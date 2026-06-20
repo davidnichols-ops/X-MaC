@@ -163,8 +163,6 @@ mod tests {
 
     #[test]
     fn test_engine_id_ordering() {
-        use std::cmp::Ordering;
-
         assert!(x_mac::core::types::Severity::Info < x_mac::core::types::Severity::Low);
         assert!(x_mac::core::types::Severity::Low < x_mac::core::types::Severity::Medium);
         assert!(x_mac::core::types::Severity::Medium < x_mac::core::types::Severity::High);

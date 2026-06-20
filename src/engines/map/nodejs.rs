@@ -1,5 +1,4 @@
 use std::path::PathBuf;
-use std::process::Command;
 use walkdir::WalkDir;
 
 use crate::core::context::ScanContext;

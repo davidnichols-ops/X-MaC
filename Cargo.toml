@@ -53,6 +53,3 @@ lto = "fat"
 codegen-units = 1
 strip = "symbols"
 panic = "abort"
-
-[target.aarch64-apple-darwin]
-rustflags = ["-C", "target-cpu=apple-m1"]

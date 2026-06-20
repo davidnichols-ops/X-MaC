@@ -125,6 +125,7 @@ pub struct EngineStats {
     pub errors_count: u64,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ScanConfig {
     pub concurrency: usize,

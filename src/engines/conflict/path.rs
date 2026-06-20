@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::process::Command;
 
 use crate::core::context::ScanContext;
 use crate::core::types::{Category, EngineId, Finding, Severity, Target};

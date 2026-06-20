@@ -6,6 +6,7 @@ use crate::core::error::EngineError;
 use crate::core::types::{EngineId, EngineStats};
 
 #[async_trait]
+#[allow(dead_code)]
 pub trait Engine: Send + Sync {
     fn id(&self) -> EngineId;
 
