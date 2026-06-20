@@ -86,7 +86,7 @@ impl Engine for DepthEngine {
 }
 
 impl DepthEngine {
-    async fn scan_dylibs(&self, ctx: &ScanContext) -> Vec<crate::core::types::Finding> {
+    async fn scan_dylibs(&self, _ctx: &ScanContext) -> Vec<crate::core::types::Finding> {
         let mut findings = Vec::new();
 
         let target_paths = vec![

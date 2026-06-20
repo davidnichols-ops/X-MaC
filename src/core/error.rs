@@ -1,5 +1,6 @@
 use thiserror::Error;
 
+#[allow(dead_code)]
 #[derive(Error, Debug)]
 pub enum XMacError {
     #[error("IO error: {0}")]
@@ -21,6 +22,7 @@ pub enum XMacError {
     PathNotFound { path: String },
 }
 
+#[allow(dead_code)]
 #[derive(Error, Debug)]
 pub enum EngineError {
     #[error("Scan failed: {0}")]
@@ -36,4 +38,5 @@ pub enum EngineError {
     Timeout(std::time::Duration),
 }
 
+#[allow(dead_code)]
 pub type Result<T> = std::result::Result<T, XMacError>;

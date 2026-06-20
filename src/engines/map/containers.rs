@@ -4,7 +4,6 @@ use std::process::Command;
 use crate::core::context::ScanContext;
 use crate::core::types::{Category, EngineId, Finding, Severity, Target};
 use crate::util::macos::MacosUtils;
-use crate::util::disk;
 
 pub struct ContainerScanner;
 
@@ -215,6 +214,7 @@ impl ContainerScanner {
     }
 }
 
+#[allow(dead_code)]
 struct DockerInfo {
     version: String,
     running: bool,

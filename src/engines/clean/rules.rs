@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use crate::core::types::Category;
 use crate::util::macos::MacosUtils;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct CleanRule {
     pub name: &'static str,
@@ -11,6 +12,7 @@ pub struct CleanRule {
     pub category: Category,
 }
 
+#[allow(dead_code)]
 pub struct CleanRules {
     pub rules: Vec<CleanRule>,
 }

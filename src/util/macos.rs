@@ -3,6 +3,7 @@ use std::process::Command;
 
 pub struct MacosUtils;
 
+#[allow(dead_code)]
 impl MacosUtils {
     pub fn new() -> Self {
         Self

@@ -81,7 +81,7 @@ impl EnvConflictScanner {
                     for line in content.lines() {
                         let line = line.trim();
                         if line.starts_with("export ") {
-                            let line = line.trim_start_matches("export ");
+                            let _line = line.trim_start_matches("export ");
                         }
                         if line.contains('=') {
                             if let Some((key, value)) = line.split_once('=') {
