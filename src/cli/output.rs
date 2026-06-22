@@ -9,6 +9,9 @@ pub struct OutputWriter {
     writer: Box<dyn Write + Send>,
     buffer: Vec<Finding>,
     is_pretty: bool,
+    /// When true, findings are buffered in addition to being streamed so the
+    /// fix-script generator can consume them after the scan.
+    buffer_for_fix_script: bool,
 }
 
 impl OutputWriter {
@@ -19,12 +22,14 @@ impl OutputWriter {
         };
 
         let is_pretty = matches!(args.format, OutputFormat::JsonPretty);
+        let buffer_for_fix_script = args.fix_script.is_some();
 
         Self {
             format: args.format,
             writer,
             buffer: Vec::new(),
             is_pretty,
+            buffer_for_fix_script,
         }
     }
 
@@ -33,6 +38,9 @@ impl OutputWriter {
             OutputFormat::Json => {
                 serde_json::to_writer(&mut self.writer, finding)?;
                 writeln!(self.writer)?;
+                if self.buffer_for_fix_script {
+                    self.buffer.push(finding.clone());
+                }
             }
             OutputFormat::JsonPretty | OutputFormat::Report => {
                 self.buffer.push(finding.clone());

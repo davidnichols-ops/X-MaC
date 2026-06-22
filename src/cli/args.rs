@@ -47,6 +47,13 @@ pub struct GlobalArgs {
 
     #[arg(long, global = true)]
     pub cache_dir: Option<PathBuf>,
+
+    /// After the scan completes, write a reviewable remediation shell script
+    /// to this path. The script is safe-by-default: destructive commands are
+    /// commented out and require manual review. Requires `--format report`
+    /// (or any format that buffers findings).
+    #[arg(long, value_name = "PATH", global = true)]
+    pub fix_script: Option<PathBuf>,
 }
 
 #[derive(Subcommand, Debug, Clone)]
