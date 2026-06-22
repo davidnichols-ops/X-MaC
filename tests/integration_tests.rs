@@ -141,6 +141,7 @@ mod tests {
             include_hidden: false,
             follow_symlinks: false,
             cache_dir: None,
+            fix_script: None,
         };
 
         let mut writer = x_mac::cli::output::OutputWriter::new(&global_args);

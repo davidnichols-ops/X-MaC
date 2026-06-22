@@ -70,16 +70,22 @@ async fn main() -> Result<()> {
 
     let total_duration = scan_start.elapsed();
 
+    // Collect findings for the report and/or the fix-script generator.
+    // `take_findings` drains the buffer, so we capture once and reuse.
+    let collected_findings: Vec<Finding> = {
+        let mut writer = output_writer.lock().await;
+        writer.take_findings()
+    };
+
     if cli.global.format == OutputFormat::Report {
         let mut writer = output_writer.lock().await;
-        let findings = writer.take_findings();
         let engine_stats: Vec<core::types::EngineStats> = engine_results
             .iter()
             .filter_map(|r| r.as_ref().ok().cloned())
             .collect();
 
         let report = core::types::ScanReport::from_findings_and_stats(
-            &findings,
+            &collected_findings,
             &engine_stats,
             &util::macos::MacosUtils::get_macos_version(),
             util::macos::MacosUtils::is_apple_silicon(),
@@ -88,6 +94,25 @@ async fn main() -> Result<()> {
         writer.write_report(&report)?;
     } else {
         output_writer.lock().await.flush()?;
+    }
+
+    // Generate the remediation script if requested. This runs after the scan
+    // report so the user can review findings first.
+    if let Some(fix_script_path) = &cli.global.fix_script {
+        let generator = cli::fix_script::FixScriptGenerator::new(fix_script_path.clone());
+        match generator.write(&collected_findings) {
+            Ok(path) => {
+                if !cli.global.quiet {
+                    eprintln!(
+                        "Wrote remediation script to {} ({} findings). Review it, then run: bash {} --yes",
+                        path.display(),
+                        collected_findings.len(),
+                        path.display()
+                    );
+                }
+            }
+            Err(e) => warn!("Failed to write fix script: {}", e),
+        }
     }
 
     for result in engine_results {
