@@ -137,20 +137,32 @@ impl DepthEngine {
                 if lines.len() > 1 {
                     for line in lines.iter().skip(1) {
                         let dep = line.trim();
-                        if !dep.starts_with("/usr/lib") && !dep.starts_with("/System") {
-                            if !PathBuf::from(dep).exists() {
-                                return Some(
-                                    crate::core::types::Finding::new(
-                                        EngineId::Depth,
-                                        crate::core::types::Severity::Medium,
-                                        crate::core::types::Category::MissingDylib,
-                                        crate::core::types::Target::Path(path.clone()),
-                                        "Missing dylib dependency",
-                                        format!("{} depends on missing library: {}", path.display(), dep),
-                                    )
-                                    .with_hint("Reinstall the package or rebuild the library".to_string()),
-                                );
-                            }
+                        // otool -L lines look like:
+                        //   "<path> (compatibility version X, current version Y)"
+                        // Take only the path (first whitespace-separated token).
+                        let dep_path = dep.split_whitespace().next().unwrap_or(dep);
+                        // Skip system libraries and Mach-O dynamic linker
+                        // tokens (@rpath, @loader_path, @executable_path) which
+                        // require runtime resolution and can't be checked
+                        // with a simple exists() call.
+                        if dep_path.starts_with("/usr/lib")
+                            || dep_path.starts_with("/System")
+                            || dep_path.starts_with('@')
+                        {
+                            continue;
+                        }
+                        if !PathBuf::from(dep_path).exists() {
+                            return Some(
+                                crate::core::types::Finding::new(
+                                    EngineId::Depth,
+                                    crate::core::types::Severity::Medium,
+                                    crate::core::types::Category::MissingDylib,
+                                    crate::core::types::Target::Path(path.clone()),
+                                    "Missing dylib dependency",
+                                    format!("{} depends on missing library: {}", path.display(), dep_path),
+                                )
+                                .with_hint("Reinstall the package or rebuild the library".to_string()),
+                            );
                         }
                     }
                 }
