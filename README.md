@@ -190,6 +190,37 @@ cargo build --release
 cargo test
 ```
 
+## Contributing
+
+Found a bug? Have an idea for a new engine or feature? Contributions are welcome.
+
+### Submitting fixes
+
+1. Fork the repo and create a branch: `git checkout -b fix/my-fix`
+2. Make your changes — keep diffs minimal and follow existing code style
+3. Verify: `cargo build --release && cargo test` (zero warnings, all tests pass)
+4. Commit with a clear message describing what changed and why
+5. Open a pull request against `main`
+
+### Adding a new engine or add-on
+
+X-MaC is built around a simple engine trait (`src/core/engine.rs`). To add a new scanner:
+
+1. Create a new module under `src/engines/<your_engine>/`
+2. Implement the `Engine` trait (`id`, `name`, `description`, `validate`, `scan`)
+3. Emit findings via `ctx.emit(finding).await`
+4. Register the engine in `src/engines/mod.rs`
+5. Wire it into the CLI in `src/cli/args.rs` and `src/main.rs`
+6. Add tests in `tests/integration_tests.rs`
+
+### Reporting issues
+
+Open an issue on [GitHub](https://github.com/davidnichols-ops/X-MaC/issues) with:
+- What you expected
+- What actually happened
+- The command you ran and its output (use `--format report` for the structured summary)
+- Your macOS version and architecture (`sw_vers` and `uname -m`)
+
 ## License
 
 MIT
