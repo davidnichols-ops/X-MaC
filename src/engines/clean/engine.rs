@@ -123,6 +123,9 @@ impl CleanEngine {
             return (findings, items);
         }
 
+        // Build a cache of installed app bundle IDs + names once.
+        let installed_apps = Self::collect_installed_apps();
+
         if let Ok(entries) = std::fs::read_dir(&app_support) {
             for entry in entries.flatten() {
                 let dir_path = entry.path();
@@ -135,7 +138,7 @@ impl CleanEngine {
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_default();
 
-                let is_orphan = !Self::is_app_installed(&dir_name);
+                let is_orphan = !Self::is_app_installed(&dir_name, &installed_apps);
 
                 if is_orphan {
                     let size = CleanScanner::dir_size(&dir_path);
@@ -150,7 +153,7 @@ impl CleanEngine {
                                 format!("Found orphaned app support directory: {}", dir_name),
                             )
                             .with_size(size)
-                            .with_hint("This application may have been uninstalled. You can safely delete this directory.".to_string()),
+                            .with_hint("This application may have been uninstalled. Verify before deleting.".to_string()),
                         );
                     }
                 }
@@ -160,23 +163,66 @@ impl CleanEngine {
         (findings, items)
     }
 
-    fn is_app_installed(app_name: &str) -> bool {
-        let applications = [
-            "/Applications",
-            "/System/Applications",
+    /// Collect installed app bundle identifiers and names from the standard
+    /// Applications directories. Returns a set of lowercase strings that can
+    /// be matched against Application Support directory names.
+    fn collect_installed_apps() -> std::collections::HashSet<String> {
+        use std::process::Command;
+        let mut set = std::collections::HashSet::new();
+        let home = crate::util::macos::MacosUtils::home_dir();
+        let app_dirs = [
+            PathBuf::from("/Applications"),
+            PathBuf::from("/System/Applications"),
+            home.join("Applications"),
         ];
 
-        for app_dir in &applications {
-            let app_path = PathBuf::from(app_dir).join(format!("{}.app", app_name));
-            if app_path.exists() {
-                return true;
+        for app_dir in &app_dirs {
+            if !app_dir.exists() {
+                continue;
+            }
+            if let Ok(entries) = std::fs::read_dir(app_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if !path.is_dir() || !path.to_string_lossy().ends_with(".app") {
+                        continue;
+                    }
+                    // Add the bundle name (without .app).
+                    if let Some(name) = path.file_stem() {
+                        set.insert(name.to_string_lossy().to_lowercase());
+                    }
+                    // Add the bundle identifier via defaults read.
+                    let info_plist = path.join("Contents/Info.plist");
+                    if info_plist.exists() {
+                        if let Ok(output) = Command::new("defaults")
+                            .args(["read", &info_plist.to_string_lossy(), "CFBundleIdentifier"])
+                            .output()
+                        {
+                            if output.status.success() {
+                                let bundle_id = String::from_utf8_lossy(&output.stdout).trim().to_lowercase();
+                                if !bundle_id.is_empty() {
+                                    set.insert(bundle_id);
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
+        set
+    }
 
-        let home = crate::util::macos::MacosUtils::home_dir();
-        let user_apps = home.join("Applications");
-        let user_app_path = user_apps.join(format!("{}.app", app_name));
-        user_app_path.exists()
+    fn is_app_installed(app_name: &str, installed: &std::collections::HashSet<String>) -> bool {
+        let name_lower = app_name.to_lowercase();
+        // Direct match against bundle name or bundle ID.
+        if installed.contains(&name_lower) {
+            return true;
+        }
+        // Apple system services (com.apple.*) are always considered installed
+        // — they're part of the OS and the .app may not be in /Applications.
+        if name_lower.starts_with("com.apple.") {
+            return true;
+        }
+        false
     }
 
     async fn scan_duplicates(&self, _ctx: &ScanContext) -> (Vec<Finding>, u64) {

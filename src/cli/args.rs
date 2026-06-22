@@ -58,23 +58,76 @@ pub struct GlobalArgs {
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum Commands {
-    Clean(CleanArgs),
-    Conflict(ConflictArgs),
-    Map(MapArgs),
-    Depth(DepthArgs),
+    /// Run a safe, comprehensive scan: caches, conflicts, environment mapping,
+    /// filesystem integrity, and package-manager diagnostics. This is the
+    /// recommended default command for everyday use.
+    Scan(ScanArgs),
+    /// Run everything (all engines). Equivalent to the old `all` command.
     All(AllArgs),
+    /// Detect caches, Xcode artifacts, orphan files, and duplicates.
+    Clean(CleanArgs),
+    /// Detect PATH conflicts, environment variable conflicts, and port usage.
+    Conflict(ConflictArgs),
+    /// Map Python/Node.js environments and container runtimes.
+    Map(MapArgs),
+    /// Check filesystem integrity: permissions, symlinks, dylib dependencies.
+    Depth(DepthArgs),
+    /// Install xmac to a directory on your PATH so it runs from anywhere.
+    Install(InstallArgs),
 }
 
 impl Commands {
     pub fn engine_id(&self) -> crate::core::types::EngineId {
         match self {
+            Commands::Scan(_) => crate::core::types::EngineId::All,
             Commands::Clean(_) => crate::core::types::EngineId::Clean,
             Commands::Conflict(_) => crate::core::types::EngineId::Conflict,
             Commands::Map(_) => crate::core::types::EngineId::Map,
             Commands::Depth(_) => crate::core::types::EngineId::Depth,
             Commands::All(_) => crate::core::types::EngineId::All,
+            Commands::Install(_) => crate::core::types::EngineId::All,
         }
     }
+}
+
+/// Arguments for the `scan` command — the recommended default.
+#[derive(Args, Debug, Clone)]
+pub struct ScanArgs {
+    /// Skip specific engines. Available: clean, conflict, map, depth, diag.
+    #[arg(long, value_enum)]
+    pub skip: Vec<ScanEngineIdArg>,
+
+    /// Include the depth engine (filesystem integrity). Off by default
+    /// because it can be noisy on large Homebrew installations.
+    #[arg(long)]
+    pub include_depth: bool,
+
+    /// Include package-manager diagnostics (brew doctor, etc.). On by default.
+    #[arg(long, default_value = "true")]
+    pub diagnostics: bool,
+}
+
+/// Engine IDs selectable from the `scan` command's `--skip` flag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ScanEngineIdArg {
+    Clean,
+    Conflict,
+    Map,
+    Depth,
+    Diag,
+}
+
+/// Arguments for the `install` command.
+#[derive(Args, Debug, Clone)]
+pub struct InstallArgs {
+    /// Directory to install into. Must be on your PATH. Defaults to
+    /// /opt/homebrew/bin on Apple Silicon, /usr/local/bin on Intel.
+    #[arg(value_name = "DIR")]
+    pub dir: Option<PathBuf>,
+
+    /// Force overwrite an existing symlink.
+    #[arg(long)]
+    pub force: bool,
 }
 
 #[derive(Args, Debug, Clone)]

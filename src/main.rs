@@ -43,6 +43,9 @@ async fn main() -> Result<()> {
     let scan_start = Instant::now();
 
     let engine_results = match &cli.command {
+        cli::args::Commands::Scan(args) => {
+            run_scan(ctx.clone(), args).await
+        }
         cli::args::Commands::Clean(args) => {
             let engine = engines::clean::CleanEngine::new(args.clone());
             vec![engine.run(ctx.clone()).await]
@@ -61,6 +64,10 @@ async fn main() -> Result<()> {
         }
         cli::args::Commands::All(args) => {
             run_all_engines(ctx.clone(), args).await
+        }
+        cli::args::Commands::Install(args) => {
+            // Handle install before the scan pipeline — it doesn't scan.
+            return run_install(args);
         }
     };
 
@@ -172,4 +179,110 @@ async fn run_all_engines(
     }
 
     results
+}
+
+/// The `scan` command — the recommended default. Runs the safe, reliable
+/// engines by default (clean, conflict, map) plus package-manager
+/// diagnostics. The depth engine is opt-in via `--include-depth`.
+async fn run_scan(
+    ctx: Arc<ScanContext>,
+    args: &cli::args::ScanArgs,
+) -> Vec<std::result::Result<core::types::EngineStats, core::error::EngineError>> {
+    use cli::args::ScanEngineIdArg;
+
+    let skip: Vec<ScanEngineIdArg> = args.skip.clone();
+    let should_run = |id: ScanEngineIdArg| -> bool { !skip.contains(&id) };
+
+    let mut results = Vec::new();
+
+    if should_run(ScanEngineIdArg::Clean) {
+        let clean_engine = engines::clean::CleanEngine::default();
+        results.push(clean_engine.run(ctx.clone()).await);
+    }
+
+    if should_run(ScanEngineIdArg::Conflict) {
+        let conflict_engine = engines::conflict::ConflictEngine::default();
+        results.push(conflict_engine.run(ctx.clone()).await);
+    }
+
+    if should_run(ScanEngineIdArg::Map) {
+        let map_engine = engines::map::MapEngine::default();
+        results.push(map_engine.run(ctx.clone()).await);
+    }
+
+    // Depth is opt-in for `scan` — it can be noisy on large installations.
+    // Only run if --include-depth is explicitly passed AND not skipped.
+    if args.include_depth && should_run(ScanEngineIdArg::Depth) {
+        let depth_engine = engines::depth::DepthEngine::default();
+        results.push(depth_engine.run(ctx.clone()).await);
+    }
+
+    if args.diagnostics && should_run(ScanEngineIdArg::Diag) {
+        let diag_engine = engines::diag::DiagEngine::default();
+        results.push(diag_engine.run(ctx.clone()).await);
+    }
+
+    results
+}
+
+/// The `install` command — symlinks the built binary into a directory on
+/// PATH so `xmac` can be run from anywhere.
+fn run_install(args: &cli::args::InstallArgs) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    // Determine the install directory.
+    let install_dir = match &args.dir {
+        Some(d) => d.clone(),
+        None => {
+            // Default: /opt/homebrew/bin on Apple Silicon, /usr/local/bin on Intel.
+            if util::macos::MacosUtils::is_apple_silicon() {
+                std::path::PathBuf::from("/opt/homebrew/bin")
+            } else {
+                std::path::PathBuf::from("/usr/local/bin")
+            }
+        }
+    };
+
+    if !install_dir.exists() {
+        anyhow::bail!(
+            "Install directory {} does not exist. Create it first or choose a different directory.",
+            install_dir.display()
+        );
+    }
+
+    // Find the built binary.
+    let current_exe = std::env::current_exe()
+        .map_err(|e| anyhow::anyhow!("Cannot determine current executable path: {}", e))?;
+
+    let target = install_dir.join("xmac");
+
+    if target.exists() || target.is_symlink() {
+        if !args.force {
+            anyhow::bail!(
+                "{} already exists. Use --force to overwrite.",
+                target.display()
+            );
+        }
+        std::fs::remove_file(&target)?;
+    }
+
+    std::os::unix::fs::symlink(&current_exe, &target)?;
+
+    // Ensure the target is executable (the symlink resolves to the binary,
+    // but set perms on the target path too for good measure).
+    let _ = std::fs::set_permissions(&current_exe, std::fs::Permissions::from_mode(0o755));
+
+    if !cli_quiet() {
+        eprintln!("Installed: {} -> {}", target.display(), current_exe.display());
+        eprintln!("You can now run `xmac` from any directory.");
+        eprintln!("If '{}' is not on your PATH, add it to your shell profile:", install_dir.display());
+        eprintln!("  export PATH=\"{}:$PATH\"", install_dir.display());
+    }
+
+    Ok(())
+}
+
+/// Check if --quiet was passed (used by run_install which exits early).
+fn cli_quiet() -> bool {
+    std::env::args().any(|a| a == "-q" || a == "--quiet")
 }

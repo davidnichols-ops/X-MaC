@@ -73,7 +73,21 @@ impl SymlinkScanner {
         match fs::symlink_metadata(path) {
             Ok(metadata) => {
                 if metadata.file_type().is_symlink() {
-                    fs::read_link(path).map(|target| !target.exists()).unwrap_or(true)
+                    fs::read_link(path)
+                        .map(|target| {
+                            // read_link returns the raw target. If it's
+                            // relative, it must be resolved against the
+                            // symlink's parent directory — NOT the CWD.
+                            let resolved = if target.is_absolute() {
+                                target
+                            } else {
+                                path.parent()
+                                    .unwrap_or(std::path::Path::new(""))
+                                    .join(target)
+                            };
+                            !resolved.exists()
+                        })
+                        .unwrap_or(true)
                 } else {
                     false
                 }
