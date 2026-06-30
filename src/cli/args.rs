@@ -70,6 +70,10 @@ pub enum Commands {
     Conflict(ConflictArgs),
     /// Map Python/Node.js environments and container runtimes.
     Map(MapArgs),
+    /// Map the system environment: OS, system/language packages, and
+    /// installed applications. Privacy-first (redacts usernames, paths,
+    /// tokens, emails by default). Read-only.
+    Envmap(EnvmapArgs),
     /// Check filesystem integrity: permissions, symlinks, dylib dependencies.
     Depth(DepthArgs),
     /// Install xmac to a directory on your PATH so it runs from anywhere.
@@ -83,6 +87,7 @@ impl Commands {
             Commands::Clean(_) => crate::core::types::EngineId::Clean,
             Commands::Conflict(_) => crate::core::types::EngineId::Conflict,
             Commands::Map(_) => crate::core::types::EngineId::Map,
+            Commands::Envmap(_) => crate::core::types::EngineId::Envmap,
             Commands::Depth(_) => crate::core::types::EngineId::Depth,
             Commands::All(_) => crate::core::types::EngineId::All,
             Commands::Install(_) => crate::core::types::EngineId::All,
@@ -93,7 +98,7 @@ impl Commands {
 /// Arguments for the `scan` command — the recommended default.
 #[derive(Args, Debug, Clone)]
 pub struct ScanArgs {
-    /// Skip specific engines. Available: clean, conflict, map, depth, diag.
+    /// Skip specific engines. Available: clean, conflict, map, envmap, depth, diag.
     #[arg(long, value_enum)]
     pub skip: Vec<ScanEngineIdArg>,
 
@@ -101,6 +106,10 @@ pub struct ScanArgs {
     /// because it can be noisy on large Homebrew installations.
     #[arg(long)]
     pub include_depth: bool,
+
+    /// Include the envmap engine (environment mapping). On by default.
+    #[arg(long, default_value = "true")]
+    pub envmap: bool,
 
     /// Include package-manager diagnostics (brew doctor, etc.). On by default.
     #[arg(long, default_value = "true")]
@@ -113,6 +122,7 @@ pub enum ScanEngineIdArg {
     Clean,
     Conflict,
     Map,
+    Envmap,
     Depth,
     Diag,
 }
@@ -181,6 +191,65 @@ pub struct MapArgs {
     pub paths: Vec<PathBuf>,
 }
 
+/// Arguments for the `envmap` command — environment mapping.
+///
+/// Mirrors the MIF Environment Mapper: discovers OS metadata, system packages
+/// (Homebrew formulae + casks), language packages (pip, pipx, npm, gems), and
+/// installed applications from `/Applications` and `~/Applications`. All
+/// output is privacy-filtered when `--redact` is on (the default).
+#[derive(Args, Debug, Clone)]
+pub struct EnvmapArgs {
+    /// Collect OS / system metadata (platform, kernel, hostname, arch).
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub system: bool,
+
+    /// Discover system-level packages (Homebrew formulae + casks on macOS;
+    /// dpkg/rpm/pacman on Linux).
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub system_packages: bool,
+
+    /// Discover language-runtime packages (Python pip + pipx, npm global,
+    /// Ruby gems).
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub language_packages: bool,
+
+    /// Enumerate installed applications from `/Applications` and
+    /// `~/Applications` (bundle name + version via Info.plist).
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub apps: bool,
+
+    /// Additional application directories to scan for `.app` bundles
+    /// (in addition to the defaults).
+    #[arg(long, value_name = "DIR")]
+    pub app_dirs: Vec<PathBuf>,
+
+    /// Privacy-first redaction. When true (the default), usernames, home
+    /// directory paths, emails, tokens/keys, IPs, UUIDs, and AWS keys are
+    /// replaced with `[REDACTED_*]` placeholders in all output. Pass
+    /// `--redact false` to disable.
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub redact: bool,
+
+    /// Also redact the system hostname from output. Off by default; pass
+    /// `--redact-hostnames true` to enable.
+    #[arg(long, default_value = "false", action = clap::ArgAction::Set)]
+    pub redact_hostnames: bool,
+}
+
+impl Default for EnvmapArgs {
+    fn default() -> Self {
+        Self {
+            system: true,
+            system_packages: true,
+            language_packages: true,
+            apps: true,
+            app_dirs: Vec::new(),
+            redact: true,
+            redact_hostnames: false,
+        }
+    }
+}
+
 #[derive(Args, Debug, Clone)]
 pub struct DepthArgs {
     #[arg(long, default_value = "true")]
@@ -207,6 +276,7 @@ pub enum EngineIdArg {
     Clean,
     Conflict,
     Map,
+    Envmap,
     Depth,
 }
 
