@@ -33,6 +33,7 @@ pub enum EngineId {
     Conflict,
     Map,
     Depth,
+    Envmap,
     All,
 }
 
@@ -56,6 +57,8 @@ pub enum Category {
     BrokenSymlink,
     MissingDylib,
     InvalidSignature,
+    InstalledApp,
+    SystemInfo,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -162,6 +165,7 @@ pub struct EngineBreakdown {
     pub conflict: u64,
     pub map: u64,
     pub depth: u64,
+    pub envmap: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -200,6 +204,7 @@ impl ScanReport {
             conflict: 0,
             map: 0,
             depth: 0,
+            envmap: 0,
         };
         let mut category_map: HashMap<String, u64> = HashMap::new();
         let mut reclaimable: u64 = 0;
@@ -217,6 +222,7 @@ impl ScanReport {
                 EngineId::Conflict => engine_bd.conflict += 1,
                 EngineId::Map => engine_bd.map += 1,
                 EngineId::Depth => engine_bd.depth += 1,
+                EngineId::Envmap => engine_bd.envmap += 1,
                 EngineId::All => {}
             }
             let cat = serde_json::to_string(&f.category)

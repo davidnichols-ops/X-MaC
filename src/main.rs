@@ -58,6 +58,10 @@ async fn main() -> Result<()> {
             let engine = engines::map::MapEngine::new(args.clone());
             vec![engine.run(ctx.clone()).await]
         }
+        cli::args::Commands::Envmap(args) => {
+            let engine = engines::envmap::EnvmapEngine::new(args.clone());
+            vec![engine.run(ctx.clone()).await]
+        }
         cli::args::Commands::Depth(args) => {
             let engine = engines::depth::DepthEngine::new(args.clone());
             vec![engine.run(ctx.clone()).await]
@@ -173,6 +177,11 @@ async fn run_all_engines(
         results.push(map_engine.run(ctx.clone()).await);
     }
 
+    if should_run(EngineIdArg::Envmap) {
+        let envmap_engine = engines::envmap::EnvmapEngine::default();
+        results.push(envmap_engine.run(ctx.clone()).await);
+    }
+
     if should_run(EngineIdArg::Depth) {
         let depth_engine = engines::depth::DepthEngine::default();
         results.push(depth_engine.run(ctx.clone()).await);
@@ -208,6 +217,12 @@ async fn run_scan(
     if should_run(ScanEngineIdArg::Map) {
         let map_engine = engines::map::MapEngine::default();
         results.push(map_engine.run(ctx.clone()).await);
+    }
+
+    // envmap is read-only and safe — included in `scan` by default.
+    if args.envmap && should_run(ScanEngineIdArg::Envmap) {
+        let envmap_engine = engines::envmap::EnvmapEngine::default();
+        results.push(envmap_engine.run(ctx.clone()).await);
     }
 
     // Depth is opt-in for `scan` — it can be noisy on large installations.

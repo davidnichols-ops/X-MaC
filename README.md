@@ -22,11 +22,12 @@ xmac --format report --fix-script ./fixes.sh scan
 
 | Command | Description |
 |---------|-------------|
-| `scan` | **Recommended.** Runs clean + conflict + map + package-manager diagnostics. Depth is opt-in with `--include-depth`. |
+| `scan` | **Recommended.** Runs clean + conflict + map + envmap + package-manager diagnostics. Depth is opt-in with `--include-depth`. |
 | `all` | Run all engines including depth (use `--skip` to exclude specific engines) |
 | `clean` | Detect caches, Xcode artifacts, orphan files, and duplicates |
 | `conflict` | Detect PATH conflicts, environment variable conflicts, and port usage |
 | `map` | Map Python/Node.js environments and container runtimes |
+| `envmap` | Map the system environment: OS, system/language packages, and installed applications. Privacy-first (redacts usernames, paths, tokens, emails by default). Read-only. |
 | `depth` | Check filesystem integrity: permissions, symlinks, dylib dependencies |
 | `install` | Install `xmac` to a directory on your PATH (default: `/opt/homebrew/bin` on Apple Silicon) |
 
@@ -76,8 +77,9 @@ xmac --format report --fix-script ./fixes.sh scan
 
 Options:
 ```
---skip <ENGINE>         Skip an engine: clean, conflict, map, depth, diag
+--skip <ENGINE>         Skip an engine: clean, conflict, map, envmap, depth, diag
 --include-depth         Include the depth engine (off by default)
+--envmap <BOOL>         Run the envmap engine (environment mapping) [default: true]
 --diagnostics <BOOL>    Run package-manager diagnostics [default: true]
 ```
 
@@ -153,6 +155,59 @@ Maps runtime environments:
 
 ```bash
 xmac map --python --nodejs --containers ~/Projects
+```
+
+### Envmap
+
+Maps the system environment — a privacy-first port of the MIF Environment
+Mapper. Read-only and safe (included in `scan` by default). It discovers:
+
+- **OS / system metadata** — platform, kernel version, hostname, architecture.
+- **System packages** — Homebrew formulae + casks on macOS; `dpkg`/`rpm`/`pacman`
+  on Linux (first source that yields output wins).
+- **Language packages** — Python (`pip freeze` + `pipx list`), Node.js
+  (`npm list -g`), Ruby (`gem list --local`).
+- **Installed applications** — `.app` bundles under `/Applications` and
+  `~/Applications`, with bundle name + version read from each bundle's
+  `Contents/Info.plist` (via the `plist` crate; no CoreFoundation linkage).
+
+Every string that flows into a finding (title, description, metadata) is run
+through a redactor when `--redact` is on (the default). The redactor ports
+MIF's `SENSITIVE_PATTERNS` and scrubs:
+
+- macOS / Linux user home paths (`/Users/<name>`, `/home/<name>`)
+- SSH / GnuPG key paths
+- Passwords, tokens, API keys, secrets (`name=value` / `name: value` forms)
+- Email addresses
+- IPv4 addresses
+- UUIDs
+- AWS access key IDs (`AKIA…`)
+- Passwords embedded in connection strings (`://user:pw@host`)
+- The system hostname (when `--redact-hostnames true` is passed)
+
+```bash
+# Full environment map (all sources, redaction on)
+xmac envmap
+
+# Only enumerate installed applications, write a report
+xmac --format report envmap --system false --system-packages false --language-packages false
+
+# Disable privacy redaction (show raw paths/usernames)
+xmac envmap --redact false
+
+# Also scrub the hostname, and scan an extra Applications dir
+xmac envmap --redact-hostnames true --app-dirs /Volumes/External/Applications
+```
+
+Options:
+```
+--system <BOOL>              Collect OS / system metadata [default: true]
+--system-packages <BOOL>     Discover system packages (Homebrew/dpkg/rpm/pacman) [default: true]
+--language-packages <BOOL>   Discover language packages (pip, pipx, npm, gems) [default: true]
+--apps <BOOL>                Enumerate .app bundles from /Applications + ~/Applications [default: true]
+--app-dirs <DIR>             Additional application directories to scan
+--redact <BOOL>              Privacy-first redaction [default: true]
+--redact-hostnames <BOOL>    Also redact the system hostname [default: false]
 ```
 
 ### Depth

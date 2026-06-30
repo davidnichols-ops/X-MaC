@@ -123,7 +123,9 @@ impl FixScriptGenerator {
                 Category::PythonEnv
                 | Category::NodeEnv
                 | Category::ContainerRuntime
-                | Category::PackageManager => {}
+                | Category::PackageManager
+                | Category::InstalledApp
+                | Category::SystemInfo => {}
             }
         }
 
@@ -281,7 +283,12 @@ impl FixScriptGenerator {
                 }
             }
             // Discovery categories are filtered out before reaching here.
-            Category::PythonEnv | Category::NodeEnv | Category::ContainerRuntime | Category::PackageManager => {
+            Category::PythonEnv
+            | Category::NodeEnv
+            | Category::ContainerRuntime
+            | Category::PackageManager
+            | Category::InstalledApp
+            | Category::SystemInfo => {
                 s.push_str("# (informational)\n");
             }
         }

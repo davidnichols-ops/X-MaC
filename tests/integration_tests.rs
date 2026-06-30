@@ -337,4 +337,203 @@ mod tests {
         let cli = x_mac::cli::args::Cli::parse_from(args);
         assert_eq!(cli.command.engine_id(), x_mac::core::types::EngineId::All);
     }
+
+    // -- envmap engine ------------------------------------------------------
+
+    #[test]
+    fn test_cli_envmap_args_parsing() {
+        let args = vec!["x-mac", "envmap"];
+        let cli = x_mac::cli::args::Cli::parse_from(args);
+
+        match cli.command {
+            x_mac::cli::args::Commands::Envmap(envmap_args) => {
+                // Defaults: all discovery toggles on, redact on.
+                assert!(envmap_args.apps);
+                assert!(envmap_args.system);
+                assert!(envmap_args.system_packages);
+                assert!(envmap_args.language_packages);
+                assert!(envmap_args.redact);
+                assert!(!envmap_args.redact_hostnames);
+            }
+            _ => panic!("Expected Envmap command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_envmap_redact_flag_off() {
+        let args = vec!["x-mac", "envmap", "--redact", "false"];
+        let cli = x_mac::cli::args::Cli::parse_from(args);
+
+        match cli.command {
+            x_mac::cli::args::Commands::Envmap(envmap_args) => {
+                assert!(!envmap_args.redact);
+            }
+            _ => panic!("Expected Envmap command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_envmap_redact_hostnames_flag() {
+        let args = vec!["x-mac", "envmap", "--redact-hostnames", "true"];
+        let cli = x_mac::cli::args::Cli::parse_from(args);
+
+        match cli.command {
+            x_mac::cli::args::Commands::Envmap(envmap_args) => {
+                assert!(envmap_args.redact_hostnames);
+            }
+            _ => panic!("Expected Envmap command"),
+        }
+    }
+
+    #[test]
+    fn test_envmap_engine_id_is_envmap() {
+        let args = vec!["x-mac", "envmap"];
+        let cli = x_mac::cli::args::Cli::parse_from(args);
+        assert_eq!(
+            cli.command.engine_id(),
+            x_mac::core::types::EngineId::Envmap
+        );
+    }
+
+    #[tokio::test]
+    async fn test_envmap_engine_validate() {
+        let engine = x_mac::engines::EnvmapEngine::default();
+        let cli = x_mac::cli::args::Cli::parse_from(vec!["x-mac", "envmap"]);
+
+        let (tx, _rx) = tokio::sync::mpsc::channel::<x_mac::core::types::Finding>(1000);
+        let ctx = x_mac::core::ScanContext::new(&cli, tx).await.unwrap();
+        let result = engine.validate(&ctx).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_envmap_engine_scan_emits_findings() {
+        // Use a temp dir as an app dir so the apps scanner has something to
+        // walk without touching the real /Applications.
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        let app_dir = tmp.path().join("MyApp.app");
+        std::fs::create_dir_all(app_dir.join("Contents")).unwrap();
+        std::fs::write(
+            app_dir.join("Contents").join("Info.plist"),
+            r#"<plist version="1.0"><dict>
+                <key>CFBundleName</key><string>MyApp</string>
+                <key>CFBundleShortVersionString</key><string>1.0</string>
+            </dict></plist>"#,
+        )
+        .unwrap();
+
+        let engine = x_mac::engines::EnvmapEngine::new(x_mac::cli::args::EnvmapArgs {
+            system: true,
+            system_packages: false,
+            language_packages: false,
+            apps: true,
+            app_dirs: vec![tmp.path().to_path_buf()],
+            redact: true,
+            redact_hostnames: false,
+        });
+
+        let cli = x_mac::cli::args::Cli::parse_from(vec!["x-mac", "envmap"]);
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<x_mac::core::types::Finding>(1000);
+        let ctx = std::sync::Arc::new(
+            x_mac::core::ScanContext::new(&cli, tx).await.unwrap(),
+        );
+
+        let stats = engine.scan(ctx).await.expect("scan should succeed");
+        assert!(stats.findings_count >= 1);
+        assert_eq!(stats.engine, x_mac::core::types::EngineId::Envmap);
+
+        // Drain emitted findings and confirm at least one is an InstalledApp.
+        let mut found_app = false;
+        while let Ok(f) = rx.try_recv() {
+            if f.category == x_mac::core::types::Category::InstalledApp {
+                found_app = true;
+                // Redaction is on — the temp path is under /private/var, not
+                // /Users, so the bundle_name should still be present.
+                assert!(f.title.contains("MyApp"));
+            }
+        }
+        assert!(found_app, "expected an InstalledApp finding");
+    }
+
+    #[test]
+    fn test_envmap_redactor_default_rule_count() {
+        let r = x_mac::engines::envmap::redaction::Redactor::new();
+        assert_eq!(r.rule_count(), 9);
+    }
+
+    #[test]
+    fn test_envmap_redactor_disabled_is_noop() {
+        let r = x_mac::engines::envmap::redaction::Redactor::disabled();
+        assert_eq!(r.redact("/Users/alice/secret=hunter2"), "/Users/alice/secret=hunter2");
+    }
+
+    #[test]
+    fn test_envmap_report_includes_envmap_breakdown() {
+        use x_mac::core::types::{
+            EngineBreakdown, EngineId, EngineStats, Finding, ScanReport, Severity,
+        };
+
+        let findings = vec![Finding::new(
+            EngineId::Envmap,
+            Severity::Info,
+            x_mac::core::types::Category::InstalledApp,
+            x_mac::core::types::Target::Path(PathBuf::from("/Applications/X.app")),
+            "App: X 1.0",
+            "Installed app",
+        )];
+
+        let engine_stats = vec![EngineStats {
+            engine: EngineId::Envmap,
+            duration: std::time::Duration::from_millis(10),
+            items_scanned: 1,
+            findings_count: 1,
+            errors_count: 0,
+        }];
+
+        let report = ScanReport::from_findings_and_stats(
+            &findings,
+            &engine_stats,
+            "14.5.0",
+            true,
+            std::time::Duration::from_millis(10),
+        );
+
+        assert_eq!(report.findings_by_engine.envmap, 1);
+        // Ensure the new field serializes.
+        let json = serde_json::to_string(&report).expect("serialize");
+        assert!(json.contains("envmap"));
+        let _bd: EngineBreakdown = serde_json::from_str(
+            &serde_json::to_string(&report.findings_by_engine).unwrap(),
+        )
+        .expect("deserialize breakdown");
+    }
+
+    #[test]
+    fn test_scan_skip_supports_envmap() {
+        let args = vec!["x-mac", "scan", "--skip", "envmap"];
+        let cli = x_mac::cli::args::Cli::parse_from(args);
+        match cli.command {
+            x_mac::cli::args::Commands::Scan(scan_args) => {
+                assert!(scan_args
+                    .skip
+                    .contains(&x_mac::cli::args::ScanEngineIdArg::Envmap));
+            }
+            _ => panic!("Expected Scan command"),
+        }
+    }
+
+    #[test]
+    fn test_all_skip_supports_envmap() {
+        let args = vec!["x-mac", "all", "--skip", "envmap"];
+        let cli = x_mac::cli::args::Cli::parse_from(args);
+        match cli.command {
+            x_mac::cli::args::Commands::All(all_args) => {
+                assert!(all_args
+                    .skip
+                    .contains(&x_mac::cli::args::EngineIdArg::Envmap));
+            }
+            _ => panic!("Expected All command"),
+        }
+    }
 }
