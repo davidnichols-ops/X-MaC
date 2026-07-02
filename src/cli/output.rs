@@ -17,7 +17,17 @@ pub struct OutputWriter {
 impl OutputWriter {
     pub fn new(args: &GlobalArgs) -> Self {
         let writer: Box<dyn Write + Send> = match &args.output {
-            Some(path) => Box::new(std::fs::File::create(path).expect("Failed to create output file")),
+            Some(path) => match std::fs::File::create(path) {
+                Ok(f) => Box::new(f),
+                Err(e) => {
+                    eprintln!(
+                        "Failed to create output file {}: {}. Falling back to stdout.",
+                        path.display(),
+                        e
+                    );
+                    Box::new(std::io::stdout())
+                }
+            },
             None => Box::new(std::io::stdout()),
         };
 

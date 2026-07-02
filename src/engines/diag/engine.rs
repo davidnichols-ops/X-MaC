@@ -177,8 +177,9 @@ impl DiagEngine {
             format!("{} {} completed with no output", pm.binary, diag.args.join(" "))
         } else {
             // Truncate very long output to keep findings manageable.
-            let truncated = if combined.len() > 2000 {
-                format!("{}...(truncated)", &combined[..2000])
+            let truncated = if combined.chars().count() > 2000 {
+                let head: String = combined.chars().take(2000).collect();
+                format!("{}...(truncated)", head)
             } else {
                 combined
             };

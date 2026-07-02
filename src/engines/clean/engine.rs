@@ -269,7 +269,7 @@ impl CleanEngine {
                         Category::DuplicateFile,
                         Target::Path(paths[0].clone()),
                         "Duplicate files detected",
-                        format!("Found {} duplicate files with hash {}. Total size: {}", paths.len(), &hash[..8], crate::util::disk::format_bytes(total_size)),
+                        format!("Found {} duplicate files with hash {}. Total size: {}", paths.len(), hash.chars().take(8).collect::<String>(), crate::util::disk::format_bytes(total_size)),
                     )
                     .with_size(total_size)
                     .with_metadata("duplicate_paths".to_string(), serde_json::json!(paths.iter().map(|p| p.to_string_lossy().to_string()).collect::<Vec<_>>()))

@@ -141,6 +141,10 @@ impl DepthEngine {
                         //   "<path> (compatibility version X, current version Y)"
                         // Take only the path (first whitespace-separated token).
                         let dep_path = dep.split_whitespace().next().unwrap_or(dep);
+                        // Skip lines that don't look like real dependency paths.
+                        if !dep_path.starts_with('/') && !dep_path.starts_with('@') {
+                            continue;
+                        }
                         // Skip system libraries and Mach-O dynamic linker
                         // tokens (@rpath, @loader_path, @executable_path) which
                         // require runtime resolution and can't be checked

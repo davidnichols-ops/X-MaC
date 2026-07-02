@@ -71,7 +71,7 @@ async fn main() -> Result<()> {
         }
         cli::args::Commands::Install(args) => {
             // Handle install before the scan pipeline — it doesn't scan.
-            return run_install(args);
+            return run_install(&cli, args);
         }
     };
 
@@ -242,7 +242,7 @@ async fn run_scan(
 
 /// The `install` command — symlinks the built binary into a directory on
 /// PATH so `xmac` can be run from anywhere.
-fn run_install(args: &cli::args::InstallArgs) -> Result<()> {
+fn run_install(cli: &Cli, args: &cli::args::InstallArgs) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
 
     // Determine the install directory.
@@ -278,7 +278,11 @@ fn run_install(args: &cli::args::InstallArgs) -> Result<()> {
                 target.display()
             );
         }
-        std::fs::remove_file(&target)?;
+        if let Err(e) = std::fs::remove_file(&target) {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                return Err(e.into());
+            }
+        }
     }
 
     std::os::unix::fs::symlink(&current_exe, &target)?;
@@ -287,7 +291,7 @@ fn run_install(args: &cli::args::InstallArgs) -> Result<()> {
     // but set perms on the target path too for good measure).
     let _ = std::fs::set_permissions(&current_exe, std::fs::Permissions::from_mode(0o755));
 
-    if !cli_quiet() {
+    if !cli_quiet(cli) {
         eprintln!("Installed: {} -> {}", target.display(), current_exe.display());
         eprintln!("You can now run `xmac` from any directory.");
         eprintln!("If '{}' is not on your PATH, add it to your shell profile:", install_dir.display());
@@ -298,6 +302,6 @@ fn run_install(args: &cli::args::InstallArgs) -> Result<()> {
 }
 
 /// Check if --quiet was passed (used by run_install which exits early).
-fn cli_quiet() -> bool {
-    std::env::args().any(|a| a == "-q" || a == "--quiet")
+fn cli_quiet(cli: &Cli) -> bool {
+    cli.global.quiet
 }
