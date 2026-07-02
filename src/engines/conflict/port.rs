@@ -46,10 +46,10 @@ impl PortConflictScanner {
                 let output_str = String::from_utf8_lossy(&out.stdout);
                 let lines: Vec<&str> = output_str.lines().collect();
 
-                if lines.len() > 1 {
-                    let parts: Vec<&str> = lines[1].split_whitespace().collect();
-                    if parts.len() >= 2 {
-                        let pid = parts[1].parse::<u32>().unwrap_or(0);
+                if let Some(line) = lines.get(1) {
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if let Some(pid_str) = parts.get(1) {
+                        let pid = pid_str.parse::<u32>().unwrap_or(0);
                         let name = parts[0].to_string();
 
                         return Ok(Some(ProcessInfo { pid, name }));

@@ -100,7 +100,10 @@ pub fn run_command_timed(args: &[&str], timeout: Duration) -> Vec<String> {
                 if !status.success() {
                     return Vec::new();
                 }
-                let mut output = child.stdout.take().expect("stdout piped");
+                let mut output = match child.stdout.take() {
+                    Some(s) => s,
+                    None => return Vec::new(),
+                };
                 use std::io::Read;
                 let mut buf = Vec::new();
                 let _ = output.read_to_end(&mut buf);

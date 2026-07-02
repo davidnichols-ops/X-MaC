@@ -137,9 +137,12 @@ fn default_rules() -> Vec<RedactionRule> {
 
     rules
         .into_iter()
-        .map(|(pat, rep)| RedactionRule {
-            regex: Regex::new(pat).expect(&format!("invalid redaction regex: {}", pat)),
-            replacement: rep.to_string(),
+        .filter_map(|(pat, rep)| {
+            let regex = Regex::new(pat).ok()?;
+            Some(RedactionRule {
+                regex,
+                replacement: rep.to_string(),
+            })
         })
         .collect()
 }
