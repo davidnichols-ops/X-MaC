@@ -1149,7 +1149,15 @@ impl Engine for CleanEngine {
 
 impl Default for CleanEngine {
     fn default() -> Self {
-        Self::new(CleanArgs {
+        Self::new(Self::default_args())
+    }
+}
+
+impl CleanEngine {
+    /// Returns the default CleanArgs — used by `quick` and other composite
+    /// commands that need to construct a CleanEngine with specific overrides.
+    pub fn default_args() -> CleanArgs {
+        CleanArgs {
             min_age: "30d".to_string(),
             min_size: "1M".to_string(),
             dedup: false,
@@ -1165,6 +1173,6 @@ impl Default for CleanEngine {
             large_files: true,
             min_large_size: "100M".to_string(),
             paths: Vec::new(),
-        })
+        }
     }
 }

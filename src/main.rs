@@ -43,7 +43,10 @@ async fn main() -> Result<()> {
     let scan_start = Instant::now();
 
     let engine_results = match &cli.command {
-        cli::args::Commands::Scan(args) => {
+        cli::args::Commands::Quick(args) => {
+            run_quick(ctx.clone(), args).await
+        }
+        cli::args::Commands::Scan(args) | cli::args::Commands::Doctor(args) => {
             run_scan(ctx.clone(), args).await
         }
         cli::args::Commands::Clean(args) => {
@@ -312,4 +315,41 @@ fn run_install(cli: &Cli, args: &cli::args::InstallArgs) -> Result<()> {
 /// Check if --quiet was passed (used by run_install which exits early).
 fn cli_quiet(cli: &Cli) -> bool {
     cli.global.quiet
+}
+
+/// The `quick` command — one-shot cleanup scan + maintenance + disk breakdown.
+/// Like CleanMyMac's "Smart Scan": gives you a quick overview of system health
+/// and reclaimable space, runs safe maintenance, and shows disk usage.
+async fn run_quick(
+    ctx: Arc<ScanContext>,
+    args: &cli::args::QuickArgs,
+) -> Vec<std::result::Result<core::types::EngineStats, core::error::EngineError>> {
+    let mut results = Vec::new();
+
+    // 1. Clean scan (with dedup if requested)
+    let clean_args = cli::args::CleanArgs {
+        dedup: args.dedup,
+        ..engines::clean::CleanEngine::default_args()
+    };
+    let clean_engine = engines::clean::CleanEngine::new(clean_args);
+    results.push(clean_engine.run(ctx.clone()).await);
+
+    // 2. Maintenance tasks (safe ones only — no sudo)
+    if !args.no_maintain {
+        let maintain_engine = engines::maintain::MaintainEngine::default();
+        results.push(maintain_engine.run(ctx.clone()).await);
+    }
+
+    // 3. Disk usage breakdown
+    if !args.no_disk {
+        let disk_args = cli::args::DiskArgs {
+            top: 20,
+            min_size: "100M".to_string(),
+            paths: args.paths.clone(),
+        };
+        let disk_engine = engines::disk::DiskEngine::new(disk_args);
+        results.push(disk_engine.run(ctx.clone()).await);
+    }
+
+    results
 }

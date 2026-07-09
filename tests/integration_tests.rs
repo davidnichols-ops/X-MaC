@@ -793,6 +793,51 @@ mod tests {
     // -- maintain engine ----------------------------------------------------
 
     #[test]
+    fn test_cli_quick_args_parsing() {
+        let args = vec!["x-mac", "quick"];
+        let cli = x_mac::cli::args::Cli::parse_from(args);
+        match cli.command {
+            x_mac::cli::args::Commands::Quick(q) => {
+                assert!(!q.dedup);
+                assert!(!q.no_maintain);
+                assert!(!q.no_disk);
+            }
+            _ => panic!("Expected Quick"),
+        }
+    }
+
+    #[test]
+    fn test_cli_quick_with_options() {
+        let args = vec!["x-mac", "quick", "--dedup", "--no-maintain"];
+        let cli = x_mac::cli::args::Cli::parse_from(args);
+        match cli.command {
+            x_mac::cli::args::Commands::Quick(q) => {
+                assert!(q.dedup);
+                assert!(q.no_maintain);
+                assert!(!q.no_disk);
+            }
+            _ => panic!("Expected Quick"),
+        }
+    }
+
+    #[test]
+    fn test_cli_doctor_alias() {
+        let args = vec!["x-mac", "doctor"];
+        let cli = x_mac::cli::args::Cli::parse_from(args);
+        match cli.command {
+            x_mac::cli::args::Commands::Doctor(_) => {}
+            _ => panic!("Expected Doctor"),
+        }
+    }
+
+    #[test]
+    fn test_default_format_is_report() {
+        let args = vec!["x-mac", "quick"];
+        let cli = x_mac::cli::args::Cli::parse_from(args);
+        assert_eq!(cli.global.format, x_mac::cli::args::OutputFormat::Report);
+    }
+
+    #[test]
     fn test_cli_maintain_args_parsing() {
         let args = vec!["x-mac", "maintain"];
         let cli = x_mac::cli::args::Cli::parse_from(args);
