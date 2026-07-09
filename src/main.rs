@@ -66,6 +66,14 @@ async fn main() -> Result<()> {
             let engine = engines::depth::DepthEngine::new(args.clone());
             vec![engine.run(ctx.clone()).await]
         }
+        cli::args::Commands::Maintain(args) => {
+            let engine = engines::maintain::MaintainEngine::new(args.clone());
+            vec![engine.run(ctx.clone()).await]
+        }
+        cli::args::Commands::Disk(args) => {
+            let engine = engines::disk::DiskEngine::new(args.clone());
+            vec![engine.run(ctx.clone()).await]
+        }
         cli::args::Commands::All(args) => {
             run_all_engines(ctx.clone(), args).await
         }

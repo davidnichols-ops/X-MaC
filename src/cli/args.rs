@@ -76,6 +76,11 @@ pub enum Commands {
     Envmap(EnvmapArgs),
     /// Check filesystem integrity: permissions, symlinks, dylib dependencies.
     Depth(DepthArgs),
+    /// Run system maintenance tasks: flush DNS, reindex Spotlight, rebuild
+    /// LaunchServices, run periodic scripts, repair permissions, purge RAM.
+    Maintain(MaintainArgs),
+    /// Show disk usage breakdown — top folders and files by size.
+    Disk(DiskArgs),
     /// Install xmac to a directory on your PATH so it runs from anywhere.
     Install(InstallArgs),
 }
@@ -90,6 +95,8 @@ impl Commands {
             Commands::Envmap(_) => crate::core::types::EngineId::Envmap,
             Commands::Depth(_) => crate::core::types::EngineId::Depth,
             Commands::All(_) => crate::core::types::EngineId::All,
+            Commands::Maintain(_) => crate::core::types::EngineId::All,
+            Commands::Disk(_) => crate::core::types::EngineId::All,
             Commands::Install(_) => crate::core::types::EngineId::All,
         }
     }
@@ -165,6 +172,34 @@ pub struct CleanArgs {
     /// Detect build artifacts (node_modules, target, __pycache__, dist, .pyc, .o, etc.).
     #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
     pub build_artifacts: bool,
+
+    /// Detect browser caches (Safari, Chrome, Firefox, Edge, Brave, Arc).
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub browser: bool,
+
+    /// Detect mail attachments and downloads.
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub mail: bool,
+
+    /// Detect old iOS device backups.
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub ios_backups: bool,
+
+    /// Detect removable language files (.lproj) in applications.
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub languages: bool,
+
+    /// Detect trash bins on all volumes.
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub trash: bool,
+
+    /// Detect large files (>= 100 MB by default, use --min-large-size to change).
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub large_files: bool,
+
+    /// Minimum size for large file detection (default: 100M).
+    #[arg(long, default_value = "100M")]
+    pub min_large_size: String,
 
     #[arg(value_name = "PATH")]
     pub paths: Vec<PathBuf>,
@@ -297,5 +332,57 @@ pub enum OutputFormat {
     Json,
     JsonPretty,
     Report,
+}
+
+/// Arguments for the `maintain` command — system maintenance tasks.
+#[derive(Args, Debug, Clone)]
+pub struct MaintainArgs {
+    /// Flush DNS cache (dscacheutil + mDNSResponder).
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub dns: bool,
+
+    /// Reindex Spotlight search.
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub spotlight: bool,
+
+    /// Rebuild LaunchServices database (fixes "Open With" menu).
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub launchservices: bool,
+
+    /// Run periodic maintenance scripts (daily, weekly, monthly).
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub periodic: bool,
+
+    /// Repair disk permissions (runs `sudo diskutil repairPermissions /`).
+    #[arg(long, default_value = "false", action = clap::ArgAction::Set)]
+    pub repair_permissions: bool,
+
+    /// Purge inactive RAM (runs `purge` command).
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub purge_ram: bool,
+
+    /// Rebuild dyld shared cache.
+    #[arg(long, default_value = "false", action = clap::ArgAction::Set)]
+    pub dyld: bool,
+
+    /// Clear Quick Look thumbnail cache.
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub quicklook: bool,
+}
+
+/// Arguments for the `disk` command — disk usage visualization.
+#[derive(Args, Debug, Clone)]
+pub struct DiskArgs {
+    /// Number of top entries to show per directory level.
+    #[arg(long, default_value = "20")]
+    pub top: usize,
+
+    /// Minimum size to display (smaller entries are aggregated).
+    #[arg(long, default_value = "100M")]
+    pub min_size: String,
+
+    /// Directory to analyze (defaults to home).
+    #[arg(value_name = "PATH")]
+    pub paths: Vec<PathBuf>,
 }
 

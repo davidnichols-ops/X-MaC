@@ -29,6 +29,8 @@ xmac --format report --fix-script ./fixes.sh scan
 | `map` | Map Python/Node.js environments and container runtimes |
 | `envmap` | Map the system environment: OS, system/language packages, and installed applications. Privacy-first (redacts usernames, paths, tokens, emails by default). Read-only. |
 | `depth` | Check filesystem integrity: permissions, symlinks, dylib dependencies |
+| `maintain` | Run system maintenance: flush DNS, reindex Spotlight, rebuild LaunchServices, run periodic scripts, purge RAM, clear Quick Look cache |
+| `disk` | Show disk usage breakdown — top directories and files by size |
 | `install` | Install `xmac` to a directory on your PATH (default: `/opt/homebrew/bin` on Apple Silicon) |
 
 ## Output Formats
@@ -125,7 +127,7 @@ The script is safe by default:
 
 ### Clean
 
-Detects reclaimable disk space:
+Detects reclaimable disk space — a comprehensive CLI equivalent of CleanMyMac / OnyX / Cleaner One Pro:
 - Cache files (aged + size-filtered)
 - Xcode DerivedData, Archives, iOS DeviceSupport
 - Orphaned Application Support directories (matched by app bundle name and bundle ID)
@@ -133,6 +135,13 @@ Detects reclaimable disk space:
 - Temp files (`/tmp`, `/var/tmp`, `.DS_Store`, editor swap files)
 - Build artifacts (`node_modules`, `target`, `__pycache__`, `dist`, `build`, `.pyc`, `.o`, etc.)
 - Rotated log files (`*.gz`, `*.bz2`, `*.0`, etc. in `/var/log` and `~/Library/Logs`)
+- Browser caches (Safari, Chrome, Firefox, Edge, Brave, Arc)
+- Mail attachments and downloads
+- Old iOS device backups (`~/Library/Application Support/MobileSync/Backup/`)
+- Removable language files (`.lproj` in `/Applications`, preserves English + Base)
+- Trash bins on all mounted volumes
+- Large files (>= 100 MB by default, configurable with `--min-large-size`)
+- Document version stores (`.DocumentRevisions-V100`)
 - Duplicate files via BLAKE3 hashing (opt-in with `--dedup`)
 
 Build-artifact and temp-file sweeps are scoped to the home directory and skip
@@ -146,8 +155,11 @@ xmac clean --min-age 30d --min-size 1M --dedup ~/Downloads
 # Disable specific clean categories
 xmac clean --build-artifacts false --temp false
 
-# Only scan package-manager caches
-xmac clean --xcode false --temp false --build-artifacts false --dedup
+# Only scan browser caches and trash
+xmac clean --xcode false --temp false --build-artifacts false --pkg-caches false --languages false --large-files false --mail false --ios-backups false
+
+# Find large files >= 500MB
+xmac clean --min-large-size 500M --xcode false --temp false --build-artifacts false --pkg-caches false --languages false --mail false --ios-backups false --trash false
 ```
 
 ### Conflict
@@ -247,6 +259,54 @@ Runs built-in diagnostics for detected package managers:
 - npm: `npm --version`, `npm doctor`
 
 Safe mode (default) only runs read-only diagnostics. Use `xmac all` to include network-dependent checks like `brew outdated`.
+
+### Maintain
+
+Runs macOS system maintenance tasks — the CLI equivalent of OnyX's maintenance
+module. Tasks that are safe and don't require `sudo` run automatically; tasks
+that require `sudo` (repair permissions, dyld rebuild) are emitted as findings
+with the command in the remediation hint for review via `--fix-script`.
+
+Tasks:
+- **Flush DNS cache** — `dscacheutil -flushcache` + `killall -HUP mDNSResponder`
+- **Reindex Spotlight** — `mdutil -E /`
+- **Rebuild LaunchServices** — `lsregister -kill -r` (fixes "Open With" menu)
+- **Run periodic scripts** — `periodic daily/weekly/monthly`
+- **Purge inactive RAM** — `purge`
+- **Clear Quick Look cache** — `qlmanage -r cache`
+- **Repair disk permissions** (opt-in) — `sudo diskutil repairPermissions /`
+- **Rebuild dyld shared cache** (opt-in) — `sudo update_dyld_shared_cache`
+
+```bash
+# Run all safe maintenance tasks
+xmac maintain
+
+# Only flush DNS and purge RAM
+xmac maintain --spotlight false --launchservices false --periodic false --quicklook false
+
+# Include sudo-requiring tasks (emitted as reviewable findings)
+xmac maintain --repair-permissions true --dyld true
+
+# Generate a fix script with the maintenance commands
+xmac --fix-script ./maintenance.sh maintain
+```
+
+### Disk
+
+Shows a disk usage breakdown — the CLI equivalent of CleanMyMac's Space Lens
+or Cleaner One Pro's Disk Map. Lists the top directories and files by size
+under the given path (defaults to home).
+
+```bash
+# Top 20 entries in home dir >= 100MB
+xmac --format report disk
+
+# Top 50 entries in a specific directory >= 1GB
+xmac --format report disk --top 50 --min-size 1G /Applications
+
+# Analyze a specific project directory
+xmac disk ~/Projects
+```
 
 ## Build
 

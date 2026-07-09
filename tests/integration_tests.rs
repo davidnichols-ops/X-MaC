@@ -690,4 +690,290 @@ mod tests {
         assert!(ROTATED_LOG_EXTENSIONS.contains(&".gz"));
         assert!(ROTATED_LOG_EXTENSIONS.contains(&".bz2"));
     }
+
+    // -- new clean categories: browser, mail, iOS, languages, trash, large --
+
+    #[test]
+    fn test_cli_clean_browser_flag() {
+        let args = vec!["x-mac", "clean", "--browser", "false"];
+        let cli = x_mac::cli::args::Cli::parse_from(args);
+        match cli.command {
+            x_mac::cli::args::Commands::Clean(c) => assert!(!c.browser),
+            _ => panic!("Expected Clean"),
+        }
+    }
+
+    #[test]
+    fn test_cli_clean_mail_flag() {
+        let args = vec!["x-mac", "clean", "--mail", "false"];
+        let cli = x_mac::cli::args::Cli::parse_from(args);
+        match cli.command {
+            x_mac::cli::args::Commands::Clean(c) => assert!(!c.mail),
+            _ => panic!("Expected Clean"),
+        }
+    }
+
+    #[test]
+    fn test_cli_clean_ios_backups_flag() {
+        let args = vec!["x-mac", "clean", "--ios-backups", "false"];
+        let cli = x_mac::cli::args::Cli::parse_from(args);
+        match cli.command {
+            x_mac::cli::args::Commands::Clean(c) => assert!(!c.ios_backups),
+            _ => panic!("Expected Clean"),
+        }
+    }
+
+    #[test]
+    fn test_cli_clean_languages_flag() {
+        let args = vec!["x-mac", "clean", "--languages", "false"];
+        let cli = x_mac::cli::args::Cli::parse_from(args);
+        match cli.command {
+            x_mac::cli::args::Commands::Clean(c) => assert!(!c.languages),
+            _ => panic!("Expected Clean"),
+        }
+    }
+
+    #[test]
+    fn test_cli_clean_trash_flag() {
+        let args = vec!["x-mac", "clean", "--trash", "false"];
+        let cli = x_mac::cli::args::Cli::parse_from(args);
+        match cli.command {
+            x_mac::cli::args::Commands::Clean(c) => assert!(!c.trash),
+            _ => panic!("Expected Clean"),
+        }
+    }
+
+    #[test]
+    fn test_cli_clean_large_files_flag() {
+        let args = vec!["x-mac", "clean", "--large-files", "false"];
+        let cli = x_mac::cli::args::Cli::parse_from(args);
+        match cli.command {
+            x_mac::cli::args::Commands::Clean(c) => assert!(!c.large_files),
+            _ => panic!("Expected Clean"),
+        }
+    }
+
+    #[test]
+    fn test_cli_clean_min_large_size() {
+        let args = vec!["x-mac", "clean", "--min-large-size", "500M"];
+        let cli = x_mac::cli::args::Cli::parse_from(args);
+        match cli.command {
+            x_mac::cli::args::Commands::Clean(c) => assert_eq!(c.min_large_size, "500M"),
+            _ => panic!("Expected Clean"),
+        }
+    }
+
+    #[test]
+    fn test_new_clean_categories_serialize() {
+        for category in [
+            x_mac::core::types::Category::BrowserCache,
+            x_mac::core::types::Category::MailAttachment,
+            x_mac::core::types::Category::IosBackup,
+            x_mac::core::types::Category::LanguageFile,
+            x_mac::core::types::Category::UniversalBinary,
+            x_mac::core::types::Category::LargeFile,
+            x_mac::core::types::Category::TrashBin,
+            x_mac::core::types::Category::DocumentVersion,
+            x_mac::core::types::Category::SystemMaintenance,
+        ] {
+            let f = x_mac::core::types::Finding::new(
+                x_mac::core::types::EngineId::Clean,
+                x_mac::core::types::Severity::Low,
+                category,
+                x_mac::core::types::Target::Path(PathBuf::from("/test")),
+                "Test",
+                "desc",
+            );
+            let json = serde_json::to_string(&f).expect("serialize");
+            let de: x_mac::core::types::Finding = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(de.category, category);
+        }
+    }
+
+    // -- maintain engine ----------------------------------------------------
+
+    #[test]
+    fn test_cli_maintain_args_parsing() {
+        let args = vec!["x-mac", "maintain"];
+        let cli = x_mac::cli::args::Cli::parse_from(args);
+        match cli.command {
+            x_mac::cli::args::Commands::Maintain(m) => {
+                assert!(m.dns);
+                assert!(m.spotlight);
+                assert!(m.launchservices);
+                assert!(m.periodic);
+                assert!(!m.repair_permissions);
+                assert!(m.purge_ram);
+                assert!(!m.dyld);
+                assert!(m.quicklook);
+            }
+            _ => panic!("Expected Maintain"),
+        }
+    }
+
+    #[test]
+    fn test_cli_maintain_selective() {
+        let args = vec!["x-mac", "maintain", "--spotlight", "false", "--periodic", "false"];
+        let cli = x_mac::cli::args::Cli::parse_from(args);
+        match cli.command {
+            x_mac::cli::args::Commands::Maintain(m) => {
+                assert!(m.dns);
+                assert!(!m.spotlight);
+                assert!(!m.periodic);
+            }
+            _ => panic!("Expected Maintain"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_maintain_engine_validate() {
+        let engine = x_mac::engines::MaintainEngine::default();
+        let cli = x_mac::cli::args::Cli::parse_from(vec!["x-mac", "maintain"]);
+        let (tx, _rx) = tokio::sync::mpsc::channel::<x_mac::core::types::Finding>(1000);
+        let ctx = x_mac::core::ScanContext::new(&cli, tx).await.unwrap();
+        let result = engine.validate(&ctx).await;
+        assert!(result.is_ok());
+    }
+
+    // -- disk engine --------------------------------------------------------
+
+    #[test]
+    fn test_cli_disk_args_parsing() {
+        let args = vec!["x-mac", "disk", "--top", "10", "--min-size", "50M"];
+        let cli = x_mac::cli::args::Cli::parse_from(args);
+        match cli.command {
+            x_mac::cli::args::Commands::Disk(d) => {
+                assert_eq!(d.top, 10);
+                assert_eq!(d.min_size, "50M");
+            }
+            _ => panic!("Expected Disk"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_disk_engine_validate() {
+        let engine = x_mac::engines::DiskEngine::default();
+        let cli = x_mac::cli::args::Cli::parse_from(vec!["x-mac", "disk"]);
+        let (tx, _rx) = tokio::sync::mpsc::channel::<x_mac::core::types::Finding>(1000);
+        let ctx = x_mac::core::ScanContext::new(&cli, tx).await.unwrap();
+        let result = engine.validate(&ctx).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_disk_engine_scan_temp_dir() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        // Create a file larger than the default 100M threshold would be
+        // impractical in tests, so use a low threshold via args.
+        let big_file = tmp.path().join("big.bin");
+        std::fs::write(&big_file, vec![0u8; 1024]).unwrap();
+
+        let engine = x_mac::engines::DiskEngine::new(x_mac::cli::args::DiskArgs {
+            top: 10,
+            min_size: "100B".to_string(),
+            paths: vec![tmp.path().to_path_buf()],
+        });
+
+        let cli = x_mac::cli::args::Cli::parse_from(vec!["x-mac", "disk"]);
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<x_mac::core::types::Finding>(1000);
+        let ctx = std::sync::Arc::new(x_mac::core::ScanContext::new(&cli, tx).await.unwrap());
+
+        let stats = engine.scan(ctx).await.expect("scan should succeed");
+        assert!(stats.findings_count >= 1);
+
+        let mut found = false;
+        while let Ok(f) = rx.try_recv() {
+            if f.title.contains("big.bin") {
+                found = true;
+            }
+        }
+        assert!(found, "expected to find big.bin in disk scan results");
+    }
+
+    // -- fix script with new categories -------------------------------------
+
+    #[test]
+    fn test_fix_script_handles_browser_cache() {
+        use x_mac::cli::fix_script::FixScriptGenerator;
+        let f = x_mac::core::types::Finding::new(
+            x_mac::core::types::EngineId::Clean,
+            x_mac::core::types::Severity::Low,
+            x_mac::core::types::Category::BrowserCache,
+            x_mac::core::types::Target::Path(PathBuf::from("/home/Library/Caches/Google/Chrome")),
+            "Chrome browser cache",
+            "desc",
+        );
+        let script = FixScriptGenerator::build_script(&[f]);
+        assert!(script.contains("# rm -rf -- '/home/Library/Caches/Google/Chrome'"));
+        assert!(script.contains("Browser caches"));
+    }
+
+    #[test]
+    fn test_fix_script_handles_trash_bin() {
+        use x_mac::cli::fix_script::FixScriptGenerator;
+        let f = x_mac::core::types::Finding::new(
+            x_mac::core::types::EngineId::Clean,
+            x_mac::core::types::Severity::Medium,
+            x_mac::core::types::Category::TrashBin,
+            x_mac::core::types::Target::Path(PathBuf::from("/home/.Trash")),
+            "Trash bin with content",
+            "desc",
+        );
+        let script = FixScriptGenerator::build_script(&[f]);
+        assert!(script.contains("# rm -rf -- '/home/.Trash'"));
+        assert!(script.contains("Trash bins"));
+    }
+
+    #[test]
+    fn test_fix_script_handles_ios_backup() {
+        use x_mac::cli::fix_script::FixScriptGenerator;
+        let f = x_mac::core::types::Finding::new(
+            x_mac::core::types::EngineId::Clean,
+            x_mac::core::types::Severity::Medium,
+            x_mac::core::types::Category::IosBackup,
+            x_mac::core::types::Target::Path(PathBuf::from("/home/Library/Application Support/MobileSync/Backup/abc123")),
+            "iOS device backup detected",
+            "desc",
+        );
+        let script = FixScriptGenerator::build_script(&[f]);
+        assert!(script.contains("# rm -rf"));
+        assert!(script.contains("iOS device backups"));
+    }
+
+    #[test]
+    fn test_fix_script_handles_system_maintenance() {
+        use x_mac::cli::fix_script::FixScriptGenerator;
+        let f = x_mac::core::types::Finding::new(
+            x_mac::core::types::EngineId::All,
+            x_mac::core::types::Severity::Info,
+            x_mac::core::types::Category::SystemMaintenance,
+            x_mac::core::types::Target::Path(PathBuf::from("/")),
+            "DNS cache flush",
+            "desc",
+        )
+        .with_hint("dscacheutil -flushcache; killall -HUP mDNSResponder");
+        let script = FixScriptGenerator::build_script(&[f]);
+        assert!(script.contains("dscacheutil -flushcache"));
+        assert!(script.contains("System maintenance tasks"));
+    }
+
+    #[test]
+    fn test_fix_script_large_file_is_informational() {
+        use x_mac::cli::fix_script::FixScriptGenerator;
+        let f = x_mac::core::types::Finding::new(
+            x_mac::core::types::EngineId::Clean,
+            x_mac::core::types::Severity::Low,
+            x_mac::core::types::Category::LargeFile,
+            x_mac::core::types::Target::Path(PathBuf::from("/home/big.iso")),
+            "Large file: big.iso",
+            "desc",
+        );
+        let script = FixScriptGenerator::build_script(&[f]);
+        // Large files are informational — should not have rm commands.
+        assert!(!script.contains("rm -rf"));
+        // The finding is filtered out entirely (no fix to apply), so it
+        // shouldn't appear as a review-required fix either.
+        assert!(!script.contains("big.iso"));
+    }
 }

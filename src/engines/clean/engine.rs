@@ -697,6 +697,306 @@ impl CleanEngine {
         }
         false
     }
+
+    // ---- Browser caches --------------------------------------------------
+
+    async fn scan_browser_caches(&self, _ctx: &ScanContext) -> (Vec<Finding>, u64) {
+        let mut findings = Vec::new();
+        let mut items = 0u64;
+
+        for (name, path) in self.rules.browser_cache_paths() {
+            if !path.exists() {
+                continue;
+            }
+            items += 1;
+            let size = CleanScanner::dir_size(&path);
+            if size > 0 {
+                findings.push(
+                    Finding::new(
+                        EngineId::Clean,
+                        Severity::Low,
+                        Category::BrowserCache,
+                        Target::Path(path.clone()),
+                        format!("{} browser cache", name),
+                        format!("Browser cache for {} occupies {}", name, crate::util::disk::format_bytes(size)),
+                    )
+                    .with_size(size)
+                    .with_hint("Safe to clear — browser will rebuild cache on next use".to_string()),
+                );
+            }
+        }
+
+        (findings, items)
+    }
+
+    // ---- Mail attachments ------------------------------------------------
+
+    async fn scan_mail(&self, _ctx: &ScanContext) -> (Vec<Finding>, u64) {
+        let mut findings = Vec::new();
+        let mut items = 0u64;
+
+        for path in self.rules.mail_paths() {
+            if !path.exists() {
+                continue;
+            }
+            items += 1;
+            let size = CleanScanner::dir_size(&path);
+            if size > 0 {
+                let name = path.file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| path.to_string_lossy().to_string());
+                findings.push(
+                    Finding::new(
+                        EngineId::Clean,
+                        Severity::Medium,
+                        Category::MailAttachment,
+                        Target::Path(path.clone()),
+                        "Mail attachments/downloads detected",
+                        format!("Mail data directory '{}' occupies {}", name, crate::util::disk::format_bytes(size)),
+                    )
+                    .with_size(size)
+                    .with_hint("Attachments may be re-downloaded from server. Review before deleting.".to_string()),
+                );
+            }
+        }
+
+        (findings, items)
+    }
+
+    // ---- iOS backups -----------------------------------------------------
+
+    async fn scan_ios_backups(&self, _ctx: &ScanContext) -> (Vec<Finding>, u64) {
+        let mut findings = Vec::new();
+        let mut items = 0u64;
+
+        for backup_root in self.rules.ios_backup_paths() {
+            if !backup_root.exists() {
+                continue;
+            }
+            items += 1;
+
+            // Each subdirectory is a device backup. List them with sizes so
+            // the user can decide which old backups to remove.
+            if let Ok(entries) = std::fs::read_dir(&backup_root) {
+                for entry in entries.flatten() {
+                    let dir = entry.path();
+                    if !dir.is_dir() {
+                        continue;
+                    }
+                    items += 1;
+                    let size = CleanScanner::dir_size(&dir);
+                    if size > 0 {
+                        // Try to read the backup status from Status.plist
+                        let backup_name = dir.file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_default();
+                        findings.push(
+                            Finding::new(
+                                EngineId::Clean,
+                                Severity::Medium,
+                                Category::IosBackup,
+                                Target::Path(dir.clone()),
+                                "iOS device backup detected",
+                                format!("Backup '{}' occupies {}", backup_name, crate::util::disk::format_bytes(size)),
+                            )
+                            .with_size(size)
+                            .with_hint("Old iOS backups can be removed if you no longer need them. Keep the most recent per device.".to_string()),
+                        );
+                    }
+                }
+            }
+        }
+
+        (findings, items)
+    }
+
+    // ---- Language files --------------------------------------------------
+
+    async fn scan_language_files(&self, _ctx: &ScanContext) -> (Vec<Finding>, u64) {
+        let mut findings = Vec::new();
+        let mut items = 0u64;
+        let keep = self.rules.keep_language_codes();
+
+        for app_dir in self.rules.app_dirs() {
+            if !app_dir.exists() {
+                continue;
+            }
+
+            if let Ok(entries) = std::fs::read_dir(&app_dir) {
+                for entry in entries.flatten() {
+                    let app_path = entry.path();
+                    if !app_path.is_dir() || !app_path.to_string_lossy().ends_with(".app") {
+                        continue;
+                    }
+
+                    let resources = app_path.join("Contents/Resources");
+                    if !resources.exists() {
+                        continue;
+                    }
+
+                    // Collect removable .lproj directories for this app
+                    let mut app_lproj_size: u64 = 0;
+                    let mut app_lproj_count = 0u64;
+
+                    if let Ok(res_entries) = std::fs::read_dir(&resources) {
+                        for res_entry in res_entries.flatten() {
+                            let lproj_path = res_entry.path();
+                            if !lproj_path.is_dir() {
+                                continue;
+                            }
+                            let name = lproj_path.file_name()
+                                .map(|n| n.to_string_lossy().to_string())
+                                .unwrap_or_default();
+                            if !name.ends_with(".lproj") {
+                                continue;
+                            }
+                            items += 1;
+                            let lang_code = name.trim_end_matches(".lproj");
+                            if keep.contains(&lang_code) {
+                                continue;
+                            }
+                            app_lproj_count += 1;
+                            app_lproj_size += CleanScanner::dir_size(&lproj_path);
+                        }
+                    }
+
+                    if app_lproj_count > 0 && app_lproj_size > 0 {
+                        let app_name = app_path.file_stem()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_default();
+                        findings.push(
+                            Finding::new(
+                                EngineId::Clean,
+                                Severity::Low,
+                                Category::LanguageFile,
+                                Target::Path(app_path.join("Contents/Resources")),
+                                format!("Removable language files: {}", app_name),
+                                format!("Found {} non-English .lproj directories ({} total) in {}", app_lproj_count, crate::util::disk::format_bytes(app_lproj_size), app_name),
+                            )
+                            .with_size(app_lproj_size)
+                            .with_metadata("lproj_count", serde_json::json!(app_lproj_count))
+                            .with_hint("Safe to remove non-English .lproj dirs. Will be restored on app update.".to_string()),
+                        );
+                    }
+                }
+            }
+        }
+
+        (findings, items)
+    }
+
+    // ---- Trash bins ------------------------------------------------------
+
+    async fn scan_trash(&self, _ctx: &ScanContext) -> (Vec<Finding>, u64) {
+        let mut findings = Vec::new();
+        let mut items = 0u64;
+
+        for trash_path in self.rules.trash_paths() {
+            if !trash_path.exists() {
+                continue;
+            }
+            items += 1;
+            let size = CleanScanner::dir_size(&trash_path);
+            if size > 0 {
+                findings.push(
+                    Finding::new(
+                        EngineId::Clean,
+                        Severity::Medium,
+                        Category::TrashBin,
+                        Target::Path(trash_path.clone()),
+                        "Trash bin with content",
+                        format!("Trash at '{}' contains {} of data", trash_path.to_string_lossy(), crate::util::disk::format_bytes(size)),
+                    )
+                    .with_size(size)
+                    .with_hint("Empty trash to reclaim space. Use 'rm -rf' for locked files.".to_string()),
+                );
+            }
+        }
+
+        (findings, items)
+    }
+
+    // ---- Large files -----------------------------------------------------
+
+    async fn scan_large_files(&self, _ctx: &ScanContext) -> (Vec<Finding>, u64) {
+        let mut findings = Vec::new();
+        let mut items = 0u64;
+        let min_large = byte_unit::Byte::from_str(&self.args.min_large_size)
+            .map(|b| b.get_bytes() as u64)
+            .unwrap_or(100 * 1024 * 1024);
+
+        let search_paths = if self.args.paths.is_empty() {
+            vec![crate::util::macos::MacosUtils::home_dir()]
+        } else {
+            self.args.paths.clone()
+        };
+
+        for search_path in search_paths {
+            if !search_path.exists() {
+                continue;
+            }
+
+            let entries = WalkDir::new(&search_path)
+                .follow_links(false)
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .filter(|e| e.file_type().is_file());
+
+            for entry in entries {
+                items += 1;
+                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                if size >= min_large {
+                    let path = entry.path();
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    findings.push(
+                        Finding::new(
+                            EngineId::Clean,
+                            Severity::Low,
+                            Category::LargeFile,
+                            Target::Path(path.to_path_buf()),
+                            format!("Large file: {} ({})", name, crate::util::disk::format_bytes(size)),
+                            format!("File '{}' is {} — exceeds threshold of {}", path.to_string_lossy(), crate::util::disk::format_bytes(size), crate::util::disk::format_bytes(min_large)),
+                        )
+                        .with_size(size)
+                        .with_hint("Review and delete if no longer needed".to_string()),
+                    );
+                }
+            }
+        }
+
+        (findings, items)
+    }
+
+    // ---- Document versions -----------------------------------------------
+
+    async fn scan_document_versions(&self, _ctx: &ScanContext) -> (Vec<Finding>, u64) {
+        let mut findings = Vec::new();
+        let mut items = 0u64;
+
+        for path in self.rules.document_version_paths() {
+            if !path.exists() {
+                continue;
+            }
+            items += 1;
+            let size = CleanScanner::dir_size(&path);
+            if size > 0 {
+                findings.push(
+                    Finding::new(
+                        EngineId::Clean,
+                        Severity::Low,
+                        Category::DocumentVersion,
+                        Target::Path(path.clone()),
+                        "Document version store detected",
+                        format!("Document revisions at '{}' occupy {}", path.to_string_lossy(), crate::util::disk::format_bytes(size)),
+                    )
+                    .with_size(size)
+                    .with_hint("Removing frees space but loses document revision history. macOS recreates this on demand.".to_string()),
+                );
+            }
+        }
+
+        (findings, items)
+    }
 }
 
 #[async_trait]
@@ -788,6 +1088,54 @@ impl Engine for CleanEngine {
             ctx.emit(finding).await;
         }
 
+        if self.args.browser {
+            let (f, i) = self.scan_browser_caches(&ctx).await;
+            items_scanned += i;
+            findings_count += f.len() as u64;
+            for finding in f { ctx.emit(finding).await; }
+        }
+
+        if self.args.mail {
+            let (f, i) = self.scan_mail(&ctx).await;
+            items_scanned += i;
+            findings_count += f.len() as u64;
+            for finding in f { ctx.emit(finding).await; }
+        }
+
+        if self.args.ios_backups {
+            let (f, i) = self.scan_ios_backups(&ctx).await;
+            items_scanned += i;
+            findings_count += f.len() as u64;
+            for finding in f { ctx.emit(finding).await; }
+        }
+
+        if self.args.languages {
+            let (f, i) = self.scan_language_files(&ctx).await;
+            items_scanned += i;
+            findings_count += f.len() as u64;
+            for finding in f { ctx.emit(finding).await; }
+        }
+
+        if self.args.trash {
+            let (f, i) = self.scan_trash(&ctx).await;
+            items_scanned += i;
+            findings_count += f.len() as u64;
+            for finding in f { ctx.emit(finding).await; }
+        }
+
+        if self.args.large_files {
+            let (f, i) = self.scan_large_files(&ctx).await;
+            items_scanned += i;
+            findings_count += f.len() as u64;
+            for finding in f { ctx.emit(finding).await; }
+        }
+
+        // Document versions — always scanned (low cost, few paths)
+        let (dv_findings, dv_items) = self.scan_document_versions(&ctx).await;
+        items_scanned += dv_items;
+        findings_count += dv_findings.len() as u64;
+        for finding in dv_findings { ctx.emit(finding).await; }
+
         Ok(EngineStats {
             engine: self.id(),
             duration: start.elapsed(),
@@ -808,6 +1156,13 @@ impl Default for CleanEngine {
             pkg_caches: true,
             temp: true,
             build_artifacts: true,
+            browser: true,
+            mail: true,
+            ios_backups: true,
+            languages: true,
+            trash: true,
+            large_files: true,
+            min_large_size: "100M".to_string(),
             paths: Vec::new(),
         })
     }

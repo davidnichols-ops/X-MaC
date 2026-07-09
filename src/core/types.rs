@@ -62,6 +62,15 @@ pub enum Category {
     TempFile,
     BuildArtifact,
     PackageManagerCache,
+    BrowserCache,
+    MailAttachment,
+    IosBackup,
+    LanguageFile,
+    UniversalBinary,
+    LargeFile,
+    TrashBin,
+    DocumentVersion,
+    SystemMaintenance,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

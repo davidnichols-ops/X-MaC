@@ -187,4 +187,96 @@ impl CleanRules {
             PathBuf::from("/usr"),
         ]
     }
+
+    // ---- Browser cache paths --------------------------------------------
+
+    /// Browser cache directories for Safari, Chrome, Firefox, Edge, Brave,
+    /// and Arc. Each entry is (browser_name, cache_path).
+    pub fn browser_cache_paths(&self) -> Vec<(&'static str, PathBuf)> {
+        let home = MacosUtils::home_dir();
+        vec![
+            ("Safari", home.join("Library/Caches/com.apple.Safari")),
+            ("Safari Containers", home.join("Library/Containers/com.apple.Safari/Data/Library/Caches/com.apple.Safari")),
+            ("Chrome", home.join("Library/Caches/Google/Chrome")),
+            ("Firefox", home.join("Library/Caches/Firefox")),
+            ("Edge", home.join("Library/Caches/Microsoft Edge")),
+            ("Brave", home.join("Library/Caches/BraveSoftware")),
+            ("Arc", home.join("Library/Caches/com.thebrowser.Browser")),
+        ]
+    }
+
+    // ---- Mail attachment paths -------------------------------------------
+
+    /// Mail attachment and download directories.
+    pub fn mail_paths(&self) -> Vec<PathBuf> {
+        let home = MacosUtils::home_dir();
+        vec![
+            home.join("Library/Containers/com.apple.mail/Data/Library/Mail Downloads"),
+            home.join("Library/Mail/V2/MailData"),
+            home.join("Library/Mail/V3/MailData"),
+            home.join("Library/Mail/V4/MailData"),
+            home.join("Library/Mail/V5/MailData"),
+            home.join("Library/Mail/V6/MailData"),
+            home.join("Library/Mail/V7/MailData"),
+            home.join("Library/Mail/V8/MailData"),
+        ]
+    }
+
+    // ---- iOS backup paths ------------------------------------------------
+
+    /// iOS device backup directory (Finder/iTunes backups).
+    pub fn ios_backup_paths(&self) -> Vec<PathBuf> {
+        let home = MacosUtils::home_dir();
+        vec![home.join("Library/Application Support/MobileSync/Backup")]
+    }
+
+    // ---- Trash paths -----------------------------------------------------
+
+    /// Trash directories on all mounted volumes.
+    pub fn trash_paths(&self) -> Vec<PathBuf> {
+        let mut paths = vec![MacosUtils::home_dir().join(".Trash")];
+        // External/volume trashes
+        if let Ok(entries) = std::fs::read_dir("/Volumes") {
+            for entry in entries.flatten() {
+                let trash = entry.path().join(".Trashes");
+                if trash.exists() {
+                    paths.push(trash);
+                }
+            }
+        }
+        paths
+    }
+
+    // ---- Document version paths ------------------------------------------
+
+    /// Document revision stores on volumes.
+    pub fn document_version_paths(&self) -> Vec<PathBuf> {
+        let mut paths = vec![PathBuf::from("/.DocumentRevisions-V100")];
+        if let Ok(entries) = std::fs::read_dir("/Volumes") {
+            for entry in entries.flatten() {
+                let rev = entry.path().join(".DocumentRevisions-V100");
+                if rev.exists() {
+                    paths.push(rev);
+                }
+            }
+        }
+        paths
+    }
+
+    // ---- Application directories (for language file scanning) -----------
+
+    /// Directories containing .app bundles to scan for language files.
+    pub fn app_dirs(&self) -> Vec<PathBuf> {
+        let home = MacosUtils::home_dir();
+        vec![
+            PathBuf::from("/Applications"),
+            home.join("Applications"),
+        ]
+    }
+
+    /// Language codes to preserve when scanning for removable .lproj dirs.
+    /// Base.lproj is always preserved (it's not language-specific).
+    pub fn keep_language_codes(&self) -> &[&'static str] {
+        &["en", "English", "Base", "base"]
+    }
 }
