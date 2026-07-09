@@ -53,7 +53,7 @@ impl CleanScanner {
     }
 
     pub fn file_size(path: &Path) -> u64 {
-        std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
+        crate::util::disk::file_size_physical(path)
     }
 }
 

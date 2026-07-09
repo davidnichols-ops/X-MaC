@@ -6,6 +6,7 @@ use std::time::Instant;
 use walkdir::WalkDir;
 
 use crate::cli::args::CleanArgs;
+use crate::util::disk::physical_size;
 use crate::core::context::ScanContext;
 use crate::core::engine::Engine;
 use crate::core::error::EngineError;
@@ -259,7 +260,7 @@ impl CleanEngine {
             if paths.len() > 1 {
                 let total_size: u64 = paths.iter()
                     .filter_map(|p| std::fs::metadata(p).ok())
-                    .map(|m| m.len())
+                    .map(physical_size)
                     .sum();
 
                 findings.push(
@@ -567,7 +568,7 @@ impl CleanEngine {
         {
             let name = entry.file_name().to_string_lossy().to_string();
             if patterns.iter().any(|p| name.ends_with(p) || name == **p) {
-                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                let size = entry.metadata().map(physical_size).unwrap_or(0);
                 results.push(
                     Finding::new(
                         EngineId::Clean,
@@ -667,7 +668,7 @@ impl CleanEngine {
             let name = entry.file_name().to_string_lossy();
             if BUILD_ARTIFACT_FILE_PATTERNS.iter().any(|p| name.ends_with(p)) {
                 items += 1;
-                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                let size = entry.metadata().map(physical_size).unwrap_or(0);
                 findings.push(
                     Finding::new(
                         EngineId::Clean,
@@ -944,7 +945,7 @@ impl CleanEngine {
 
             for entry in entries {
                 items += 1;
-                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                let size = entry.metadata().map(physical_size).unwrap_or(0);
                 if size >= min_large {
                     let path = entry.path();
                     let name = entry.file_name().to_string_lossy().to_string();

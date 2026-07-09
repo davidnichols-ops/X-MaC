@@ -9,11 +9,18 @@ use crate::core::context::ScanContext;
 use crate::core::engine::Engine;
 use crate::core::error::EngineError;
 use crate::core::types::{Category, EngineId, EngineStats, Finding, Severity, Target};
+use crate::util::disk::physical_size;
 
 /// The disk engine analyzes disk usage and emits findings for the top
 /// largest directories and files under the given paths. Unlike the clean
 /// engine, these findings are informational (Severity::Info) — they help
 /// the user understand where disk space is being used.
+///
+/// Uses **physical block size** (`blocks * 512`) rather than logical file
+/// size to correctly handle sparse files (e.g. Docker.raw, sparse VM
+/// images) that report a large logical size but use far less disk space.
+/// Directory-level findings are emitted as `SystemInfo` (not counted in
+/// reclaimable totals) to avoid double-counting with file-level findings.
 pub struct DiskEngine {
     args: DiskArgs,
 }
@@ -23,14 +30,17 @@ impl DiskEngine {
         Self { args }
     }
 
-    fn dir_size(path: &std::path::Path) -> u64 {
+    /// Sum physical disk usage (blocks * 512) for all files under a path.
+    /// This correctly handles sparse files — `metadata().len()` reports
+    /// logical size, but `metadata().blocks()` reports actual blocks used.
+    fn dir_size_physical(path: &std::path::Path) -> u64 {
         WalkDir::new(path)
             .follow_links(false)
             .into_iter()
             .filter_map(|e| e.ok())
             .filter(|e| e.file_type().is_file())
             .filter_map(|e| e.metadata().ok())
-            .map(|m| m.len())
+            .map(physical_size)
             .sum()
     }
 }
@@ -46,7 +56,7 @@ impl Engine for DiskEngine {
     }
 
     fn description(&self) -> &'static str {
-        "Analyzes disk usage — top directories and files by size"
+        "Analyzes disk usage — top directories and files by physical size"
     }
 
     async fn validate(&self, _ctx: &ScanContext) -> std::result::Result<(), EngineError> {
@@ -73,7 +83,10 @@ impl Engine for DiskEngine {
                 continue;
             }
 
-            // Collect immediate children with sizes, sorted descending
+            // ---- Directory-level breakdown (immediate children) ----
+            // Emitted as SystemInfo so they don't contribute to
+            // total_reclaimable_bytes (which would double-count with the
+            // file-level findings below).
             let mut entries: Vec<(PathBuf, u64, bool)> = Vec::new();
 
             if let Ok(dir_entries) = std::fs::read_dir(search_path) {
@@ -81,9 +94,9 @@ impl Engine for DiskEngine {
                     let path = entry.path();
                     let is_dir = path.is_dir();
                     let size = if is_dir {
-                        Self::dir_size(&path)
+                        Self::dir_size_physical(&path)
                     } else {
-                        entry.metadata().map(|m| m.len()).unwrap_or(0)
+                        entry.metadata().map(physical_size).unwrap_or(0)
                     };
                     items_scanned += 1;
                     if size >= min_size {
@@ -106,13 +119,14 @@ impl Engine for DiskEngine {
                     format!("Disk usage: {} ({} file)", name, crate::util::disk::format_bytes(size))
                 };
 
+                // SystemInfo category → not counted in reclaimable totals.
                 let finding = Finding::new(
                     EngineId::All,
                     Severity::Info,
                     Category::SystemInfo,
                     Target::Path(path.clone()),
                     title,
-                    format!("{} '{}' in {} — {}", if is_dir { "Directory" } else { "File" }, name, search_path.display(), crate::util::disk::format_bytes(size)),
+                    format!("{} '{}' in {} — {} (physical disk usage)", if is_dir { "Directory" } else { "File" }, name, search_path.display(), crate::util::disk::format_bytes(size)),
                 )
                 .with_size(size)
                 .with_hint(if is_dir {
@@ -125,7 +139,9 @@ impl Engine for DiskEngine {
                 findings_count += 1;
             }
 
-            // Also find the top N largest individual files recursively
+            // ---- File-level breakdown (recursive, top N largest files) ----
+            // These use LargeFile category and DO contribute to reclaimable
+            // totals. Physical block size avoids counting sparse file holes.
             let mut large_files: Vec<(PathBuf, u64)> = Vec::new();
 
             let walker = WalkDir::new(search_path)
@@ -136,7 +152,7 @@ impl Engine for DiskEngine {
 
             for entry in walker {
                 items_scanned += 1;
-                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                let size = entry.metadata().map(physical_size).unwrap_or(0);
                 if size >= min_size {
                     large_files.push((entry.path().to_path_buf(), size));
                 }
@@ -156,7 +172,7 @@ impl Engine for DiskEngine {
                     Category::LargeFile,
                     Target::Path(path.clone()),
                     format!("Large file: {} ({})", name, crate::util::disk::format_bytes(size)),
-                    format!("File '{}' — {}", path.display(), crate::util::disk::format_bytes(size)),
+                    format!("File '{}' — {} (physical disk usage)", path.display(), crate::util::disk::format_bytes(size)),
                 )
                 .with_size(size)
                 .with_hint("Review and delete if no longer needed".to_string());

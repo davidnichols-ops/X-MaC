@@ -242,8 +242,15 @@ impl ScanReport {
                 .trim_matches('"')
                 .to_string();
             *category_map.entry(cat).or_insert(0) += 1;
+            // Only count reclaimable bytes for categories that represent
+            // actual deletable space — not informational categories like
+            // SystemInfo (disk usage breakdown) or LargeFile (which are
+            // informational pointers, not necessarily deletable).
             if let Some(sz) = f.size_bytes {
-                reclaimable += sz;
+                match f.category {
+                    Category::SystemInfo | Category::LargeFile => {}
+                    _ => reclaimable += sz,
+                }
             }
         }
 
