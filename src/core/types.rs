@@ -59,6 +59,9 @@ pub enum Category {
     InvalidSignature,
     InstalledApp,
     SystemInfo,
+    TempFile,
+    BuildArtifact,
+    PackageManagerCache,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

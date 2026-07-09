@@ -154,6 +154,18 @@ pub struct CleanArgs {
     #[arg(long, default_value = "true")]
     pub xcode: bool,
 
+    /// Detect package-manager caches (npm, pip, cargo, Homebrew, go, gradle, maven).
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub pkg_caches: bool,
+
+    /// Detect temp files (/tmp, /var/tmp, .DS_Store, editor swap files).
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub temp: bool,
+
+    /// Detect build artifacts (node_modules, target, __pycache__, dist, .pyc, .o, etc.).
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub build_artifacts: bool,
+
     #[arg(value_name = "PATH")]
     pub paths: Vec<PathBuf>,
 }

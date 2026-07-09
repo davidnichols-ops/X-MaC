@@ -12,7 +12,7 @@ use crate::core::error::EngineError;
 use crate::core::types::{Category, EngineId, EngineStats, Finding, Severity, Target};
 
 use super::scanner::CleanScanner;
-use super::rules::CleanRules;
+use super::rules::{CleanRules, BUILD_ARTIFACT_DIRS, BUILD_ARTIFACT_FILE_PATTERNS, ROTATED_LOG_EXTENSIONS, TEMP_FILE_NAMES, SWAP_FILE_PATTERNS};
 
 pub struct CleanEngine {
     args: CleanArgs,
@@ -298,6 +298,405 @@ impl CleanEngine {
 
         Ok(hasher.finalize().to_hex().to_string())
     }
+
+    // ---- New scan methods: package-manager caches ------------------------
+
+    /// Detect package-manager cache directories (npm, pip, cargo, Homebrew,
+    /// go, gradle, maven). These are regenerated on demand and safe to clear.
+    async fn scan_pkg_caches(&self, _ctx: &ScanContext) -> (Vec<Finding>, u64) {
+        let mut findings = Vec::new();
+        let mut items = 0u64;
+
+        for path in self.rules.pkg_cache_paths() {
+            if !path.exists() {
+                continue;
+            }
+            items += 1;
+
+            let size = if path.is_dir() {
+                CleanScanner::dir_size(&path)
+            } else {
+                CleanScanner::file_size(&path)
+            };
+
+            if size == 0 {
+                continue;
+            }
+
+            let name = path.file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| path.to_string_lossy().to_string());
+
+            findings.push(
+                Finding::new(
+                    EngineId::Clean,
+                    Severity::Low,
+                    Category::PackageManagerCache,
+                    Target::Path(path.clone()),
+                    "Package-manager cache detected",
+                    format!("Found package-manager cache '{}' with size {}", name, crate::util::disk::format_bytes(size)),
+                )
+                .with_size(size)
+                .with_hint("Safe to clear — regenerated on next install/build".to_string()),
+            );
+        }
+
+        (findings, items)
+    }
+
+    // ---- New scan methods: temp files ------------------------------------
+
+    /// Detect temp files: contents of /tmp and /var/tmp, .DS_Store files,
+    /// and editor swap files (.swp/.swo) under the home directory.
+    async fn scan_temp_files(&self, _ctx: &ScanContext) -> (Vec<Finding>, u64) {
+        let mut findings = Vec::new();
+        let mut items = 0u64;
+
+        // 1. System temp directories — report aggregate size.
+        for temp_path in self.rules.temp_paths() {
+            if !temp_path.exists() {
+                continue;
+            }
+            items += 1;
+            let size = CleanScanner::dir_size(&temp_path);
+            if size > 0 {
+                findings.push(
+                    Finding::new(
+                        EngineId::Clean,
+                        Severity::Low,
+                        Category::TempFile,
+                        Target::Path(temp_path.clone()),
+                        "System temp directory",
+                        format!("Temp directory '{}' contains {} of data", temp_path.to_string_lossy(), crate::util::disk::format_bytes(size)),
+                    )
+                    .with_size(size)
+                    .with_hint("Clear with: rm -rf /tmp/* /var/tmp/* (macOS recreates these on reboot)".to_string()),
+                );
+            }
+        }
+
+        // 2. .DS_Store and swap files under home — use a bounded walk that
+        //    prunes skip dirs to avoid traversing editor extensions etc.
+        let home = self.rules.home_search_root();
+        let skip_dirs: Vec<PathBuf> = self.rules.sweep_skip_dirs();
+
+        let ds_store_findings = tokio::task::spawn_blocking({
+            let home = home.clone();
+            let skip_dirs = skip_dirs.clone();
+            move || Self::sweep_named_files(&home, TEMP_FILE_NAMES, &skip_dirs, "DS_Store")
+        })
+        .await
+        .unwrap_or_default();
+
+        items += ds_store_findings.len() as u64;
+        let ds_size: u64 = ds_store_findings.iter().filter_map(|f| f.size_bytes).sum();
+        if !ds_store_findings.is_empty() {
+            findings.push(
+                Finding::new(
+                    EngineId::Clean,
+                    Severity::Low,
+                    Category::TempFile,
+                    Target::Path(home.join(".DS_Store")),
+                    "DS_Store files detected",
+                    format!("Found {} .DS_Store files under home (total {})", ds_store_findings.len(), crate::util::disk::format_bytes(ds_size)),
+                )
+                .with_size(ds_size)
+                .with_metadata("file_count", serde_json::json!(ds_store_findings.len()))
+                .with_hint("Clear with: find ~ -name .DS_Store -delete".to_string()),
+            );
+        }
+
+        // 3. Swap files (.swp/.swo).
+        let swap_findings = tokio::task::spawn_blocking({
+            let home = home.clone();
+            let skip_dirs = skip_dirs.clone();
+            move || Self::sweep_named_files(&home, SWAP_FILE_PATTERNS, &skip_dirs, "swap")
+        })
+        .await
+        .unwrap_or_default();
+
+        items += swap_findings.len() as u64;
+        let swap_size: u64 = swap_findings.iter().filter_map(|f| f.size_bytes).sum();
+        if !swap_findings.is_empty() {
+            findings.push(
+                Finding::new(
+                    EngineId::Clean,
+                    Severity::Low,
+                    Category::TempFile,
+                    Target::Path(home.join("*.swp")),
+                    "Editor swap files detected",
+                    format!("Found {} swap files (.swp/.swo) under home (total {})", swap_findings.len(), crate::util::disk::format_bytes(swap_size)),
+                )
+                .with_size(swap_size)
+                .with_metadata("file_count", serde_json::json!(swap_findings.len()))
+                .with_hint("Clear with: find ~ -name '*.swp' -o -name '*.swo' -delete".to_string()),
+            );
+        }
+
+        (findings, items)
+    }
+
+    // ---- New scan methods: build artifacts -------------------------------
+
+    /// Detect build-artifact directories (node_modules, target, __pycache__,
+    /// dist, build, etc.) and compiled artifact files (.pyc, .o, .so, etc.)
+    /// under the home directory. Skips editor extensions and toolchain dirs
+    /// to avoid breaking installed software.
+    async fn scan_build_artifacts(&self, _ctx: &ScanContext) -> (Vec<Finding>, u64) {
+        let mut findings = Vec::new();
+        let mut items = 0u64;
+
+        let home = self.rules.home_search_root();
+        let skip_dirs = self.rules.sweep_skip_dirs();
+
+        // 1. Build-artifact directories (node_modules, target, __pycache__, …)
+        let dir_findings = tokio::task::spawn_blocking({
+            let home = home.clone();
+            let skip_dirs = skip_dirs.clone();
+            move || Self::sweep_build_artifact_dirs(&home, &skip_dirs)
+        })
+        .await
+        .unwrap_or_default();
+
+        items += dir_findings.0;
+        findings.extend(dir_findings.1);
+
+        // 2. Compiled artifact files (.pyc, .o, .so, .class, etc.)
+        let file_findings = tokio::task::spawn_blocking({
+            let home = home.clone();
+            let skip_dirs = skip_dirs.clone();
+            move || Self::sweep_build_artifact_files(&home, &skip_dirs)
+        })
+        .await
+        .unwrap_or_default();
+
+        items += file_findings.0;
+        findings.extend(file_findings.1);
+
+        (findings, items)
+    }
+
+    // ---- New scan methods: rotated logs ----------------------------------
+
+    /// Detect rotated / archived log files (*.gz, *.bz2, *.xz, *.zst, *.0)
+    /// in system and user log directories. Active log files are never flagged.
+    async fn scan_rotated_logs(&self, _ctx: &ScanContext) -> (Vec<Finding>, u64) {
+        let mut findings = Vec::new();
+        let mut items = 0u64;
+
+        let mut all_log_dirs = self.rules.system_log_paths();
+        all_log_dirs.extend(self.rules.user_log_paths());
+
+        for log_dir in all_log_dirs {
+            if !log_dir.exists() {
+                continue;
+            }
+
+            let entries = WalkDir::new(&log_dir)
+                .max_depth(1)
+                .follow_links(false)
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .filter(|e| e.file_type().is_file());
+
+            for entry in entries {
+                items += 1;
+                let path = entry.path();
+                let name = path.file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+
+                let is_rotated = ROTATED_LOG_EXTENSIONS.iter().any(|ext| name.ends_with(ext))
+                    || name.ends_with(".0")
+                    || name.ends_with(".1")
+                    || name.ends_with(".2")
+                    || name.ends_with(".3")
+                    || name.ends_with(".4")
+                    || name.ends_with(".5")
+                    || name.ends_with(".6")
+                    || name.ends_with(".7")
+                    || name.ends_with(".8")
+                    || name.ends_with(".9");
+
+                if !is_rotated {
+                    continue;
+                }
+
+                let size = CleanScanner::file_size(path);
+                if size == 0 {
+                    continue;
+                }
+
+                findings.push(
+                    Finding::new(
+                        EngineId::Clean,
+                        Severity::Low,
+                        Category::Log,
+                        Target::Path(path.to_path_buf()),
+                        "Rotated log file detected",
+                        format!("Found rotated log '{}' with size {}", name, crate::util::disk::format_bytes(size)),
+                    )
+                    .with_size(size)
+                    .with_hint("Safe to delete — these are archived logs, not active".to_string()),
+                );
+            }
+        }
+
+        (findings, items)
+    }
+
+    // ---- Sweep helpers (run on spawn_blocking) ---------------------------
+
+    /// Walk `root` (pruning `skip_dirs`) and collect findings for files whose
+    /// name ends with any of the given `patterns`. Returns one Finding per
+    /// file so the caller can aggregate if desired.
+    fn sweep_named_files(
+        root: &std::path::Path,
+        patterns: &[&str],
+        skip_dirs: &[PathBuf],
+        label: &str,
+    ) -> Vec<Finding> {
+        let mut results = Vec::new();
+
+        for entry in WalkDir::new(root)
+            .follow_links(false)
+            .into_iter()
+            .filter_entry(|e| !Self::is_in_skip_dir(e.path(), skip_dirs))
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_file())
+        {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if patterns.iter().any(|p| name.ends_with(p) || name == **p) {
+                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                results.push(
+                    Finding::new(
+                        EngineId::Clean,
+                        Severity::Low,
+                        Category::TempFile,
+                        Target::Path(entry.path().to_path_buf()),
+                        format!("{} file detected", label),
+                        format!("Found {} file: {}", label, entry.path().to_string_lossy()),
+                    )
+                    .with_size(size),
+                );
+            }
+        }
+
+        results
+    }
+
+    /// Walk `root` (pruning `skip_dirs`) and find build-artifact directories
+    /// (node_modules, target, __pycache__, etc.). When a match is found the
+    /// directory is pruned (we don't descend into it) to avoid wasted work.
+    /// Returns (items_scanned, findings).
+    fn sweep_build_artifact_dirs(root: &std::path::Path, skip_dirs: &[PathBuf]) -> (u64, Vec<Finding>) {
+        let mut items = 0u64;
+        let mut findings = Vec::new();
+
+        for entry in WalkDir::new(root)
+            .follow_links(false)
+            .into_iter()
+            .filter_entry(|e| {
+                // Prune skip dirs.
+                if Self::is_in_skip_dir(e.path(), skip_dirs) {
+                    return false;
+                }
+                // Prune build-artifact dirs themselves — we report them but
+                // don't descend into them.
+                if e.file_type().is_dir() {
+                    let name = e.file_name().to_string_lossy();
+                    if BUILD_ARTIFACT_DIRS.contains(&name.as_ref()) {
+                        return false;
+                    }
+                }
+                true
+            })
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_dir())
+        {
+            let name = entry.file_name().to_string_lossy();
+            if BUILD_ARTIFACT_DIRS.contains(&name.as_ref()) {
+                items += 1;
+                let path = entry.path();
+                let size = CleanScanner::dir_size(path);
+                if size > 0 {
+                    findings.push(
+                        Finding::new(
+                            EngineId::Clean,
+                            Severity::Medium,
+                            Category::BuildArtifact,
+                            Target::Path(path.to_path_buf()),
+                            format!("Build artifact directory: {}", name),
+                            format!("Found '{}' directory with size {} — regenerated on next build", name, crate::util::disk::format_bytes(size)),
+                        )
+                        .with_size(size)
+                        .with_hint(format!("Safe to delete: rm -rf '{}'", path.to_string_lossy())),
+                    );
+                }
+            }
+        }
+
+        (items, findings)
+    }
+
+    /// Walk `root` (pruning `skip_dirs` and build-artifact dirs) and find
+    /// compiled artifact files (.pyc, .o, .so, .class, etc.). Returns
+    /// (items_scanned, findings).
+    fn sweep_build_artifact_files(root: &std::path::Path, skip_dirs: &[PathBuf]) -> (u64, Vec<Finding>) {
+        let mut items = 0u64;
+        let mut findings = Vec::new();
+
+        for entry in WalkDir::new(root)
+            .follow_links(false)
+            .into_iter()
+            .filter_entry(|e| {
+                if Self::is_in_skip_dir(e.path(), skip_dirs) {
+                    return false;
+                }
+                if e.file_type().is_dir() {
+                    let name = e.file_name().to_string_lossy();
+                    if BUILD_ARTIFACT_DIRS.contains(&name.as_ref()) {
+                        return false;
+                    }
+                }
+                true
+            })
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_file())
+        {
+            let name = entry.file_name().to_string_lossy();
+            if BUILD_ARTIFACT_FILE_PATTERNS.iter().any(|p| name.ends_with(p)) {
+                items += 1;
+                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                findings.push(
+                    Finding::new(
+                        EngineId::Clean,
+                        Severity::Low,
+                        Category::BuildArtifact,
+                        Target::Path(entry.path().to_path_buf()),
+                        format!("Build artifact file: {}", name),
+                        format!("Found compiled artifact '{}' ({}). Regenerated on next build.", entry.path().to_string_lossy(), crate::util::disk::format_bytes(size)),
+                    )
+                    .with_size(size)
+                    .with_hint("Safe to delete — regenerated by the compiler/build tool".to_string()),
+                );
+            }
+        }
+
+        (items, findings)
+    }
+
+    /// Check whether `path` is inside any of the `skip_dirs`.
+    fn is_in_skip_dir(path: &std::path::Path, skip_dirs: &[PathBuf]) -> bool {
+        let path_str = path.to_string_lossy();
+        for skip in skip_dirs {
+            let skip_str = skip.to_string_lossy();
+            if path_str == skip_str || path_str.starts_with(&*format!("{}/", skip_str)) {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 #[async_trait]
@@ -311,7 +710,7 @@ impl Engine for CleanEngine {
     }
 
     fn description(&self) -> &'static str {
-        "Detects bloat: caches, logs, Xcode artifacts, and orphan files"
+        "Detects bloat: caches, logs, Xcode artifacts, build artifacts, temp files, and orphan files"
     }
 
     async fn validate(&self, _ctx: &ScanContext) -> std::result::Result<(), EngineError> {
@@ -355,6 +754,40 @@ impl Engine for CleanEngine {
             }
         }
 
+        if self.args.pkg_caches {
+            let (pkg_findings, pkg_items) = self.scan_pkg_caches(&ctx).await;
+            items_scanned += pkg_items;
+            findings_count += pkg_findings.len() as u64;
+            for finding in pkg_findings {
+                ctx.emit(finding).await;
+            }
+        }
+
+        if self.args.temp {
+            let (temp_findings, temp_items) = self.scan_temp_files(&ctx).await;
+            items_scanned += temp_items;
+            findings_count += temp_findings.len() as u64;
+            for finding in temp_findings {
+                ctx.emit(finding).await;
+            }
+        }
+
+        if self.args.build_artifacts {
+            let (build_findings, build_items) = self.scan_build_artifacts(&ctx).await;
+            items_scanned += build_items;
+            findings_count += build_findings.len() as u64;
+            for finding in build_findings {
+                ctx.emit(finding).await;
+            }
+        }
+
+        let (log_findings, log_items) = self.scan_rotated_logs(&ctx).await;
+        items_scanned += log_items;
+        findings_count += log_findings.len() as u64;
+        for finding in log_findings {
+            ctx.emit(finding).await;
+        }
+
         Ok(EngineStats {
             engine: self.id(),
             duration: start.elapsed(),
@@ -372,6 +805,9 @@ impl Default for CleanEngine {
             min_size: "1M".to_string(),
             dedup: false,
             xcode: true,
+            pkg_caches: true,
+            temp: true,
+            build_artifacts: true,
             paths: Vec::new(),
         })
     }

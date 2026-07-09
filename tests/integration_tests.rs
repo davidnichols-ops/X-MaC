@@ -536,4 +536,158 @@ mod tests {
             _ => panic!("Expected All command"),
         }
     }
+
+    // -- new clean categories: temp, build artifacts, pkg caches -----------
+
+    #[test]
+    fn test_cli_clean_new_flags_default_true() {
+        let args = vec!["x-mac", "clean"];
+        let cli = x_mac::cli::args::Cli::parse_from(args);
+
+        match cli.command {
+            x_mac::cli::args::Commands::Clean(clean_args) => {
+                assert!(clean_args.pkg_caches);
+                assert!(clean_args.temp);
+                assert!(clean_args.build_artifacts);
+            }
+            _ => panic!("Expected Clean command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_clean_disable_build_artifacts() {
+        let args = vec!["x-mac", "clean", "--build-artifacts", "false"];
+        let cli = x_mac::cli::args::Cli::parse_from(args);
+
+        match cli.command {
+            x_mac::cli::args::Commands::Clean(clean_args) => {
+                assert!(!clean_args.build_artifacts);
+            }
+            _ => panic!("Expected Clean command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_clean_disable_temp() {
+        let args = vec!["x-mac", "clean", "--temp", "false"];
+        let cli = x_mac::cli::args::Cli::parse_from(args);
+
+        match cli.command {
+            x_mac::cli::args::Commands::Clean(clean_args) => {
+                assert!(!clean_args.temp);
+            }
+            _ => panic!("Expected Clean command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_clean_disable_pkg_caches() {
+        let args = vec!["x-mac", "clean", "--pkg-caches", "false"];
+        let cli = x_mac::cli::args::Cli::parse_from(args);
+
+        match cli.command {
+            x_mac::cli::args::Commands::Clean(clean_args) => {
+                assert!(!clean_args.pkg_caches);
+            }
+            _ => panic!("Expected Clean command"),
+        }
+    }
+
+    #[test]
+    fn test_new_category_serialization() {
+        for category in [
+            x_mac::core::types::Category::TempFile,
+            x_mac::core::types::Category::BuildArtifact,
+            x_mac::core::types::Category::PackageManagerCache,
+        ] {
+            let finding = x_mac::core::types::Finding::new(
+                x_mac::core::types::EngineId::Clean,
+                x_mac::core::types::Severity::Low,
+                category,
+                x_mac::core::types::Target::Path(PathBuf::from("/test")),
+                "Test",
+                "desc",
+            );
+            let json = serde_json::to_string(&finding).expect("serialize");
+            let de: x_mac::core::types::Finding = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(de.category, category);
+        }
+    }
+
+    #[test]
+    fn test_fix_script_handles_build_artifact() {
+        use x_mac::cli::fix_script::FixScriptGenerator;
+        let f = x_mac::core::types::Finding::new(
+            x_mac::core::types::EngineId::Clean,
+            x_mac::core::types::Severity::Medium,
+            x_mac::core::types::Category::BuildArtifact,
+            x_mac::core::types::Target::Path(PathBuf::from("/home/proj/node_modules")),
+            "Build artifact directory: node_modules",
+            "desc",
+        );
+        let script = FixScriptGenerator::build_script(&[f]);
+        assert!(script.contains("# rm -rf -- '/home/proj/node_modules'"));
+        assert!(script.contains("Build artifacts"));
+    }
+
+    #[test]
+    fn test_fix_script_handles_pkg_cache() {
+        use x_mac::cli::fix_script::FixScriptGenerator;
+        let f = x_mac::core::types::Finding::new(
+            x_mac::core::types::EngineId::Clean,
+            x_mac::core::types::Severity::Low,
+            x_mac::core::types::Category::PackageManagerCache,
+            x_mac::core::types::Target::Path(PathBuf::from("/home/.npm/_cacache")),
+            "Package-manager cache detected",
+            "desc",
+        );
+        let script = FixScriptGenerator::build_script(&[f]);
+        assert!(script.contains("# rm -rf -- '/home/.npm/_cacache'"));
+        assert!(script.contains("Package-manager caches"));
+    }
+
+    #[test]
+    fn test_fix_script_handles_temp_file() {
+        use x_mac::cli::fix_script::FixScriptGenerator;
+        let f = x_mac::core::types::Finding::new(
+            x_mac::core::types::EngineId::Clean,
+            x_mac::core::types::Severity::Low,
+            x_mac::core::types::Category::TempFile,
+            x_mac::core::types::Target::Path(PathBuf::from("/private/tmp")),
+            "System temp directory",
+            "desc",
+        );
+        let script = FixScriptGenerator::build_script(&[f]);
+        assert!(script.contains("# rm -rf -- '/private/tmp'"));
+        assert!(script.contains("Temp files"));
+    }
+
+    #[test]
+    fn test_clean_engine_default_has_new_flags() {
+        let engine = x_mac::engines::CleanEngine::default();
+        // Just validate it constructs — the flags are exercised at scan time.
+        assert_eq!(engine.id(), x_mac::core::types::EngineId::Clean);
+    }
+
+    #[test]
+    fn test_build_artifact_dirs_constant() {
+        use x_mac::engines::clean::rules::BUILD_ARTIFACT_DIRS;
+        assert!(BUILD_ARTIFACT_DIRS.contains(&"node_modules"));
+        assert!(BUILD_ARTIFACT_DIRS.contains(&"target"));
+        assert!(BUILD_ARTIFACT_DIRS.contains(&"__pycache__"));
+    }
+
+    #[test]
+    fn test_build_artifact_file_patterns_constant() {
+        use x_mac::engines::clean::rules::BUILD_ARTIFACT_FILE_PATTERNS;
+        assert!(BUILD_ARTIFACT_FILE_PATTERNS.contains(&".pyc"));
+        assert!(BUILD_ARTIFACT_FILE_PATTERNS.contains(&".o"));
+    }
+
+    #[test]
+    fn test_rotated_log_extensions_constant() {
+        use x_mac::engines::clean::rules::ROTATED_LOG_EXTENSIONS;
+        assert!(ROTATED_LOG_EXTENSIONS.contains(&".gz"));
+        assert!(ROTATED_LOG_EXTENSIONS.contains(&".bz2"));
+    }
 }

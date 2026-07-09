@@ -129,10 +129,25 @@ Detects reclaimable disk space:
 - Cache files (aged + size-filtered)
 - Xcode DerivedData, Archives, iOS DeviceSupport
 - Orphaned Application Support directories (matched by app bundle name and bundle ID)
+- Package-manager caches (npm, pip, cargo, Homebrew, go, gradle, maven)
+- Temp files (`/tmp`, `/var/tmp`, `.DS_Store`, editor swap files)
+- Build artifacts (`node_modules`, `target`, `__pycache__`, `dist`, `build`, `.pyc`, `.o`, etc.)
+- Rotated log files (`*.gz`, `*.bz2`, `*.0`, etc. in `/var/log` and `~/Library/Logs`)
 - Duplicate files via BLAKE3 hashing (opt-in with `--dedup`)
+
+Build-artifact and temp-file sweeps are scoped to the home directory and skip
+editor extensions (`.cursor`, `.windsurf`, `.vscode`), toolchain binaries
+(`.cargo/bin`, `.rustup`), and system paths (`/System`, `/usr`) to avoid
+breaking installed software.
 
 ```bash
 xmac clean --min-age 30d --min-size 1M --dedup ~/Downloads
+
+# Disable specific clean categories
+xmac clean --build-artifacts false --temp false
+
+# Only scan package-manager caches
+xmac clean --xcode false --temp false --build-artifacts false --dedup
 ```
 
 ### Conflict
