@@ -58,18 +58,27 @@ impl MaintainEngine {
 
     async fn task_reindex_spotlight(&self, ctx: &ScanContext) -> (Vec<Finding>, u64) {
         let mut findings = Vec::new();
+        // mdutil -E / requires root on most macOS versions.
+        // Try without sudo first; if it fails, emit as a sudo-required finding.
         let (ok, msg) = Self::run_command("mdutil", &["-E", "/"]);
+        let needs_sudo = !ok && (msg.contains("Try as root") || msg.contains("Operation not permitted"));
 
         findings.push(
             Finding::new(
                 EngineId::All,
-                if ok { Severity::Info } else { Severity::Medium },
+                if ok { Severity::Info } else if needs_sudo { Severity::Low } else { Severity::Medium },
                 Category::SystemMaintenance,
                 Target::Path(std::path::PathBuf::from("/")),
                 "Spotlight reindex",
-                if ok { "Spotlight reindex initiated for /".to_string() } else { format!("Spotlight reindex failed: {}", msg) },
+                if ok {
+                    "Spotlight reindex initiated for /".to_string()
+                } else if needs_sudo {
+                    "Spotlight reindex requires sudo — skipped (run manually if needed)".to_string()
+                } else {
+                    format!("Spotlight reindex failed: {}", msg)
+                },
             )
-            .with_hint("mdutil -E /".to_string()),
+            .with_hint("sudo mdutil -E /  # requires root".to_string()),
         );
         ctx.emit(findings[0].clone()).await;
         (findings, 1)
@@ -77,9 +86,17 @@ impl MaintainEngine {
 
     async fn task_rebuild_launchservices(&self, ctx: &ScanContext) -> (Vec<Finding>, u64) {
         let mut findings = Vec::new();
-        // Rebuild the LaunchServices database via lsregister
+        // Rebuild the LaunchServices database via lsregister.
+        // The -kill flag was removed in macOS 15+. Use -r -domain args without -kill.
         let lsregister = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
-        let (ok, msg) = Self::run_command(lsregister, &["-kill", "-r", "-domain", "local", "-domain", "system", "-domain", "user"]);
+        // Try without -kill first (works on macOS 15+), fall back to -kill for older macOS
+        let (ok, msg) = Self::run_command(lsregister, &["-r", "-domain", "local", "-domain", "system", "-domain", "user"]);
+        let (ok, msg) = if ok {
+            (true, msg)
+        } else {
+            // Try with -kill for older macOS versions
+            Self::run_command(lsregister, &["-kill", "-r", "-domain", "local", "-domain", "system", "-domain", "user"])
+        };
 
         findings.push(
             Finding::new(
@@ -90,7 +107,7 @@ impl MaintainEngine {
                 "LaunchServices database rebuild",
                 if ok { "LaunchServices database rebuilt".to_string() } else { format!("LaunchServices rebuild failed: {}", msg) },
             )
-            .with_hint("lsregister -kill -r -domain local -domain system -domain user".to_string()),
+            .with_hint("lsregister -r -domain local -domain system -domain user".to_string()),
         );
         ctx.emit(findings[0].clone()).await;
         (findings, 1)
@@ -99,6 +116,31 @@ impl MaintainEngine {
     async fn task_run_periodic(&self, ctx: &ScanContext) -> (Vec<Finding>, u64) {
         let mut findings = Vec::new();
         let mut items = 0u64;
+
+        // Check if the periodic command exists at all
+        let periodic_exists = std::process::Command::new("which")
+            .arg("periodic")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+
+        if !periodic_exists {
+            // periodic not available — emit a single informational finding
+            items = 1;
+            findings.push(
+                Finding::new(
+                    EngineId::All,
+                    Severity::Low,
+                    Category::SystemMaintenance,
+                    Target::Path(std::path::PathBuf::from("/etc/periodic")),
+                    "Periodic scripts",
+                    "The `periodic` command is not available on this system. Maintenance scripts may be handled by launchd instead.".to_string(),
+                )
+                .with_hint("sudo periodic daily weekly monthly  # if available".to_string()),
+            );
+            ctx.emit(findings[0].clone()).await;
+            return (findings, items);
+        }
 
         for script in &["daily", "weekly", "monthly"] {
             items += 1;

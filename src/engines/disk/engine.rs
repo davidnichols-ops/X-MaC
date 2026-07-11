@@ -11,6 +11,92 @@ use crate::core::error::EngineError;
 use crate::core::types::{Category, EngineId, EngineStats, Finding, Severity, Target};
 use crate::util::disk::physical_size;
 
+/// Disk volume breakdown: total container capacity, free space,
+/// system-volume used, and data-volume used — queried via `diskutil info`
+/// for accuracy on APFS (statvfs on the snapshot root is unreliable).
+struct ApfsStats {
+    /// Total APFS container capacity in bytes.
+    total: u64,
+    /// APFS container free space in bytes.
+    free: u64,
+    /// macOS system volume used bytes (Macintosh HD, read-only sealed).
+    system_used: u64,
+    /// User data volume used bytes (the writable "Data" volume).
+    data_used: u64,
+    /// Size of /Applications directory in bytes (best-effort).
+    applications_used: u64,
+}
+
+fn apfs_stats() -> Option<ApfsStats> {
+    // Ask diskutil for the APFS container that hosts the boot volume.
+    // We parse the output of `diskutil list -plist disk3` (or whichever
+    // identifier hosts the boot volume) but the simplest cross-machine
+    // approach is to call `diskutil info -plist /` and `diskutil info -plist /System/Volumes/Data`.
+    use std::process::Command;
+
+    fn parse_bytes(plist_output: &str, key: &str) -> Option<u64> {
+        // Extremely lightweight plist key extraction — avoids pulling in
+        // a full plist parser for two integer values.
+        let needle = format!("<key>{}</key>", key);
+        let pos = plist_output.find(&needle)?;
+        let after = &plist_output[pos + needle.len()..];
+        let int_start = after.find("<integer>")? + "<integer>".len();
+        let int_end = after.find("</integer>")?;
+        after[int_start..int_end].trim().parse::<u64>().ok()
+    }
+
+    // / is the sealed system snapshot. /System/Volumes/Data is the writable data volume.
+    let root_plist = Command::new("diskutil")
+        .args(["info", "-plist", "/"])
+        .output()
+        .ok()?;
+    let data_plist = Command::new("diskutil")
+        .args(["info", "-plist", "/System/Volumes/Data"])
+        .output()
+        .ok()?;
+
+    let root_str = String::from_utf8_lossy(&root_plist.stdout);
+    let data_str = String::from_utf8_lossy(&data_plist.stdout);
+
+    // Container free is authoritative from either volume.
+    let container_free = parse_bytes(&root_str, "APFSContainerFree")
+        .or_else(|| parse_bytes(&data_str, "APFSContainerFree"))?;
+    let container_total = parse_bytes(&root_str, "APFSContainerSize")
+        .or_else(|| parse_bytes(&root_str, "TotalSize"))
+        .or_else(|| parse_bytes(&data_str, "APFSContainerSize"))?;
+
+    // "CapacityInUse" is the actual bytes used by this APFS volume.
+    let system_used = parse_bytes(&root_str, "CapacityInUse").unwrap_or(0);
+    let data_used   = parse_bytes(&data_str, "CapacityInUse").unwrap_or(0);
+
+    // Best-effort: sum physical sizes of /Applications and /System/Applications.
+    let applications_used = dir_size_fast(std::path::Path::new("/Applications"))
+        + dir_size_fast(std::path::Path::new("/System/Applications"));
+
+    Some(ApfsStats {
+        total: container_total,
+        free: container_free,
+        system_used,
+        data_used,
+        applications_used,
+    })
+}
+
+/// Quick physical size sum (no recursion limit) — used only for /Applications.
+fn dir_size_fast(path: &std::path::Path) -> u64 {
+    if !path.exists() {
+        return 0;
+    }
+    WalkDir::new(path)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .filter_map(|e| e.metadata().ok())
+        .map(physical_size)
+        .sum()
+}
+
 /// The disk engine analyzes disk usage and emits findings for the top
 /// largest directories and files under the given paths. Unlike the clean
 /// engine, these findings are informational (Severity::Info) — they help
@@ -77,6 +163,48 @@ impl Engine for DiskEngine {
         } else {
             self.args.paths.clone()
         };
+
+        // Emit a volume-level summary finding so the GUI can render the
+        // full disk donut chart (total / system / data / free / apps)
+        // without needing a separate API call.
+        if let Some(stats) = apfs_stats() {
+            let total_known_used = stats.system_used + stats.data_used;
+            let vol_finding = Finding::new(
+                EngineId::All,
+                Severity::Info,
+                Category::SystemInfo,
+                Target::Path(std::path::PathBuf::from("/")),
+                format!("Volume: {} total, {} used, {} free",
+                    crate::util::disk::format_bytes(stats.total),
+                    crate::util::disk::format_bytes(total_known_used),
+                    crate::util::disk::format_bytes(stats.free)),
+                format!("Macintosh HD — {} total capacity, {} data + {} system used, {} available",
+                    crate::util::disk::format_bytes(stats.total),
+                    crate::util::disk::format_bytes(stats.data_used),
+                    crate::util::disk::format_bytes(stats.system_used),
+                    crate::util::disk::format_bytes(stats.free)),
+            )
+            .with_size(total_known_used)
+            // Rich JSON so Swift can build accurate donut segments:
+            // volume_total  — APFS container total bytes
+            // volume_used   — system + data combined (for the "used%" centre label)
+            // volume_free   — APFS container free bytes
+            // volume_system — macOS sealed system volume bytes
+            // volume_data   — writable Data volume bytes (home + apps + etc)
+            // volume_apps   — /Applications physical size (subset of data)
+            .with_hint(format!(
+                "{{\"volume_total\":{},\"volume_used\":{},\"volume_free\":{},\
+                 \"volume_system\":{},\"volume_data\":{},\"volume_apps\":{}}}",
+                stats.total,
+                total_known_used,
+                stats.free,
+                stats.system_used,
+                stats.data_used,
+                stats.applications_used,
+            ));
+            ctx.emit(vol_finding).await;
+            findings_count += 1;
+        }
 
         for search_path in &search_paths {
             if !search_path.exists() {

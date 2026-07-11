@@ -5,6 +5,7 @@ use std::time::Instant;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
+mod cleanup;
 mod cli;
 mod core;
 mod engines;
@@ -77,12 +78,19 @@ async fn main() -> Result<()> {
             let engine = engines::disk::DiskEngine::new(args.clone());
             vec![engine.run(ctx.clone()).await]
         }
+        cli::args::Commands::Graph(args) => {
+            let engine = engines::graph::GraphEngine::new(args.clone());
+            vec![engine.run(ctx.clone()).await]
+        }
         cli::args::Commands::All(args) => {
             run_all_engines(ctx.clone(), args).await
         }
         cli::args::Commands::Install(args) => {
             // Handle install before the scan pipeline — it doesn't scan.
             return run_install(&cli, args);
+        }
+        cli::args::Commands::Purge(args) => {
+            return run_purge(&cli, args).await;
         }
     };
 
@@ -315,6 +323,111 @@ fn run_install(cli: &Cli, args: &cli::args::InstallArgs) -> Result<()> {
 /// Check if --quiet was passed (used by run_install which exits early).
 fn cli_quiet(cli: &Cli) -> bool {
     cli.global.quiet
+}
+
+/// The `purge` command — runs a clean scan, builds a transactional plan, and
+/// executes it with full safety checks and undo metadata.
+async fn run_purge(cli: &Cli, args: &cli::args::PurgeArgs) -> Result<()> {
+    use cli::args::PurgeCategoryArg;
+    use cleanup::{CleanupExecutor, CleanupPolicy};
+
+    let mut policy = CleanupPolicy::safe();
+    if args.force_review {
+        policy.allow_trash_overrides = true;
+    }
+
+    // 1. Run the clean scan to produce findings.
+    let clean_args = cli::args::CleanArgs {
+        min_age: args.min_age.clone(),
+        min_size: args.min_size.clone(),
+        ..engines::clean::CleanEngine::default_args()
+    };
+
+    let (tx, mut rx) = mpsc::channel::<Finding>(1000);
+    let ctx = Arc::new(ScanContext::new(cli, tx).await?);
+    let clean_engine = engines::clean::CleanEngine::new(clean_args);
+    let _ = clean_engine.run(ctx.clone()).await;
+
+    drop(ctx);
+    let mut findings = Vec::new();
+    while let Some(finding) = rx.recv().await {
+        findings.push(finding);
+    }
+
+    // 2. Optionally filter to selected categories.
+    if !args.category.is_empty() {
+        let allowed: Vec<crate::core::types::Category> = args
+            .category
+            .iter()
+            .map(|c| match c {
+                PurgeCategoryArg::Cache => crate::core::types::Category::Cache,
+                PurgeCategoryArg::TempFile => crate::core::types::Category::TempFile,
+                PurgeCategoryArg::BuildArtifact => crate::core::types::Category::BuildArtifact,
+                PurgeCategoryArg::PackageManagerCache => crate::core::types::Category::PackageManagerCache,
+                PurgeCategoryArg::BrowserCache => crate::core::types::Category::BrowserCache,
+                PurgeCategoryArg::Log => crate::core::types::Category::Log,
+                PurgeCategoryArg::TrashBin => crate::core::types::Category::TrashBin,
+                PurgeCategoryArg::XcodeArtifact => crate::core::types::Category::XcodeArtifact,
+                PurgeCategoryArg::OrphanFile => crate::core::types::Category::OrphanFile,
+                PurgeCategoryArg::LargeFile => crate::core::types::Category::LargeFile,
+                PurgeCategoryArg::DuplicateFile => crate::core::types::Category::DuplicateFile,
+                PurgeCategoryArg::MailAttachment => crate::core::types::Category::MailAttachment,
+                PurgeCategoryArg::IosBackup => crate::core::types::Category::IosBackup,
+                PurgeCategoryArg::LanguageFile => crate::core::types::Category::LanguageFile,
+                PurgeCategoryArg::DocumentVersion => crate::core::types::Category::DocumentVersion,
+                PurgeCategoryArg::UniversalBinary => crate::core::types::Category::UniversalBinary,
+            })
+            .collect();
+        findings.retain(|f| allowed.contains(&f.category));
+    }
+
+    // 3. Build and execute the plan.
+    let executor = CleanupExecutor::new(policy, args.dry_run);
+    let plan = executor.plan(&findings);
+    let mut executor = executor;
+    let transaction = executor.execute(&plan);
+
+    // 4. Output the transaction record.
+    if cli.global.format == OutputFormat::Json || cli.global.format == OutputFormat::JsonPretty {
+        let json = match cli.global.format {
+            OutputFormat::JsonPretty => serde_json::to_string_pretty(&transaction)?,
+            _ => serde_json::to_string(&transaction)?,
+        };
+        println!("{}", json);
+    } else {
+        let mode = if args.dry_run { "DRY RUN" } else { "LIVE" };
+        eprintln!("X-MaC purge ({}) — transaction {}", mode, transaction.id);
+        eprintln!("  Candidates:  {}", plan.candidates.len());
+        eprintln!("  Executable:  {}", plan.executable().len());
+        eprintln!("  Blocked:     {}", plan.blocked().len());
+        eprintln!(
+            "  Reclaimable: {}",
+            crate::util::disk::format_bytes(plan.total_reclaimable_bytes())
+        );
+        eprintln!("  Succeeded:   {}", transaction.successful_count());
+        eprintln!(
+            "  Reclaimed:   {}",
+            crate::util::disk::format_bytes(transaction.successful_bytes())
+        );
+        for action in &transaction.actions {
+            let status = if action.success { "OK" } else { "SKIP" };
+            eprintln!(
+                "  [{}] {} -> {}",
+                status,
+                action.original_path.display(),
+                action
+                    .trashed_path
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|| "-".to_string())
+            );
+            if let Some(err) = &action.error {
+                eprintln!("       error: {}", err);
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// The `quick` command — one-shot cleanup scan + maintenance + disk breakdown.

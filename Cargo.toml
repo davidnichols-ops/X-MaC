@@ -1,6 +1,6 @@
 [package]
 name = "x-mac"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 authors = ["X-MaC Contributors"]
 description = "macOS system sanitizer & discovery tool"
@@ -42,6 +42,7 @@ blake3 = "1.5"
 uuid = { version = "1.10", features = ["v7", "serde"] }
 
 async-trait = "0.1"
+libc = "0.2"
 
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

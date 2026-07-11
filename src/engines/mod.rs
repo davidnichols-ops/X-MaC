@@ -3,6 +3,7 @@ pub mod conflict;
 pub mod diag;
 pub mod disk;
 pub mod envmap;
+pub mod graph;
 pub mod maintain;
 pub mod map;
 pub mod depth;
@@ -17,6 +18,8 @@ pub use diag::DiagEngine;
 pub use disk::DiskEngine;
 #[allow(unused_imports)]
 pub use envmap::EnvmapEngine;
+#[allow(unused_imports)]
+pub use graph::GraphEngine;
 #[allow(unused_imports)]
 pub use maintain::MaintainEngine;
 #[allow(unused_imports)]

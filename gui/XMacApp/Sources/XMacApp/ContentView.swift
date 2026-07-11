@@ -1,0 +1,212 @@
+import SwiftUI
+
+struct ContentView: View {
+    @EnvironmentObject var runner: XMacRunner
+    @EnvironmentObject var settings: AppSettings
+    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding: Bool = false
+
+    var body: some View {
+        NavigationSplitView {
+            SidebarView()
+                .navigationSplitViewColumnWidth(min: 220, ideal: 240)
+        } detail: {
+            switch runner.scanMode {
+            case .dashboard, .idle:
+                DashboardView()
+            case .full:
+                FullScanView()
+            case .clean:
+                CleanView()
+            case .maintain:
+                MaintainView()
+            case .disk:
+                DiskView()
+            case .neural:
+                NeuralScanView()
+            case .apps:
+                AppInventoryView()
+            case .settings:
+                SettingsView()
+            case .history:
+                ScanHistoryView()
+            case .automation:
+                AutomationView()
+            }
+        }
+        .frame(minWidth: 1100, minHeight: 720)
+        .background(XTheme.bgPrimary)
+        .overlay(
+            Group {
+                if !hasCompletedOnboarding {
+                    OnboardingView(
+                        onComplete: { hasCompletedOnboarding = true },
+                        onQuickScan: { hasCompletedOnboarding = true; runner.startCleanScan() }
+                    )
+                    .transition(.opacity)
+                    .animation(.easeInOut(duration: 0.4), value: hasCompletedOnboarding)
+                }
+            }
+        )
+    }
+}
+
+struct SidebarView: View {
+    @EnvironmentObject var runner: XMacRunner
+
+    var body: some View {
+        VStack(spacing: 4) {
+            // Logo
+            HStack(spacing: 10) {
+                Image(systemName: "cpu")
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundStyle(XTheme.accent)
+                Text("X-MaC")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(XTheme.textPrimary)
+            }
+            .padding(.vertical, 16)
+
+            Divider().background(XTheme.cardBorder)
+
+            let scanning = runner.isScanning
+
+            NavButton(icon: "rectangle.grid.2x2", label: "Overview", isActive: runner.scanMode == .dashboard || runner.scanMode == .idle, disabled: scanning) {
+                runner.openDashboard()
+            }
+            NavButton(icon: "sparkles", label: "Smart Scan", isActive: runner.scanMode == .full, disabled: scanning) {
+                runner.startFullScan()
+            }
+            NavButton(icon: "wand.and.stars", label: "Neural Scan", isActive: runner.scanMode == .neural, disabled: scanning) {
+                runner.startNeuralScan()
+            }
+            NavButton(icon: "trash.circle", label: "Clean", isActive: runner.scanMode == .clean, disabled: scanning) {
+                runner.startCleanScan()
+            }
+            NavButton(icon: "wrench.and.screwdriver", label: "Maintain", isActive: runner.scanMode == .maintain, disabled: scanning) {
+                runner.startMaintainScan()
+            }
+            NavButton(icon: "internaldrive", label: "Disk Usage", isActive: runner.scanMode == .disk, disabled: scanning) {
+                runner.startDiskScan()
+            }
+            NavButton(icon: "app.badge", label: "Applications", isActive: runner.scanMode == .apps, disabled: scanning) {
+                runner.openApps()
+            }
+
+            Spacer()
+
+            if scanning {
+                ScanProgressMini(phase: runner.scanPhase, progress: runner.scanProgress)
+            }
+
+            NavButton(icon: "clock.arrow.circlepath", label: "History", isActive: runner.scanMode == .history, disabled: scanning) {
+                runner.openHistory()
+            }
+            NavButton(icon: "gearshape.2", label: "Automation", isActive: runner.scanMode == .automation, disabled: scanning) {
+                runner.openAutomation()
+            }
+            NavButton(icon: "gearshape", label: "Settings", isActive: runner.scanMode == .settings, disabled: scanning) {
+                runner.openSettings()
+            }
+        }
+        .padding(.horizontal, 12)
+        .background(XTheme.bgSecondary)
+    }
+}
+
+struct ScanProgressMini: View {
+    @EnvironmentObject var runner: XMacRunner
+    let phase: String
+    let progress: Double
+
+    var body: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                ProgressView()
+                    .scaleEffect(0.7)
+                Text(phase)
+                    .font(.system(size: 11))
+                    .foregroundStyle(XTheme.textSecondary)
+                    .lineLimit(2)
+                Spacer()
+                Button("Stop") {
+                    runner.stopScan()
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.mini)
+                .tint(XTheme.danger)
+            }
+            ProgressView(value: progress)
+                .tint(XTheme.accent)
+                .scaleEffect(y: 0.6)
+        }
+        .padding(12)
+        .background(XTheme.cardBg)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .padding(.bottom, 8)
+    }
+}
+
+struct NavButton: View {
+    let icon: String
+    let label: String
+    let isActive: Bool
+    let disabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: disabled ? {} : action) {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(foregroundColor)
+                    .frame(width: 20)
+                Text(label)
+                    .font(.system(size: 13, weight: isActive ? .semibold : .regular))
+                    .foregroundStyle(foregroundColor)
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(isActive && !disabled ? XTheme.accent.opacity(0.12) : Color.clear)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .opacity(disabled ? 0.5 : 1.0)
+        .accessibilityLabel(label)
+    }
+
+    private var foregroundColor: Color {
+        if disabled { return XTheme.textTertiary }
+        return isActive ? XTheme.accent : XTheme.textSecondary
+    }
+}
+
+struct WelcomeView: View {
+    var body: some View {
+        VStack(spacing: 24) {
+            Spacer()
+
+            Image(systemName: "cpu")
+                .font(.system(size: 64, weight: .light))
+                .foregroundStyle(XTheme.accent)
+                .xGlow()
+
+            Text("X-MaC")
+                .font(.system(size: 32, weight: .bold))
+                .foregroundStyle(XTheme.textPrimary)
+
+            Text("macOS cleaner, optimizer, and system scanner")
+                .font(.system(size: 14))
+                .foregroundStyle(XTheme.textSecondary)
+
+            Text("Select a scan mode from the sidebar to begin.")
+                .font(.system(size: 13))
+                .foregroundStyle(XTheme.textTertiary)
+
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(XTheme.bgPrimary)
+    }
+}

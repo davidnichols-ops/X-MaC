@@ -144,6 +144,17 @@ pub enum Commands {
     /// Like CleanMyMac's Space Lens or Cleaner One Pro's Disk Map.
     Disk(DiskArgs),
 
+    /// Extract a file system graph for GNN training and inference. Emits
+    /// nodes (files/dirs with features) and edges (parent-child, symlink,
+    /// dependency) as JSON. The graph can be consumed by a Graph Neural
+    /// Network for intelligent cleanup scoring.
+    Graph(GraphArgs),
+
+    /// Execute a reviewed cleanup plan: move selected categories to Trash
+    /// with full safety validation, undo metadata, and verification. This is
+    /// the only subcommand that modifies the filesystem.
+    Purge(PurgeArgs),
+
     /// Install xmac to a directory on your PATH so it runs from anywhere.
     Install(InstallArgs),
 }
@@ -162,6 +173,8 @@ impl Commands {
             Commands::All(_) => crate::core::types::EngineId::All,
             Commands::Maintain(_) => crate::core::types::EngineId::All,
             Commands::Disk(_) => crate::core::types::EngineId::All,
+            Commands::Graph(_) => crate::core::types::EngineId::All,
+            Commands::Purge(_) => crate::core::types::EngineId::Clean,
             Commands::Install(_) => crate::core::types::EngineId::All,
         }
     }
@@ -475,5 +488,72 @@ pub struct DiskArgs {
     /// Directory to analyze (defaults to home).
     #[arg(value_name = "PATH")]
     pub paths: Vec<PathBuf>,
+}
+
+/// Arguments for the `graph` command — file system graph extraction.
+#[derive(Args, Debug, Clone)]
+pub struct GraphArgs {
+    /// Maximum directory depth to walk (safety limit).
+    #[arg(long, default_value = "15")]
+    pub max_depth: usize,
+
+    /// Maximum number of nodes to extract (safety limit).
+    #[arg(long, default_value = "50000")]
+    pub max_nodes: usize,
+
+    /// Directory to write graph JSON files to. If not specified, graph data
+    /// is emitted as metadata in findings (use --format json to see it).
+    #[arg(long, value_name = "DIR")]
+    pub output_graph: Option<PathBuf>,
+
+    /// Directory to extract graph from (defaults to home directory).
+    #[arg(value_name = "PATH")]
+    pub paths: Vec<PathBuf>,
+}
+
+/// Arguments for the `purge` command — transactional cleanup.
+#[derive(Args, Debug, Clone)]
+pub struct PurgeArgs {
+    /// Show the cleanup plan without executing any destructive actions.
+    #[arg(long)]
+    pub dry_run: bool,
+
+    /// Override the default policy and allow high-risk categories such as
+    /// orphaned app support and large files. Each category still requires
+    /// an explicit `--category` selection.
+    #[arg(long)]
+    pub force_review: bool,
+
+    /// Only purge specific categories. Repeatable. Use with --dry-run first.
+    #[arg(long, value_enum)]
+    pub category: Vec<PurgeCategoryArg>,
+
+    /// Minimum file age to include in the purge (e.g. 30d, 90d).
+    #[arg(long, default_value = "30d")]
+    pub min_age: String,
+
+    /// Minimum file size to include in the purge (e.g. 1M, 100M).
+    #[arg(long, default_value = "1M")]
+    pub min_size: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum PurgeCategoryArg {
+    Cache,
+    TempFile,
+    BuildArtifact,
+    PackageManagerCache,
+    BrowserCache,
+    Log,
+    TrashBin,
+    XcodeArtifact,
+    OrphanFile,
+    LargeFile,
+    DuplicateFile,
+    MailAttachment,
+    IosBackup,
+    LanguageFile,
+    DocumentVersion,
+    UniversalBinary,
 }
 

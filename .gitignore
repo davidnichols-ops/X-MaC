@@ -1,4 +1,41 @@
-/target
-/.cargo
+# Rust
+/target/
+/.cargo/
 *.rs.bk
+Cargo.lock
+
+# Swift / Xcode
+gui/XMacApp/.build/
+gui/XMacApp/DerivedData/
+gui/staging/
+*.xcuserstate
+*.xcworkspace/xcuserdata/
+.swiftpm/
+
+# GNN / Python
+gnn/__pycache__/
+gnn/**/__pycache__/
+gnn/*.pyc
+gnn/**/*.pyc
+gnn/.venv/
+gnn/venv/
+*.pt
+*.pth
+# Keep the pre-trained CoreML model — it's needed for the build
+# gnn/XMacGNN.mlpackage  <-- intentionally tracked
+
+# macOS
 .DS_Store
+**/.DS_Store
+.Spotlight-V100
+.Trashes
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs / temp
+*.log
+/tmp/

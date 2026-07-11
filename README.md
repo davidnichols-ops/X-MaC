@@ -1,316 +1,297 @@
-# xmac
+<img src="gui/AppIcon.icns" alt="X-MaC" width="120" align="right" />
 
-macOS cleaner, optimizer, and system scanner — the CLI equivalent of CleanMyMac, OnyX, and Cleaner One Pro.
+# X-MaC
 
-All scan operations are **read-only**. Use `--fix-script` to generate a remediation shell script you can review and run.
+**macOS cleaner, optimizer, and system monitor — with on-device GNN intelligence.**
 
-## Quick Start
+> Cleaner. Smarter. Stronger.
+
+X-MaC is a free, open-source Mac cleaner that combines a fast Rust scan engine, a Graph Neural Network safety scorer, and a native SwiftUI app — all running entirely on your device. Nothing ever leaves your Mac.
+
+**[Download the latest build](#installation) · [Screenshots](#screenshots) · [Join the beta](#beta--community) · [Contribute](#contributing)**
+
+---
+
+## Why X-MaC?
+
+| | CleanMyMac | CleanerOne Pro | **X-MaC** |
+|---|:---:|:---:|:---:|
+| Free & open-source | ✗ | ✗ | ✅ |
+| On-device GNN scoring | ✗ | ✗ | ✅ |
+| Native SwiftUI app | ✓ | ✓ | ✅ |
+| Rust scan engine | ✗ | ✗ | ✅ |
+| Full disk donut chart | ✓ | ✓ | ✅ |
+| Never deletes without asking | sometimes | sometimes | ✅ always |
+| No subscription | ✗ | ✗ | ✅ |
+| CLI + GUI | ✗ | ✗ | ✅ |
+
+---
+
+## What it does
+
+X-MaC has three layers that work together:
+
+```
+┌─────────────────────────────────────────────┐
+│           SwiftUI App  (gui/)               │  ← What users see
+│  Dashboard · Disk Map · Smart Scan · Clean  │
+├─────────────────────────────────────────────┤
+│      GNN Inference Server  (gnn/)           │  ← On-device AI
+│  PyTorch graph model → CoreML on-device     │
+├─────────────────────────────────────────────┤
+│       Rust Scan Engine  (src/)              │  ← Speed + safety
+│  Clean · Disk · Maintain · Map · Depth      │
+└─────────────────────────────────────────────┘
+```
+
+### GUI features
+- **Dashboard** — action-first hero with one-tap Quick Clean, reclaimable total, and a "Recommended next step" card
+- **Disk Analyzer** — interactive donut wheel (CleanerOne Pro style) showing macOS System, Applications, named home directories, and free space with live hover tooltips
+- **Smart Scan (GNN)** — graph neural network scores every finding by safety; anomaly detection; cross-directory pattern analysis
+- **Full Scan** — select safe items, clean with confirmation, success banner
+- **Maintain** — per-task Fix buttons (Spotlight re-index, cache reveal, LaunchAgent repair)
+- **App Inventory** — maps every installed app to its leftover files, caches, and support directories
+- **History** — re-run past scans, export findings
+- **Automation** — scheduled scans, quiet hours, configurable notifications
+- **Onboarding** — first-launch animated walkthrough
+- **Crash reporter + adaptive fixer** — logs errors, auto-applies known recovery patterns
+
+### Rust CLI features
+```bash
+xmac clean       # find reclaimable space (caches, build artifacts, browsers…)
+xmac disk        # disk usage breakdown with APFS-accurate volume stats
+xmac maintain    # flush DNS, reindex Spotlight, rebuild LaunchServices…
+xmac scan        # full system scan
+xmac quick       # clean + maintain + disk in one shot
+xmac map         # map Python/Node/container environments
+xmac conflict    # detect PATH and environment conflicts
+xmac depth       # filesystem integrity (permissions, broken symlinks, dylibs)
+```
+
+---
+
+## Screenshots
+
+> _Full scan in progress, GNN safety scores visible per finding:_
+
+```
+coming soon — help us take some!
+```
+
+---
+
+## Installation
+
+### macOS App (GUI)
+
+**Requirements:** macOS 13 Ventura or later, Apple Silicon or Intel.
 
 ```bash
-# Install
+git clone https://github.com/davidnichols-ops/X-MaC.git
+cd X-MaC/gui
+./build_app.sh
+cp -r staging/X-MaC.app /Applications/
+open /Applications/X-MaC.app
+```
+
+The build script compiles the Rust binary, bundles it inside the `.app`, and copies the CoreML GNN model — no external dependencies at runtime.
+
+### CLI only
+
+```bash
+git clone https://github.com/davidnichols-ops/X-MaC.git
+cd X-MaC
 cargo build --release
-./target/release/x-mac install
-
-# One-shot health check (clean scan + maintenance + disk breakdown)
+./target/release/x-mac install   # installs xmac to ~/.local/bin
 xmac quick
-
-# Find reclaimable disk space
-xmac clean
-
-# Run system maintenance (flush DNS, reindex Spotlight, purge RAM…)
-xmac maintain
-
-# What's taking up space?
-xmac disk
-
-# Full system scan (clean + conflict + map + envmap + diagnostics)
-xmac scan
-
-# Generate a cleanup script you can review and run
-xmac --fix-script ./fixes.sh clean
 ```
 
-## Commands
+### Requirements
 
-| Command | What it does |
-|---------|-------------|
-| `quick` | **One-shot:** clean scan + maintenance + disk breakdown. Fastest way to check system health. |
-| `clean` | Find reclaimable space: caches, browser data, build artifacts, trash, iOS backups, language files, large files, duplicates. |
-| `maintain` | Run macOS maintenance: flush DNS, reindex Spotlight, rebuild LaunchServices, periodic scripts, purge RAM, clear Quick Look. |
-| `disk` | Show disk usage breakdown — top directories and files by size. |
-| `scan` | Full system scan: clean + conflict + map + envmap + diagnostics. (Alias: `doctor`) |
-| `doctor` | Alias for `scan` (familiar to Homebrew users). |
-| `conflict` | Detect PATH conflicts, environment variable conflicts, and port usage. |
-| `map` | Map Python/Node.js environments and container runtimes. |
-| `envmap` | Map system environment: OS, packages, installed apps. Privacy-first. |
-| `depth` | Check filesystem integrity: permissions, symlinks, dylib dependencies. |
-| `all` | Run everything including depth (use `--skip` to exclude). |
-| `install` | Install `xmac` to your PATH. |
+| Component | Requirement |
+|---|---|
+| GUI build | Xcode 15+, Swift 5.9+, macOS 13+ SDK |
+| CLI build | Rust 1.78+ (`rustup update stable`) |
+| GNN training | Python 3.10+, PyTorch 2.x (optional — pre-trained model included) |
 
-## Output Formats
+---
 
-Default is `report` (human-readable summary). Use `json` for scripting.
-
-```bash
-xmac clean                          # report (default, human-readable)
-xmac --format json clean | jq .     # JSON for scripting
-xmac -o results.json clean          # write to file
-```
-
-| Format | Flag | Description |
-|--------|------|-------------|
-| Report | `--format report` (default) | Structured summary with breakdowns and reclaimable space totals |
-| JSON | `--format json` | One finding per line (NDJSON) |
-| JSON Pretty | `--format json-pretty` | Indented JSON array |
-
-## Common Workflows
-
-### Free up disk space
-
-```bash
-# See what can be cleaned
-xmac clean
-
-# Also find duplicate files
-xmac clean --dedup
-
-# Generate a cleanup script
-xmac --fix-script ./cleanup.sh clean
-less ./cleanup.sh       # review it
-bash ./cleanup.sh --yes  # run non-destructive fixes
-
-# Find large files (>= 500MB)
-xmac clean --min-large-size 500M
-
-# Only scan specific directories
-xmac clean ~/Downloads ~/Desktop
-```
-
-### Run system maintenance
-
-```bash
-# Run all safe maintenance tasks
-xmac maintain
-
-# Only flush DNS and purge RAM
-xmac maintain --spotlight false --launchservices false --periodic false --quicklook false
-
-# Include sudo-requiring tasks (emitted as reviewable findings)
-xmac maintain --repair-permissions true --dyld true
-```
-
-### See what's using disk space
-
-```bash
-# Top 20 entries in home dir >= 100MB
-xmac disk
-
-# Top 50 entries in a specific directory >= 1GB
-xmac disk --top 50 --min-size 1G /Applications
-
-# Analyze a project directory
-xmac disk ~/Projects
-```
-
-### Full system health check
-
-```bash
-# Full scan (clean + conflict + map + envmap + diagnostics)
-xmac scan
-
-# Include filesystem integrity checks
-xmac scan --include-depth
-
-# Skip specific engines
-xmac scan --skip conflict
-
-# Generate fix script from full scan
-xmac --fix-script ./fixes.sh scan
-```
-
-### Quick health check (Smart Scan)
-
-```bash
-# Clean scan + maintenance + disk breakdown in one shot
-xmac quick
-
-# Also find duplicates
-xmac quick --dedup
-
-# Skip maintenance, just scan + disk
-xmac quick --no-maintain
-
-# Generate fix script from quick scan
-xmac --fix-script ./fixes.sh quick
-```
-
-## Remediation Scripts
-
-Use `--fix-script <PATH>` to generate a safe, reviewable shell script:
-
-```bash
-xmac --fix-script ./fixes.sh clean
-
-# Review the script
-less ./fixes.sh
-
-# Apply non-destructive fixes (e.g. chmod o-w on world-writable files)
-bash ./fixes.sh --yes
-
-# Destructive commands (rm, kill) are commented out — uncomment
-# the ones you agree with after reviewing, then re-run
-```
-
-The script is safe by default:
-- Every destructive command is commented out
-- Non-destructive fixes are gated behind `--yes` confirmation
-- False-positive-prone categories carry explicit review warnings
-- All paths are shell-quoted to prevent injection
-
-## Clean Categories
-
-The `clean` command detects all major categories of reclaimable disk space:
-
-| Category | What it finds | CLI flag |
-|----------|--------------|----------|
-| Caches | User & system cache files (aged + size-filtered) | always on |
-| Xcode artifacts | DerivedData, Archives, iOS DeviceSupport | `--xcode` |
-| Package-manager caches | npm, pip, cargo, Homebrew, go, gradle, maven | `--pkg-caches` |
-| Temp files | .DS_Store, editor swap files, /tmp contents | `--temp` |
-| Build artifacts | node_modules, target, __pycache__, dist, .pyc, .o | `--build-artifacts` |
-| Browser caches | Safari, Chrome, Firefox, Edge, Brave, Arc | `--browser` |
-| Mail attachments | Mail downloads & attachment directories | `--mail` |
-| iOS backups | Old device backups (per-device with sizes) | `--ios-backups` |
-| Language files | Removable .lproj dirs (preserves English + Base) | `--languages` |
-| Trash bins | Trash on all mounted volumes | `--trash` |
-| Large files | Files >= 100MB (configurable) | `--large-files` |
-| Rotated logs | .gz, .bz2, .0–.9 in /var/log and ~/Library/Logs | always on |
-| Document versions | .DocumentRevisions-V100 stores | always on |
-| Duplicates | Duplicate files via BLAKE3 hashing | `--dedup` |
-
-All categories default to `true`. Disable any with `--<flag> false`:
-
-```bash
-# Only scan browser caches and trash
-xmac clean --xcode false --temp false --build-artifacts false --pkg-caches false \
-           --languages false --large-files false --mail false --ios-backups false
-```
-
-Build-artifact and temp-file sweeps are scoped to the home directory and skip
-editor extensions (`.cursor`, `.windsurf`, `.vscode`), toolchain binaries
-(`.cargo/bin`, `.rustup`), and system paths (`/System`, `/usr`).
-
-## Maintenance Tasks
-
-The `maintain` command runs macOS system maintenance — the CLI equivalent of
-OnyX's maintenance module:
-
-| Task | What it does | Default |
-|------|-------------|---------|
-| Flush DNS | `dscacheutil -flushcache` + `killall -HUP mDNSResponder` | on |
-| Reindex Spotlight | `mdutil -E /` | on |
-| Rebuild LaunchServices | `lsregister -kill -r` (fixes "Open With" menu) | on |
-| Periodic scripts | `periodic daily/weekly/monthly` | on |
-| Purge RAM | `purge` (frees inactive memory) | on |
-| Clear Quick Look | `qlmanage -r cache` | on |
-| Repair permissions | `sudo diskutil repairPermissions /` (HFS+ only) | off |
-| Rebuild dyld cache | `sudo update_dyld_shared_cache` | off |
-
-Safe tasks run automatically. Sudo-requiring tasks are emitted as findings
-with the command in the remediation hint for review via `--fix-script`.
-
-## Global Options
+## Project Structure
 
 ```
--f, --format <FORMAT>        Output format: report (default), json, json-pretty
--o, --output <PATH>          Write output to file instead of stdout
--v, --verbose                Increase verbosity (-v info, -vv debug, -vvv trace)
--q, --quiet                  Suppress progress output
-    --fix-script <PATH>      Generate a reviewable remediation shell script
-    --concurrency <N>        Number of concurrent workers [default: 4]
-    --exclude <GLOB>         Exclude paths matching glob pattern
-    --include-hidden         Include hidden files/directories
-    --follow-symlinks        Follow symbolic links during traversal
+X-MaC/
+├── src/                    # Rust scan engine (the core)
+│   ├── engines/
+│   │   ├── clean/          # Cache, build artifact, browser, iOS backup scanner
+│   │   ├── disk/           # APFS-aware disk usage analyzer
+│   │   ├── maintain/       # macOS maintenance tasks
+│   │   ├── graph/          # GNN integration (Rust side)
+│   │   ├── map/            # Python/Node/container environment mapper
+│   │   └── depth/          # Filesystem integrity checker
+│   ├── core/               # Engine trait, types, context, error handling
+│   ├── cleanup/            # Safe deletion: trash-first, dry-run, undo history
+│   └── cli/                # Clap CLI, argument parsing, output formatters
+│
+├── gnn/                    # On-device Graph Neural Network
+│   ├── model/              # PyTorch GNN architecture
+│   ├── data/               # Graph construction from scan findings
+│   ├── server/             # Inference server (called by Swift via XPC)
+│   └── XMacGNN.mlpackage   # Pre-trained CoreML model (ready to use)
+│
+├── gui/                    # Native SwiftUI macOS app
+│   └── XMacApp/
+│       └── Sources/XMacApp/
+│           ├── XMacApp.swift           # App entry point
+│           ├── XMacRunner.swift        # Rust bridge (process runner)
+│           ├── ContentView.swift       # Sidebar + navigation
+│           ├── DashboardView.swift     # Hero dashboard
+│           ├── DiskView.swift          # Donut chart disk analyzer
+│           ├── NeuralScanView.swift    # GNN smart scan
+│           ├── FullScanView.swift      # Full scan with cleanup toolbar
+│           ├── CleanView.swift         # Category-based cleaner
+│           ├── MaintainView.swift      # Maintenance tasks
+│           ├── AppInventoryView.swift  # App leftover mapper
+│           ├── AutomationView.swift    # Scheduled scans
+│           ├── DashboardView.swift     # Action-first dashboard
+│           ├── OnboardingView.swift    # First-launch flow
+│           ├── CrashReporter.swift     # Error logging
+│           ├── AdaptiveFixer.swift     # Auto-recovery engine
+│           └── Models.swift            # Shared types + FilePathDisplay
+│
+└── tests/                  # Rust integration tests
 ```
 
-## Engine Details
+---
 
-### Conflict
+## Architecture deep-dive
 
-Detects environment conflicts:
-- Duplicate binaries across PATH directories
-- Environment variables set to different values across shell configs
-- Ports in use by running processes
+### Rust engine
 
-```bash
-xmac conflict --path --env --ports --port-list 3000,5000,8080
+The scan engine is built around an async `Engine` trait. Every scanner implements three methods: `validate`, `scan`, and `name`. The context object (`ScanContext`) collects findings via an async channel so the GUI can stream results in real time.
+
+```rust
+#[async_trait]
+pub trait Engine: Send + Sync {
+    fn id(&self) -> EngineId;
+    async fn validate(&self, ctx: &ScanContext) -> Result<(), EngineError>;
+    async fn scan(&self, ctx: Arc<ScanContext>) -> Result<EngineStats, EngineError>;
+}
 ```
 
-### Map
+Findings are typed (`Category`, `Severity`, `Target`) and carry:
+- `size_bytes` — physical block size via `stat.st_blocks * 512` (correct for APFS sparse files)
+- `remediation_hint` — either a human description or a machine-readable JSON blob (used by the disk chart)
+- `neural_score` — GNN safety score (0–1) injected after inference
 
-Maps runtime environments:
-- Python: venv, conda, poetry, pipenv, uv, pyenv
-- Node.js: npm, yarn, pnpm, nvm versions, global installs
-- Containers: Docker, Colima, Lima, OrbStack, Podman
+Cleanup is **always trash-first** — `FileManager.trashItem` in Swift, never `rm -rf`. Permanent deletion requires a second confirmation.
 
-```bash
-xmac map --python --nodejs --containers ~/Projects
-```
+### GNN model
 
-### Envmap
+The GNN (`gnn/`) takes the scan findings graph as input:
+- Nodes = findings (category, size, path depth, extension)
+- Edges = same-directory, same-app, same-category relationships
 
-Maps the system environment — a privacy-first port of the MIF Environment
-Mapper. Read-only and safe. Discovers OS metadata, system packages (Homebrew),
-language packages (pip, npm, gems), and installed applications.
+The graph is scored through a 3-layer GCN → MLP → sigmoid. Output is a per-node safety score (0 = risky, 1 = safe to clean). The model is exported to CoreML (`XMacGNN.mlpackage`) and runs entirely on-device — no network required.
 
-All output is redacted by default (usernames, paths, tokens, emails, IPs,
-UUIDs, AWS keys). Pass `--redact false` to disable.
+### Swift ↔ Rust bridge
 
-```bash
-xmac envmap                              # full environment map (redacted)
-xmac envmap --redact false               # show raw paths/usernames
-xmac envmap --apps --system false        # only enumerate installed apps
-```
+`XMacRunner.swift` manages the `xmac` subprocess, writes arguments, reads NDJSON findings line-by-line, and publishes them as `@Published var findings: [Finding]`. The bundled binary lives at `Contents/MacOS/xmac` so there are no external dependencies.
 
-### Depth
+---
 
-Filesystem integrity checks:
-- World-writable files, SUID/SGID binaries
-- Broken symlinks (relative symlinks resolved correctly)
-- Missing dylib dependencies (via `otool -L`)
+## Beta & Community
 
-```bash
-xmac depth --permissions --symlinks --dylibs /usr/local/bin
-```
+We're looking for **macOS developers** to:
+- Test on different Mac configurations (Intel, M1/M2/M3/M4, different macOS versions)
+- Review the Rust scan logic for false positives
+- Improve the SwiftUI code quality
+- Help tune the GNN model with real scan data
+- Report bugs and suggest features
 
-### Diagnostics
+**How to get involved:**
+1. Star and watch this repo for updates
+2. Open an issue with your Mac model + macOS version — even just "it ran fine" is useful
+3. Try the beta build and file a bug if anything looks wrong
+4. Join the discussion in [GitHub Discussions](https://github.com/davidnichols-ops/X-MaC/discussions)
 
-Runs built-in diagnostics for detected package managers (Homebrew, MacPorts,
-Nix, Cargo, pip, npm). Included in `scan` by default.
+> No telemetry, no accounts, no sign-up. Just build and run.
 
-## Build & Test
-
-```bash
-cargo build --release
-cargo test
-```
+---
 
 ## Contributing
 
-Found a bug? Have an idea? Contributions welcome.
+All contributions welcome — from a one-line typo fix to a new scan engine.
 
-1. Fork and branch: `git checkout -b fix/my-fix`
-2. Verify: `cargo build --release && cargo test` (zero warnings, all pass)
-3. Commit with a clear message
-4. Open a PR against `main`
+### Getting started
 
-### Adding a new engine
+```bash
+git clone https://github.com/davidnichols-ops/X-MaC.git
+cd X-MaC
 
-1. Create `src/engines/<name>/` and implement the `Engine` trait
-2. Register in `src/engines/mod.rs`
-3. Wire into `src/cli/args.rs` and `src/main.rs`
-4. Add tests in `tests/integration_tests.rs`
+# Build and test the Rust engine
+cargo build --release
+cargo test
+
+# Build the GUI
+cd gui && ./build_app.sh
+```
+
+### Before opening a PR
+
+- `cargo build --release` — zero errors, ideally zero warnings
+- `cargo test` — all 67+ tests pass
+- Swift: `cd gui/XMacApp && swift build` — clean build
+- New scan categories need a test in `tests/`
+- GUI changes should match the existing `XTheme` style system
+
+### Good first issues
+
+- [ ] Add a "Largest files" view inside a directory when you click a donut segment
+- [ ] Export scan results as CSV
+- [ ] Localization (the UI is English-only right now)
+- [ ] Dark/light mode theming (currently dark-only)
+- [ ] TestFlight / notarization workflow
+- [ ] Add more GNN training data and improve model accuracy
+- [ ] Brew tap for `xmac` CLI
+
+### Adding a new scan engine (Rust)
+
+1. Create `src/engines/<name>/mod.rs` and implement the `Engine` trait
+2. Add a new `EngineId` variant in `src/core/types.rs`
+3. Register in `src/engines/mod.rs`
+4. Wire into `src/cli/args.rs` and the relevant `run_*` function in `src/main.rs`
+5. Add integration tests in `tests/`
+
+### Adding a new view (SwiftUI)
+
+1. Create `gui/XMacApp/Sources/XMacApp/<Name>View.swift`
+2. Follow the `XTheme` / `XCard` / `XSectionHeader` style — see `Models.swift`
+3. Add a case to `AppSection` in `ContentView.swift`
+4. Wire up the runner call in `XMacRunner.swift`
+
+---
+
+## Roadmap
+
+- [ ] **v1.1** — TestFlight public beta + notarized DMG
+- [ ] **v1.2** — Duplicate file finder with visual diff
+- [ ] **v1.3** — Space Lens (drill-down treemap like Disk Diag)
+- [ ] **v1.4** — GNN model improvements with community scan data (opt-in, anonymised)
+- [ ] **v2.0** — App Store submission
+
+---
 
 ## License
 
-MIT
+MIT — do whatever you want, attribution appreciated.
+
+---
+
+## Acknowledgements
+
+Built with:
+- [Rust](https://www.rust-lang.org/) + [Tokio](https://tokio.rs/) — async scan engine
+- [SwiftUI](https://developer.apple.com/xcode/swiftui/) — native macOS UI
+- [PyTorch](https://pytorch.org/) + [Core ML](https://developer.apple.com/documentation/coreml) — on-device GNN
+- [WalkDir](https://github.com/BurntSushi/walkdir) — fast filesystem traversal
+- [Clap](https://clap.rs/) — CLI argument parsing
