@@ -1,18 +1,16 @@
 <div align="center">
 
-<img src="logo.png" alt="X-MaC" width="200" />
+<img src="logo.png" alt="X-MaC — Cleaner. Smarter. Stronger." width="100%" />
 
-# X-MaC
-
-**macOS cleaner, optimizer, and system monitor — with on-device GNN intelligence.**
-
-*Cleaner. Smarter. Stronger.*
+<br />
 
 [![Build](https://img.shields.io/badge/build-passing-brightgreen?style=flat-square&logo=rust)](#build--test)
 [![Swift](https://img.shields.io/badge/Swift-5.9+-orange?style=flat-square&logo=swift)](https://swift.org)
 [![Platform](https://img.shields.io/badge/macOS-13%2B-blue?style=flat-square&logo=apple)](https://www.apple.com/macos)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)](LICENSE)
 [![Beta](https://img.shields.io/badge/beta-open-purple?style=flat-square)](#beta--community)
+
+**macOS cleaner, optimizer, and system monitor — with on-device GNN intelligence.**
 
 [Install](#installation) · [How it works](#what-it-does) · [Join the beta](#beta--community) · [Contribute](#contributing)
 
