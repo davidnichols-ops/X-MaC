@@ -1,18 +1,18 @@
 <div align="center">
 
-<img src="logo.png" alt="X-MaC — Cleaner. Smarter. Stronger." width="100%" />
+<img src="logo.png" alt="X-MaC" width="180" />
 
-<br />
+# X-MaC
 
-[![Build](https://img.shields.io/badge/build-passing-brightgreen?style=flat-square&logo=rust)](#build--test)
-[![Swift](https://img.shields.io/badge/Swift-5.9+-orange?style=flat-square&logo=swift)](https://swift.org)
-[![Platform](https://img.shields.io/badge/macOS-13%2B-blue?style=flat-square&logo=apple)](https://www.apple.com/macos)
-[![License](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)](LICENSE)
+### macOS cleaner, optimizer & system monitor — with on-device GNN intelligence
+
+[![Build](https://img.shields.io/badge/build-passing-brightgreen?style=flat-square&logo=rust)](#build--test)&nbsp;
+[![Swift](https://img.shields.io/badge/Swift-5.9+-orange?style=flat-square&logo=swift)](https://swift.org)&nbsp;
+[![Platform](https://img.shields.io/badge/macOS-13%2B-blue?style=flat-square&logo=apple)](https://www.apple.com/macos)&nbsp;
+[![License](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)](LICENSE)&nbsp;
 [![Beta](https://img.shields.io/badge/beta-open-purple?style=flat-square)](#beta--community)
 
-**macOS cleaner, optimizer, and system monitor — with on-device GNN intelligence.**
-
-[Install](#installation) · [How it works](#what-it-does) · [Join the beta](#beta--community) · [Contribute](#contributing)
+[Install](#installation) &nbsp;·&nbsp; [How it works](#what-it-does) &nbsp;·&nbsp; [Join the beta](#beta--community) &nbsp;·&nbsp; [Contribute](#contributing)
 
 </div>
 
