@@ -51,6 +51,11 @@ struct RamBoostView: View {
                 } else if let err = boostError {
                     ScanErrorView(message: err)
                 } else if let before = beforeStats {
+                    // Show purge warning if boost ran but freed nothing
+                    if let after = afterStats, freedBytes == 0, hasRunBoost {
+                        purgeWarningCard
+                    }
+
                     // After-boost summary if available
                     if let after = afterStats {
                         boostResultCard(before: before, after: after)
@@ -124,6 +129,45 @@ struct RamBoostView: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 20)
+        }
+    }
+
+    // MARK: - Purge Warning
+
+    private var purgeWarningCard: some View {
+        XCard {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(XTheme.medium)
+                    Text("Purge Requires Elevated Permissions")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(XTheme.medium)
+                }
+
+                Text("The `purge` command needs sudo to free inactive memory on modern macOS. The memory report ran successfully, but no RAM was freed.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(XTheme.textSecondary)
+
+                HStack(spacing: 8) {
+                    Image(systemName: "terminal")
+                        .font(.system(size: 12))
+                        .foregroundStyle(XTheme.accent)
+                    Text("sudo purge")
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(XTheme.textPrimary)
+                        .textSelection(.enabled)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(XTheme.bgTertiary)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+
+                Text("Run this in Terminal to purge inactive memory. You can also try killing memory-hungry processes below — that works without sudo.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(XTheme.textTertiary)
+            }
         }
     }
 

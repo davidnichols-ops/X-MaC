@@ -1,6 +1,25 @@
 import Foundation
 import Combine
 
+// MARK: - Activity Log Entry
+
+struct ActivityLogEntry: Identifiable, Hashable {
+    let id = UUID()
+    let timestamp: Date
+    let operation: String
+    let status: ActivityStatus
+    let message: String
+    let detail: String?
+    let durationMs: Double?
+}
+
+enum ActivityStatus: String, Hashable {
+    case started
+    case success
+    case warning
+    case failed
+}
+
 @MainActor
 final class XMacRunner: ObservableObject {
     var historyStore = ScanHistoryStore()
@@ -22,6 +41,11 @@ final class XMacRunner: ObservableObject {
     @Published var cleanupMessage: String?
     @Published var binaryPathOverride: String? = nil
     @Published var scanProgress: Double = 0
+
+    // Universal activity log — tracks all operations across the app
+    @Published var activityLog: [ActivityLogEntry] = []
+    @Published var lastActivity: ActivityLogEntry? = nil
+    @Published var showActivityBanner: Bool = false
 
     enum ScanMode: String {
         case dashboard, idle, full, clean, maintain, disk, neural, apps, settings, history, automation, ramBoost
@@ -50,6 +74,57 @@ final class XMacRunner: ObservableObject {
                 }
             }
         }
+    }
+
+    // MARK: - Universal Activity Logger
+
+    /// Log an activity. This is the single entry point for all operation tracking.
+    func logActivity(_ operation: String, status: ActivityStatus, message: String, detail: String? = nil, durationMs: Double? = nil) {
+        let entry = ActivityLogEntry(
+            timestamp: Date(),
+            operation: operation,
+            status: status,
+            message: message,
+            detail: detail,
+            durationMs: durationMs
+        )
+        activityLog.insert(entry, at: 0)
+        if activityLog.count > 100 { activityLog.removeLast() }
+        lastActivity = entry
+
+        // Show banner for warnings and failures
+        if status == .warning || status == .failed {
+            showActivityBanner = true
+        }
+
+        #if DEBUG
+        print("[XMacRunner] \(status.rawValue.uppercased()) \(operation): \(message)" + (detail != nil ? " — \(detail!)" : ""))
+        #endif
+    }
+
+    /// Track an async operation with automatic start/success/failure logging.
+    func trackOperation<T>(_ operation: String, task: () async throws -> T) async -> Result<T, Error> {
+        logActivity(operation, status: .started, message: "Starting...")
+        let start = Date()
+        do {
+            let result = try await task()
+            let duration = Date().timeIntervalSince(start) * 1000
+            logActivity(operation, status: .success, message: "Completed", durationMs: duration)
+            return .success(result)
+        } catch {
+            let duration = Date().timeIntervalSince(start) * 1000
+            logActivity(operation, status: .failed, message: error.localizedDescription, durationMs: duration)
+            return .failure(error)
+        }
+    }
+
+    func dismissActivityBanner() {
+        showActivityBanner = false
+    }
+
+    func clearActivityLog() {
+        activityLog.removeAll()
+        lastActivity = nil
     }
 
     private let xmacPath: String = {
@@ -455,16 +530,22 @@ final class XMacRunner: ObservableObject {
         scanPhase = ""
         scanProgress = 1.0
         historyStore.add(mode: mode, findings: findings, duration: scanDuration)
+        logActivity(mode, status: .success, message: "Scan completed in \(String(format: "%.1f", scanDuration))s — \(findings.count) findings", durationMs: scanDuration * 1000)
     }
 
     // MARK: - Process execution
 
     private func runCommand(_ args: [String]) async {
+        let cmdName = args.dropFirst().first ?? args.first ?? "?"
         do {
-            let (stdout, _) = try await runProcess(args)
+            let (stdout, stderr) = try await runProcess(args)
             parseFindings(from: stdout)
+            if !stderr.isEmpty {
+                logActivity(String(cmdName), status: .warning, message: "Process produced stderr", detail: stderr)
+            }
         } catch let err {
             self.error = err.localizedDescription
+            logActivity(String(cmdName), status: .failed, message: err.localizedDescription)
             await CrashReporter.shared.record(
                 error: err,
                 context: "runCommand: \(args.first ?? "?")"
@@ -601,16 +682,41 @@ final class XMacRunner: ObservableObject {
             args += ["--protect-system", "false"]
         }
 
+        let start = Date()
+        logActivity("ram-boost", status: .started, message: purge ? "Purging memory..." : "Reading memory stats...")
+
         do {
-            let (stdout, _) = try await runProcess(args)
+            let (stdout, stderr) = try await runProcess(args)
+
+            if !stderr.isEmpty {
+                logActivity("ram-boost", status: .warning, message: "Process stderr", detail: stderr)
+            }
+
             let (before, after, freed, freedSwap, killed) = parseRamBoostFindings(from: stdout)
             if before == nil {
+                let msg = "No memory data returned from ram-boost"
+                logActivity("ram-boost", status: .failed, message: msg, detail: stdout.isEmpty ? "Empty output" : "Output: \(stdout.prefix(200))")
                 return .failure(NSError(domain: "XMacRunner", code: 10, userInfo: [
-                    NSLocalizedDescriptionKey: "No memory data returned from ram-boost"
+                    NSLocalizedDescriptionKey: msg
                 ]))
             }
+
+            let duration = Date().timeIntervalSince(start) * 1000
+            if let after = after {
+                let purgeOk = after.memory_pressure.contains("purge_success") || true // we check via metadata
+                if freed > 0 {
+                    logActivity("ram-boost", status: .success, message: "Freed \(formatBytes(freed)) RAM, \(formatBytes(freedSwap)) swap, \(killed) processes killed", durationMs: duration)
+                } else {
+                    logActivity("ram-boost", status: .warning, message: "Boost completed but no memory was freed. Purge may require sudo — run 'sudo purge' in Terminal.", detail: nil, durationMs: duration)
+                }
+            } else {
+                logActivity("ram-boost", status: .success, message: "Memory report generated", durationMs: duration)
+            }
+
             return .success((before!, after, freed, freedSwap, killed))
         } catch {
+            let duration = Date().timeIntervalSince(start) * 1000
+            logActivity("ram-boost", status: .failed, message: error.localizedDescription, durationMs: duration)
             return .failure(error)
         }
     }

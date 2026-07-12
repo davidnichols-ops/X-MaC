@@ -625,15 +625,55 @@ impl MaintainEngine {
         }
 
         // ── 2. Purge inactive memory ────────────────────────────────────────
+        let mut purge_succeeded = false;
+        let mut purge_message = String::new();
         if args.purge {
             items_scanned += 1;
             let (ok, msg) = if cfg!(target_os = "macos") {
-                Self::run_command("purge", &[])
+                // Try without sudo first, then with sudo
+                let (ok1, msg1) = Self::run_command("purge", &[]);
+                if ok1 {
+                    (true, msg1)
+                } else {
+                    // Try with sudo -n (non-interactive, uses cached credentials)
+                    let (ok2, msg2) = Self::run_command("sudo", &["-n", "purge"]);
+                    if ok2 {
+                        (true, msg2)
+                    } else {
+                        (false, format!("{} (tried sudo: {})", msg1, msg2))
+                    }
+                }
             } else {
                 // Linux: try drop_caches (needs root)
-                Self::run_command(
+                let (ok1, msg1) = Self::run_command(
                     "sh",
                     &["-c", "echo 3 > /proc/sys/vm/drop_caches"],
+                );
+                if ok1 {
+                    (true, msg1)
+                } else {
+                    let (ok2, msg2) = Self::run_command(
+                        "sudo",
+                        &["-n", "sh", "-c", "echo 3 > /proc/sys/vm/drop_caches"],
+                    );
+                    if ok2 {
+                        (true, msg2)
+                    } else {
+                        (false, format!("{} (tried sudo: {})", msg1, msg2))
+                    }
+                }
+            };
+
+            purge_succeeded = ok;
+            purge_message = if ok {
+                let reclaimable = before.reclaimable_bytes();
+                format!(
+                    "Inactive memory purged — up to {} could be freed",
+                    crate::util::disk::format_bytes(reclaimable)
+                )
+            } else {
+                format!(
+                    "Memory purge requires elevated permissions. Run in Terminal: sudo purge"
                 )
             };
 
@@ -643,24 +683,15 @@ impl MaintainEngine {
                 Category::RamOptimization,
                 Target::Path(std::path::PathBuf::from("/")),
                 "Purge inactive memory",
-                if ok {
-                    let reclaimable = before.reclaimable_bytes();
-                    format!(
-                        "Inactive memory purged — up to {} could be freed",
-                        crate::util::disk::format_bytes(reclaimable)
-                    )
-                } else {
-                    format!(
-                        "Memory purge failed (may need sudo): {}",
-                        msg
-                    )
-                },
+                purge_message.clone(),
             )
             .with_hint(if cfg!(target_os = "macos") {
-                "purge  # may require sudo".to_string()
+                "sudo purge  # run in Terminal to purge inactive RAM".to_string()
             } else {
                 "sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'".to_string()
-            });
+            })
+            .with_metadata("purge_success", serde_json::json!(ok))
+            .with_metadata("purge_message", serde_json::json!(purge_message));
             ctx.emit(purge_finding).await;
             findings_count += 1;
         }
@@ -775,6 +806,8 @@ impl MaintainEngine {
         .with_metadata("freed_bytes", serde_json::json!(freed))
         .with_metadata("freed_swap_bytes", serde_json::json!(freed_swap))
         .with_metadata("processes_killed", serde_json::json!(killed))
+        .with_metadata("purge_success", serde_json::json!(purge_succeeded))
+        .with_metadata("purge_message", serde_json::json!(purge_message))
         .with_metadata(
             "memory_pressure",
             serde_json::json!(format!("{:?}", after.memory_pressure)),

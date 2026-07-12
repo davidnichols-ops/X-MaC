@@ -37,6 +37,13 @@ struct ContentView: View {
         }
         .frame(minWidth: 1100, minHeight: 720)
         .background(XTheme.voidGradient)
+        .overlay(alignment: .top) {
+            ActivityBannerView()
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .animation(.easeInOut(duration: 0.3), value: runner.showActivityBanner)
+        }
         .overlay(
             Group {
                 if !hasCompletedOnboarding {
@@ -49,6 +56,86 @@ struct ContentView: View {
                 }
             }
         )
+    }
+}
+
+// MARK: - Activity Banner
+
+struct ActivityBannerView: View {
+    @EnvironmentObject var runner: XMacRunner
+
+    private var activity: ActivityLogEntry? {
+        runner.lastActivity
+    }
+
+    private var showBanner: Bool {
+        runner.showActivityBanner && activity != nil
+    }
+
+    var body: some View {
+        if showBanner, let entry = activity {
+            HStack(spacing: 10) {
+                Image(systemName: iconForStatus(entry.status))
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(colorForStatus(entry.status))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(entry.operation)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(XTheme.textPrimary)
+                    Text(entry.message)
+                        .font(.system(size: 11))
+                        .foregroundStyle(XTheme.textSecondary)
+                        .lineLimit(2)
+                }
+
+                Spacer()
+
+                if let duration = entry.durationMs {
+                    Text(String(format: "%.0fms", duration))
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(XTheme.textTertiary)
+                }
+
+                Button {
+                    runner.dismissActivityBanner()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(XTheme.textTertiary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(XTheme.cardBg)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(colorForStatus(entry.status).opacity(0.3), lineWidth: 1)
+                    )
+                    .shadow(color: colorForStatus(entry.status).opacity(0.15), radius: 8)
+            )
+        }
+    }
+
+    private func iconForStatus(_ status: ActivityStatus) -> String {
+        switch status {
+        case .started: return "arrow.clockwise.circle.fill"
+        case .success: return "checkmark.circle.fill"
+        case .warning: return "exclamationmark.triangle.fill"
+        case .failed: return "xmark.octagon.fill"
+        }
+    }
+
+    private func colorForStatus(_ status: ActivityStatus) -> Color {
+        switch status {
+        case .started: return XTheme.accent
+        case .success: return XTheme.safe
+        case .warning: return XTheme.medium
+        case .failed: return XTheme.danger
+        }
     }
 }
 
@@ -102,6 +189,8 @@ struct SidebarView: View {
 
             if scanning {
                 ScanProgressMini(phase: runner.scanPhase, progress: runner.scanProgress)
+            } else if let activity = runner.lastActivity {
+                ActivityMiniIndicator(activity: activity)
             }
 
             NavButton(icon: "clock.arrow.circlepath", label: "History", isActive: runner.scanMode == .history, disabled: scanning) {
@@ -148,6 +237,55 @@ struct ScanProgressMini: View {
         .padding(12)
         .background(XTheme.cardBg)
         .clipShape(RoundedRectangle(cornerRadius: 8))
+        .padding(.bottom, 8)
+    }
+}
+
+struct ActivityMiniIndicator: View {
+    let activity: ActivityLogEntry
+
+    private var color: Color {
+        switch activity.status {
+        case .started: return XTheme.accent
+        case .success: return XTheme.safe
+        case .warning: return XTheme.medium
+        case .failed: return XTheme.danger
+        }
+    }
+
+    private var icon: String {
+        switch activity.status {
+        case .started: return "arrow.clockwise"
+        case .success: return "checkmark.circle"
+        case .warning: return "exclamationmark.triangle"
+        case .failed: return "xmark.octagon"
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 10))
+                .foregroundStyle(color)
+            Text(activity.operation)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(XTheme.textSecondary)
+                .lineLimit(1)
+            Spacer()
+            Text(activity.message)
+                .font(.system(size: 9))
+                .foregroundStyle(XTheme.textTertiary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(XTheme.cardBg)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(color.opacity(0.2), lineWidth: 1)
+        )
         .padding(.bottom, 8)
     }
 }

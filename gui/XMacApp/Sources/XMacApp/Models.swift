@@ -190,10 +190,24 @@ struct CrossDirPattern: Codable, Identifiable, Hashable {
 // MARK: - Helpers
 
 func formatBytes(_ bytes: Int) -> String {
-    let formatter = ByteCountFormatter()
-    formatter.allowedUnits = [.useAll]
-    formatter.countStyle = .file
-    return formatter.string(fromByteCount: Int64(bytes))
+    // Use binary units (1 GB = 1024³) to match macOS Activity Monitor
+    let units = [(1024 * 1024 * 1024 * 1024, "TB"),
+                 (1024 * 1024 * 1024, "GB"),
+                 (1024 * 1024, "MB"),
+                 (1024, "KB")]
+    for (divisor, suffix) in units {
+        if bytes >= divisor {
+            let value = Double(bytes) / Double(divisor)
+            if value >= 100 {
+                return String(format: "%.0f %@", value, suffix)
+            } else if value >= 10 {
+                return String(format: "%.1f %@", value, suffix)
+            } else {
+                return String(format: "%.2f %@", value, suffix)
+            }
+        }
+    }
+    return "\(bytes) B"
 }
 
 func formatBytes(_ bytes: UInt64) -> String {
