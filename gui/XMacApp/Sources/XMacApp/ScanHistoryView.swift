@@ -16,7 +16,7 @@ struct ScanHistoryView: View {
             }
             .padding(20)
         }
-        .background(XTheme.bgPrimary)
+        .background(XTheme.voidGradient)
     }
 }
 

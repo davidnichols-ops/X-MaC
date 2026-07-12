@@ -34,7 +34,7 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 1100, minHeight: 720)
-        .background(XTheme.bgPrimary)
+        .background(XTheme.voidGradient)
         .overlay(
             Group {
                 if !hasCompletedOnboarding {
@@ -55,14 +55,15 @@ struct SidebarView: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            // Logo
+            // Logo — metallic X with cyan neural glow
             HStack(spacing: 10) {
                 Image(systemName: "cpu")
                     .font(.system(size: 24, weight: .bold))
-                    .foregroundStyle(XTheme.accent)
+                    .foregroundStyle(XTheme.metallicGradient)
+                    .xGlow(XTheme.accent, radius: 6)
                 Text("X-MaC")
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(XTheme.textPrimary)
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .foregroundStyle(XTheme.metallicGradient)
             }
             .padding(.vertical, 16)
 
@@ -109,7 +110,7 @@ struct SidebarView: View {
             }
         }
         .padding(.horizontal, 12)
-        .background(XTheme.bgSecondary)
+        .background(XTheme.sidebarGradient)
     }
 }
 
@@ -160,6 +161,7 @@ struct NavButton: View {
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(foregroundColor)
                     .frame(width: 20)
+                    .xGlow(isActive && !disabled ? XTheme.accent : .clear, radius: 3)
                 Text(label)
                     .font(.system(size: 13, weight: isActive ? .semibold : .regular))
                     .foregroundStyle(foregroundColor)
@@ -167,8 +169,18 @@ struct NavButton: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(isActive && !disabled ? XTheme.accent.opacity(0.12) : Color.clear)
+            .background(
+                isActive && !disabled
+                    ? LinearGradient(colors: [XTheme.accent.opacity(0.15), XTheme.accent.opacity(0.05)], startPoint: .leading, endPoint: .trailing)
+                    : LinearGradient(colors: [.clear, .clear], startPoint: .leading, endPoint: .trailing)
+            )
             .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                isActive && !disabled
+                    ? RoundedRectangle(cornerRadius: 8)
+                        .stroke(XTheme.accent.opacity(0.2), lineWidth: 1)
+                    : nil
+            )
         }
         .buttonStyle(.plain)
         .disabled(disabled)
@@ -189,12 +201,12 @@ struct WelcomeView: View {
 
             Image(systemName: "cpu")
                 .font(.system(size: 64, weight: .light))
-                .foregroundStyle(XTheme.accent)
-                .xGlow()
+                .foregroundStyle(XTheme.metallicGradient)
+                .xHeroGlow()
 
             Text("X-MaC")
-                .font(.system(size: 32, weight: .bold))
-                .foregroundStyle(XTheme.textPrimary)
+                .font(.system(size: 32, weight: .bold, design: .rounded))
+                .foregroundStyle(XTheme.metallicGradient)
 
             Text("macOS cleaner, optimizer, and system scanner")
                 .font(.system(size: 14))
@@ -207,6 +219,6 @@ struct WelcomeView: View {
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(XTheme.bgPrimary)
+        .background(XTheme.voidGradient)
     }
 }

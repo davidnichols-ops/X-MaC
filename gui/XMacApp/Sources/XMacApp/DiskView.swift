@@ -118,20 +118,21 @@ struct DiskView: View {
             }
             .padding(20)
         }
-        .background(XTheme.bgPrimary)
+        .background(XTheme.voidGradient)
     }
 
     // Build properly-labelled donut segments:
     //   macOS System | Applications | top home dirs (named) | Other Home | Free
     private func buildSegments(stats: VolumeStats) -> [DiskSegment] {
+        // Palette distilled from the X-MaC icon: cyan → teal → neural blue → purple
         let palette: [Color] = [
-            XTheme.accent,                                 // blue  – Library
-            Color(red: 0.65, green: 0.35, blue: 0.90),    // purple
-            Color(red: 0.30, green: 0.80, blue: 0.40),    // green
-            Color(red: 0.95, green: 0.75, blue: 0.25),    // yellow
-            Color(red: 0.95, green: 0.45, blue: 0.20),    // orange
-            Color(red: 0.40, green: 0.70, blue: 0.95),    // light blue
-            Color(red: 0.90, green: 0.30, blue: 0.55),    // pink
+            XTheme.accent,                                 // cyan  – Library
+            XTheme.teal,                                   // teal
+            XTheme.safe,                                   // neon green
+            XTheme.warning,                                // amber
+            XTheme.high,                                   // orange
+            XTheme.accentBright,                           // bright cyan
+            XTheme.anomaly,                                // neural purple
         ]
 
         var segments: [DiskSegment] = []
@@ -146,7 +147,7 @@ struct DiskView: View {
                 label: "macOS System",
                 subtitle: "Sealed read-only OS volume — cannot be cleaned",
                 bytes: stats.system,
-                color: Color(red: 0.55, green: 0.60, blue: 0.65),
+                color: XTheme.steel,  // metallic grey — matches the X in the icon
                 icon: "apple.logo",
                 fraction: frac(stats.system)
             ))
@@ -158,7 +159,7 @@ struct DiskView: View {
                 label: "Applications",
                 subtitle: "/Applications + /System/Applications",
                 bytes: stats.apps,
-                color: Color(red: 0.20, green: 0.75, blue: 0.65),
+                color: XTheme.teal,  // teal — matches icon's mid-tones
                 icon: "square.stack.3d.up.fill",
                 fraction: frac(stats.apps)
             ))
@@ -258,10 +259,7 @@ private struct DiskEmptyState: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 22)
                     .padding(.vertical, 11)
-                    .background(
-                        LinearGradient(colors: [XTheme.accent, Color(red:0,green:0.78,blue:0.88)],
-                                       startPoint: .leading, endPoint: .trailing)
-                    )
+                    .background(XTheme.neuralGradient)
                     .clipShape(Capsule())
             }
             .buttonStyle(.plain)
@@ -305,7 +303,8 @@ struct DiskDonutCard: View {
                                 .foregroundStyle(h.color)
                             Text(formatBytes(h.bytes))
                                 .font(.system(size: 17, weight: .bold))
-                                .foregroundStyle(XTheme.textPrimary)
+                                .foregroundStyle(XTheme.metallicGradient)
+                                .xGlow(XTheme.accent, radius: 4)
                             Text(h.label)
                                 .font(.system(size: 11, weight: .semibold))
                                 .foregroundStyle(h.color)
@@ -321,7 +320,8 @@ struct DiskDonutCard: View {
                         } else {
                             Text(stats.usedPercent)
                                 .font(.system(size: 26, weight: .bold))
-                                .foregroundStyle(XTheme.textPrimary)
+                                .foregroundStyle(XTheme.metallicGradient)
+                                .xGlow(XTheme.accent, radius: 4)
                             Text("used")
                                 .font(.system(size: 12))
                                 .foregroundStyle(XTheme.textSecondary)
@@ -454,7 +454,7 @@ struct DiskDonutShape: View {
                     let dy2 = sin(startAngle + gap) * iR
                     divider.move(to: CGPoint(x: centre.x + dx2, y: centre.y + dy2))
                     divider.addLine(to: CGPoint(x: centre.x + dx, y: centre.y + dy))
-                    ctx.stroke(divider, with: .color(Color(red:0.06,green:0.07,blue:0.09).opacity(0.9)), lineWidth: 2)
+                    ctx.stroke(divider, with: .color(XTheme.bgVoid.opacity(0.9)), lineWidth: 2)
                 }
 
                 startAngle += sweep + gap * 2
@@ -465,7 +465,7 @@ struct DiskDonutShape: View {
                 x: centre.x - innerR, y: centre.y - innerR,
                 width: innerR * 2, height: innerR * 2
             ))
-            ctx.fill(ringPath, with: .color(Color(red:0.10,green:0.11,blue:0.14)))
+            ctx.fill(ringPath, with: .color(XTheme.bgSecondary))
         }
         .animation(.easeOut(duration: 0.9), value: animate)
     }
@@ -693,12 +693,12 @@ struct DiskItemRow: View {
     private var segmentColor: Color {
         let colors: [Color] = [
             XTheme.accent,
-            Color(red: 0.65, green: 0.35, blue: 0.90),
-            Color(red: 0.30, green: 0.80, blue: 0.40),
-            Color(red: 0.95, green: 0.75, blue: 0.25),
-            Color(red: 0.95, green: 0.45, blue: 0.20),
-            Color(red: 0.40, green: 0.70, blue: 0.95),
-            Color(red: 0.90, green: 0.30, blue: 0.55),
+            XTheme.teal,
+            XTheme.safe,
+            XTheme.warning,
+            XTheme.high,
+            XTheme.accentBright,
+            XTheme.anomaly,
         ]
         let h = abs(finding.target.value.hashValue) % colors.count
         return colors[h]
@@ -844,9 +844,9 @@ struct DiskQuickCleanSheet: View {
                     .disabled(remaining.isEmpty)
                 }
                 .padding()
-                .background(XTheme.bgSecondary)
+                .background(XTheme.sidebarGradient)
             }
-            .background(XTheme.bgPrimary)
+            .background(XTheme.voidGradient)
             .navigationTitle("Clean Reclaimable Items")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

@@ -26,7 +26,7 @@ struct AutomationView: View {
             }
             .padding(28)
         }
-        .background(XTheme.bgPrimary)
+        .background(XTheme.voidGradient)
         .onAppear { checkStatus() }
     }
 
@@ -182,7 +182,7 @@ private struct AutomationPolicyRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: icon).foregroundStyle(XTheme.accent).frame(width: 18)
+            Image(systemName: icon).foregroundStyle(XTheme.accent).xGlow(XTheme.accent, radius: 3).frame(width: 18)
             Text(text).font(.system(size: 12)).foregroundStyle(XTheme.textPrimary)
             Spacer()
         }

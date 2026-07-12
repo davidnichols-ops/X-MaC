@@ -55,7 +55,7 @@ struct OnboardingView: View {
     // MARK: - Background
 
     private var backdrop: some View {
-        Color(red: 0.04, green: 0.05, blue: 0.08)
+        XTheme.voidGradient
             .ignoresSafeArea()
     }
 
@@ -157,7 +157,7 @@ struct OnboardingView: View {
 
             Text(page.title)
                 .font(.system(size: isWelcome ? 34 : 28, weight: .bold))
-                .foregroundStyle(.white)
+                .foregroundStyle(XTheme.metallicGradient)
                 .multilineTextAlignment(.center)
 
             Text(page.body)
@@ -217,7 +217,7 @@ struct OnboardingView: View {
             .foregroundStyle(.white)
             .padding(.horizontal, 24)
             .frame(height: 44)
-            .background(Color(white: 0.18))
+            .background(XTheme.neuralGradient)
             .clipShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -235,13 +235,7 @@ struct OnboardingView: View {
             .foregroundStyle(.white)
             .padding(.horizontal, 28)
             .frame(height: 48)
-            .background(
-                LinearGradient(
-                    colors: [XTheme.accent, Color(red: 0.20, green: 0.80, blue: 0.80)],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-            )
+            .background(XTheme.neuralGradient)
             .clipShape(Capsule())
             .xGlow(XTheme.accent, radius: 16)
         }

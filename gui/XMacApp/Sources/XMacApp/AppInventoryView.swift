@@ -94,7 +94,7 @@ struct AppInventoryView: View {
                     .frame(minWidth: 420)
             }
         }
-        .background(XTheme.bgPrimary)
+        .background(XTheme.voidGradient)
         .onAppear { if apps.isEmpty && !isLoading { scan() } }
     }
 
@@ -150,7 +150,7 @@ struct AppInventoryView: View {
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 7)
-                .background(XTheme.bgSecondary)
+                .background(XTheme.sidebarGradient)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
 
                 HStack(spacing: 4) {
@@ -207,7 +207,7 @@ struct AppInventoryView: View {
                 }
             }
         }
-        .background(XTheme.bgSecondary)
+        .background(XTheme.sidebarGradient)
     }
 
     // MARK: - Detail Panel
@@ -228,7 +228,7 @@ struct AppInventoryView: View {
                     EmptyScanView(message: "Select one or more apps to inspect their footprint and support files.")
                     Spacer()
                 }
-                .background(XTheme.bgPrimary)
+                .background(XTheme.voidGradient)
             }
         }
     }
@@ -498,7 +498,8 @@ struct AppDetailPanel: View {
                             XSectionHeader(title: "Bundle", icon: "ruler")
                             Text(formatBytes(app.sizeBytes))
                                 .font(.system(size: 28, weight: .bold))
-                                .foregroundStyle(XTheme.textPrimary)
+                                .foregroundStyle(XTheme.metallicGradient)
+                                .xGlow(XTheme.accent, radius: 4)
                             FilePathDisplay(path: app.path, fontSize: 11, pathFontSize: 9, showIcon: false, maxPathLines: 1)
                         }
                     }
@@ -509,7 +510,8 @@ struct AppDetailPanel: View {
                             XSectionHeader(title: "Support Files", icon: "folder.badge.plus")
                             Text(formatBytes(relatedTotal))
                                 .font(.system(size: 28, weight: .bold))
-                                .foregroundStyle(relatedTotal > 0 ? XTheme.warning : XTheme.textPrimary)
+                                .foregroundStyle(XTheme.metallicGradient)
+                                .xGlow(XTheme.accent, radius: 4)
                             Text("\(app.relatedPaths.count) related paths")
                                 .font(.system(size: 11))
                                 .foregroundStyle(XTheme.textSecondary)
@@ -620,7 +622,7 @@ struct AppDetailPanel: View {
             }
             .padding(20)
         }
-        .background(XTheme.bgPrimary)
+        .background(XTheme.voidGradient)
     }
 }
 

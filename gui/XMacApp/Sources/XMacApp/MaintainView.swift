@@ -32,7 +32,7 @@ struct MaintainView: View {
             }
             .padding(20)
         }
-        .background(XTheme.bgPrimary)
+        .background(XTheme.voidGradient)
     }
 }
 

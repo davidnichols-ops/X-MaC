@@ -55,7 +55,7 @@ struct DashboardView: View {
             }
             .padding(28)
         }
-        .background(XTheme.bgPrimary)
+        .background(XTheme.voidGradient)
     }
 
     // MARK: - Hero
@@ -66,7 +66,8 @@ struct DashboardView: View {
                 if hasScan {
                     Text(formatBytes(reclaimable))
                         .font(.system(size: 48, weight: .bold, design: .rounded))
-                        .foregroundStyle(XTheme.textPrimary)
+                        .foregroundStyle(XTheme.metallicGradient)
+                        .xGlow(XTheme.accent, radius: 6)
                     Text("found across \(runner.findings.count) items")
                         .font(.system(size: 13))
                         .foregroundStyle(XTheme.textSecondary)
@@ -89,20 +90,11 @@ struct DashboardView: View {
                 }
                 .frame(width: 280, height: 52)
                 .foregroundStyle(.white)
-                .background(
-                    LinearGradient(
-                        colors: [
-                            Color(red: 0.10, green: 0.52, blue: 1.0), // #1A85FF
-                            Color(red: 0.00, green: 0.78, blue: 0.88)  // #00C8E0
-                        ],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
+                .background(XTheme.neuralGradient)
                 .clipShape(Capsule())
             }
             .buttonStyle(.plain)
-            .xGlow(Color(red: 0.10, green: 0.52, blue: 1.0), radius: 10)
+            .xHeroGlow(XTheme.accent, radius: 14)
 
             HStack(spacing: 12) {
                 SecondaryHeroButton(
@@ -247,9 +239,15 @@ private struct DashboardMetric: View {
     var body: some View {
         XCard {
             VStack(alignment: .leading, spacing: 10) {
-                Image(systemName: icon).foregroundStyle(color)
-                Text(value).font(.system(size: 22, weight: .bold)).foregroundStyle(XTheme.textPrimary)
-                Text(title).font(.system(size: 11)).foregroundStyle(XTheme.textSecondary)
+                Image(systemName: icon)
+                    .foregroundStyle(color)
+                    .xGlow(color, radius: 3)
+                Text(value)
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .foregroundStyle(XTheme.textPrimary)
+                Text(title)
+                    .font(.system(size: 11))
+                    .foregroundStyle(XTheme.textSecondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }

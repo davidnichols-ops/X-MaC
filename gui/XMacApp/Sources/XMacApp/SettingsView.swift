@@ -154,7 +154,7 @@ struct SettingsView: View {
             }
             .padding(20)
         }
-        .background(XTheme.bgPrimary)
+        .background(XTheme.voidGradient)
         .sheet(isPresented: $showingImportSheet) {
             ImportProfileSheet(importJSON: $importJSON, profiles: profiles, isPresented: $showingImportSheet)
         }

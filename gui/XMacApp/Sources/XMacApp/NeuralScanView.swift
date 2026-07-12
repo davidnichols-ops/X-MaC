@@ -15,7 +15,7 @@ struct NeuralScanView: View {
                 NeuralIdleView()
             }
         }
-        .background(XTheme.bgPrimary)
+        .background(XTheme.voidGradient)
     }
 }
 
@@ -143,7 +143,7 @@ struct NeuralIdleView: View {
                 .foregroundStyle(XTheme.bgPrimary)
                 .padding(.horizontal, 20)
                 .padding(.vertical, 10)
-                .background(XTheme.anomaly)
+                .background(XTheme.neuralGradient)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .xGlow(XTheme.anomaly)
             }
@@ -198,7 +198,7 @@ struct NeuralResultsView: View {
                     .tag(1)
             }
         }
-        .background(XTheme.bgPrimary)
+        .background(XTheme.voidGradient)
     }
 }
 

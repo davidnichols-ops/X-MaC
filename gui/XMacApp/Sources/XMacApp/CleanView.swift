@@ -74,7 +74,7 @@ struct CleanView: View {
             }
             .padding(20)
         }
-        .background(XTheme.bgPrimary)
+        .background(XTheme.voidGradient)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button("Export Report") {
@@ -118,7 +118,8 @@ struct CleanReclaimCard: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(formatBytes(reclaimable))
                             .font(.system(size: 28, weight: .bold))
-                            .foregroundStyle(XTheme.textPrimary)
+                            .foregroundStyle(XTheme.metallicGradient)
+                            .xGlow(XTheme.accent, radius: 4)
                         Text("\(count) items can be safely removed")
                             .font(.system(size: 12))
                             .foregroundStyle(XTheme.textSecondary)
