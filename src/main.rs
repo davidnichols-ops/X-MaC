@@ -495,23 +495,28 @@ async fn run_ram_boost(
 
     drop(ctx);
 
-    // Print findings as they arrive
+    // Print findings as they arrive — JSON or plain text depending on --format
+    let is_json = cli.global.format == cli::args::OutputFormat::Json
+        || cli.global.format == cli::args::OutputFormat::JsonPretty;
+
     let mut findings = Vec::new();
     while let Some(finding) = rx.recv().await {
+        if is_json {
+            // Stream JSON lines immediately so the GUI can parse them
+            serde_json::to_writer(std::io::stdout(), &finding)?;
+            println!();
+        } else {
+            println!("{}", finding.title);
+            println!("{}", finding.description);
+            if let Some(hint) = &finding.remediation_hint {
+                println!("  → {}", hint);
+            }
+            println!();
+        }
         findings.push(finding);
     }
 
     boost_handle.await??;
-
-    // Print the report
-    for finding in &findings {
-        println!("{}", finding.title);
-        println!("{}", finding.description);
-        if let Some(hint) = &finding.remediation_hint {
-            println!("  → {}", hint);
-        }
-        println!();
-    }
 
     Ok(())
 }
