@@ -1,69 +1,67 @@
-"""
-GAT (Graph Attention Network) model for X-MaC file system graph analysis.
-Predicts safety_score (safe to delete) and anomaly_score (unusual file).
-"""
+"""GAT model for X-MaC file system graph analysis."""
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn import GATConv, global_mean_pool
+from torch_geometric.nn import GATConv
 
 
 class GATModel(nn.Module):
-    def __init__(self, num_features=9, hidden_dim=64, num_classes=27, num_heads=4):
+    def __init__(self, num_features=16, hidden_dim=128, num_classes=27, num_heads=8,
+                 num_layers=3, dropout=0.2):
         super().__init__()
-        self.conv1 = GATConv(num_features, hidden_dim, heads=num_heads, dropout=0.1)
-        self.conv2 = GATConv(hidden_dim * num_heads, hidden_dim, heads=1, dropout=0.1)
+        if hidden_dim % num_heads:
+            raise ValueError("hidden_dim must be divisible by num_heads")
+        if num_layers < 2:
+            raise ValueError("num_layers must be at least 2")
+        self.num_features = num_features
+        self.hidden_dim = hidden_dim
+        self.num_classes = num_classes
+        self.num_heads = num_heads
+        self.num_layers = num_layers
+        self.dropout = dropout
+        self.input_proj = nn.Linear(num_features, hidden_dim)
+        self.convs = nn.ModuleList([
+            GATConv(hidden_dim, hidden_dim // num_heads, heads=num_heads, dropout=dropout)
+            for _ in range(num_layers)
+        ])
+        self.norms = nn.ModuleList([nn.LayerNorm(hidden_dim) for _ in range(num_layers)])
+        self.safety_head = self._head(1)
+        self.anomaly_head = self._head(1)
+        self.class_head = self._head(num_classes)
 
-        # Safety score head (regression -> sigmoid)
-        self.safety_head = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim // 2),
+    def _head(self, output_dim):
+        return nn.Sequential(
+            nn.Linear(self.hidden_dim, self.hidden_dim),
             nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(hidden_dim // 2, 1)
-        )
-
-        # Anomaly score head (regression -> sigmoid)
-        self.anomaly_head = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(hidden_dim // 2, 1)
-        )
-
-        # Classification head (node type prediction)
-        self.class_head = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.ReLU(),
-            nn.Linear(hidden_dim // 2, num_classes)
+            nn.Dropout(self.dropout),
+            nn.Linear(self.hidden_dim, output_dim),
         )
 
     def forward(self, x, edge_index, batch=None):
-        # x: [B, N, F] or [N, F]
+        batched_shape = None
         if x.dim() == 3:
-            B, N, F = x.shape
-            x = x.view(B * N, F)
+            batch_size, node_count, feature_count = x.shape
+            batched_shape = (batch_size, node_count)
+            x = x.reshape(batch_size * node_count, feature_count)
             if edge_index.dim() == 3:
-                # Multiple graphs
-                edge_indices = []
-                offset = 0
-                for i in range(B):
-                    edge_indices.append(edge_index[i] + offset)
-                    offset += N
-                edge_index = torch.cat(edge_indices, dim=1)
-
-        x = F.elu(self.conv1(x, edge_index))
-        x = F.dropout(x, p=0.1, training=self.training)
-        x = F.elu(self.conv2(x, edge_index))
-
+                edge_index = torch.cat([
+                    edge_index[index] + index * node_count for index in range(batch_size)
+                ], dim=1)
+        x = self.input_proj(x)
+        for index, (conv, norm) in enumerate(zip(self.convs, self.norms)):
+            identity = x
+            x = F.elu(conv(x, edge_index))
+            x = norm(x)
+            if index < self.num_layers - 1:
+                x = F.dropout(x, p=self.dropout, training=self.training)
+                x = x + identity
+        logits = self.class_head(x)
         safety = self.safety_head(x)
         anomaly = self.anomaly_head(x)
-        logits = self.class_head(x)
-
-        # Reshape back if batched
-        if 'B' in dir() and 'N' in dir():
-            safety = safety.view(B, N, 1)
-            anomaly = anomaly.view(B, N, 1)
-            logits = logits.view(B, N, -1)
-
-        return logits, safety
+        if batched_shape is not None:
+            batch_size, node_count = batched_shape
+            logits = logits.reshape(batch_size, node_count, -1)
+            safety = safety.reshape(batch_size, node_count, 1)
+            anomaly = anomaly.reshape(batch_size, node_count, 1)
+        return logits, safety, anomaly

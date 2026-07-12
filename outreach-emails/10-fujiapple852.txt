@@ -1,0 +1,22 @@
+To: fujiapple852@gmail.com
+Name: FujiApple
+GitHub: https://github.com/fujiapple852
+
+Subject: trippy and X-MaC — Rust system tools, would value your perspective
+
+---
+
+Hi,
+
+Trippy is an excellent piece of work — a Rust network diagnostic tool with real depth. The TUI and the cross-platform approach are both really well executed.
+
+I'm building X-MaC, an open source macOS diagnostic and maintenance tool with a Rust core. It scans for disk usage, cache bloat, PATH conflicts, broken symlinks, missing dylibs, environment mapping, and system maintenance issues. It also has a GNN model (CoreML) for filesystem anomaly detection and a SwiftUI frontend.
+
+As a Rust developer who builds polished system tools, your perspective on the Rust architecture — the engine system, cross-platform support (we just added Linux), and the overall code structure — would be genuinely valuable:
+
+https://github.com/davidnichols-ops/X-MaC
+
+Discussions are enabled. Any feedback on the Rust side of things would be much appreciated.
+
+Best,
+David

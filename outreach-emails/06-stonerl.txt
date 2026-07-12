@@ -1,0 +1,22 @@
+To: toni.foerster@gmail.com
+Name: Toni Förster
+GitHub: https://github.com/stonerl
+
+Subject: Thaw and X-MaC — macOS open source utilities, would love to connect
+
+---
+
+Hi Toni,
+
+I've been following your work on Thaw — it's a great evolution of the menu bar manager concept, and the execution in SwiftUI is really polished.
+
+I'm building X-MaC, an open source macOS diagnostic and maintenance tool. It combines a Rust core for system scanning (disk usage, cache bloat, PATH conflicts, broken symlinks, missing dylibs, environment mapping, system maintenance) with a SwiftUI frontend. It also has a GNN model (CoreML) for filesystem anomaly detection and generates safe remediation scripts.
+
+As someone who ships polished macOS utilities, your perspective on the project would be genuinely valuable:
+
+https://github.com/davidnichols-ops/X-MaC
+
+Discussions are enabled. Any feedback — on the Swift side, the UX, or the overall approach — would be much appreciated.
+
+Best,
+David

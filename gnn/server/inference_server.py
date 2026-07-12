@@ -38,10 +38,17 @@ def load_model():
     global model, label_map, reverse_label_map
     if os.path.exists(MODEL_PATH):
         checkpoint = torch.load(MODEL_PATH, map_location=device)
-        num_features = checkpoint.get("num_features", 9)
+        num_features = checkpoint.get("num_features", 16)
         num_classes = checkpoint.get("num_classes", 27)
-        hidden_dim = checkpoint.get("hidden_dim", 64)
-        model = GATModel(num_features=num_features, hidden_dim=hidden_dim, num_classes=num_classes)
+        hidden_dim = checkpoint.get("hidden_dim", 128)
+        model = GATModel(
+            num_features=num_features,
+            hidden_dim=hidden_dim,
+            num_classes=num_classes,
+            num_heads=checkpoint.get("num_heads", 8),
+            num_layers=checkpoint.get("num_layers", 3),
+            dropout=checkpoint.get("dropout", 0.2),
+        )
         model.load_state_dict(checkpoint["model_state_dict"])
         model.eval()
         print(f"Model loaded from {MODEL_PATH}")
@@ -60,7 +67,7 @@ class GraphRequest(BaseModel):
     nodes: List[Dict[str, Any]]
     edges: List[Dict[str, Any]]
     root_path: str = ""
-    num_features: int = 9
+    num_features: int = 16
 
 
 class ScoreResponse(BaseModel):
@@ -93,15 +100,15 @@ async def predict(req: GraphRequest):
         edge_dst = [e["target"] for e in req.edges]
         edge_index = torch.tensor([edge_src, edge_dst], dtype=torch.long)
     else:
-        edge_index = torch.zeros((2, 1), dtype=torch.long)
+        edge_index = torch.empty((2, 0), dtype=torch.long)
 
     t1 = time.time()
 
     # Run inference
     with torch.no_grad():
-        safety_logits, anomaly_logits = model(node_features, edge_index)
-        safety_scores = torch.sigmoid(safety_logits.squeeze(0))  # [N]
-        anomaly_scores = torch.sigmoid(anomaly_logits.squeeze(0))  # [N]
+        logits, safety_logits, anomaly_logits = model(node_features, edge_index)
+        safety_scores = torch.sigmoid(safety_logits.squeeze(0).squeeze(-1))
+        anomaly_scores = torch.sigmoid(anomaly_logits.squeeze(0).squeeze(-1))
 
     t2 = time.time()
 
@@ -110,7 +117,7 @@ async def predict(req: GraphRequest):
     for i, node in enumerate(req.nodes):
         safety = safety_scores[i].item()
         anomaly = anomaly_scores[i].item()
-        label_idx = int(torch.argmax(safety_logits[0, i]).item())
+        label_idx = int(torch.argmax(logits[0, i]).item())
         label = reverse_label_map.get(label_idx, "file")
 
         scores.append({

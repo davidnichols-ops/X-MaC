@@ -23,6 +23,7 @@ gnn/venv/
 *.pth
 # Keep the pre-trained CoreML model — it's needed for the build
 # gnn/XMacGNN.mlpackage  <-- intentionally tracked
+gnn/XMacGNN.previous*.mlpackage/
 
 # macOS
 .DS_Store

@@ -1,0 +1,22 @@
+To: fpillet@gmail.com
+Name: Florent Pillet
+GitHub: https://github.com/fpillet
+
+Subject: X-MaC — open source macOS system tool (Rust + Swift), seeking feedback from a fellow macOS dev
+
+---
+
+Hi Florent,
+
+I've been following your work in the Swift/macOS space for a while — your contributions to the Swift community and your cross-platform work (Swift, Kotlin, TypeScript) are genuinely impressive.
+
+I'm building X-MaC, an open source macOS diagnostic and maintenance tool. It has a Rust core that handles scanning (disk usage, cache bloat, PATH conflicts, broken symlinks, missing dylibs, environment mapping) and a SwiftUI frontend with a custom neural-network-themed UI. It also includes a GNN model exported to CoreML for filesystem anomaly detection.
+
+As someone who works across Swift and server-side technologies, your perspective on the architecture (Rust core + Swift GUI) would be really valuable. The project is here:
+
+https://github.com/davidnichols-ops/X-MaC
+
+Discussions are enabled — I'd welcome any feedback, even just a quick look. No pressure at all.
+
+Best,
+David

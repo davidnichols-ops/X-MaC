@@ -1,0 +1,22 @@
+To: development@haukesomm.de
+Name: Hauke Sommerfeld
+GitHub: https://github.com/haukesomm
+
+Subject: apple-photos-export and X-MaC — Rust macOS tools, would love to connect
+
+---
+
+Hi Hauke,
+
+Apple-photos-export is a really useful tool — accessing the macOS Photos library programmatically is non-trivial, and your Rust implementation is clean and well-structured.
+
+I'm building X-MaC, an open source macOS diagnostic and maintenance tool with a Rust core. It scans for disk usage, cache bloat, PATH conflicts, broken symlinks, missing dylibs, environment mapping, and system maintenance. It also has a GNN model (CoreML) for filesystem anomaly detection and a SwiftUI frontend.
+
+As a fellow Rust developer working on macOS-specific tooling, I'd really value your perspective on the project:
+
+https://github.com/davidnichols-ops/X-MaC
+
+Discussions are enabled. Any feedback on the Rust architecture or the macOS-specific handling would be much appreciated.
+
+Best,
+David

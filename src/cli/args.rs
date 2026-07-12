@@ -157,6 +157,11 @@ pub enum Commands {
 
     /// Install xmac to a directory on your PATH so it runs from anywhere.
     Install(InstallArgs),
+
+    /// Boost RAM: show memory usage, purge inactive memory, and optionally
+    /// kill memory-hungry processes. On macOS runs `purge`; on Linux drops
+    /// kernel caches. Shows before/after comparison.
+    RamBoost(RamBoostArgs),
 }
 
 impl Commands {
@@ -176,6 +181,7 @@ impl Commands {
             Commands::Graph(_) => crate::core::types::EngineId::All,
             Commands::Purge(_) => crate::core::types::EngineId::Clean,
             Commands::Install(_) => crate::core::types::EngineId::All,
+            Commands::RamBoost(_) => crate::core::types::EngineId::All,
         }
     }
 }
@@ -555,5 +561,39 @@ pub enum PurgeCategoryArg {
     LanguageFile,
     DocumentVersion,
     UniversalBinary,
+}
+
+/// Arguments for the `ram-boost` command — RAM optimizer and memory cleaner.
+#[derive(Args, Debug, Clone)]
+pub struct RamBoostArgs {
+    /// Show memory report only — don't purge or kill anything.
+    #[arg(long, default_value = "false")]
+    pub report_only: bool,
+
+    /// Purge inactive/compressed memory (macOS: `purge`, Linux: drop_caches).
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub purge: bool,
+
+    /// Kill the top N memory-hungry processes (use with caution).
+    #[arg(long, default_value = "0")]
+    pub kill_top: usize,
+
+    /// Kill processes by name (e.g. --kill-name "Slack,Spotify").
+    /// The process is sent SIGTERM first, then SIGKILL after 5s if still alive.
+    #[arg(long)]
+    pub kill_name: Option<String>,
+
+    /// Force kill (SIGKILL) instead of graceful SIGTERM.
+    #[arg(long, default_value = "false")]
+    pub force: bool,
+
+    /// Minimum RSS in MB for a process to be considered for killing.
+    #[arg(long, default_value = "500")]
+    pub min_rss_mb: u64,
+
+    /// Don't kill system processes (kernel_task, launchd, WindowServer, etc.).
+    /// Enabled by default — disable with --allow-system-kill (dangerous).
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub protect_system: bool,
 }
 

@@ -77,8 +77,7 @@ final class CoreMLGNNManager {
         // Parse the graph JSON
         guard let graphData = graphJSON.data(using: .utf8),
               let graph = try? JSONSerialization.jsonObject(with: graphData) as? [String: Any],
-              let nodes = graph["nodes"] as? [[String: Any]],
-              let edges = graph["edges"] as? [[String: Any]] else {
+              let nodes = graph["nodes"] as? [[String: Any]] else {
             print("[CoreMLGNN] Failed to parse graph JSON")
             return nil
         }
@@ -91,43 +90,39 @@ final class CoreMLGNNManager {
         // Hard cap to keep inference fast and within CoreML's comfort zone.
         let nodeCount = min(nodes.count, 600)
         let cappedNodes = Array(nodes.prefix(nodeCount))
-        let numFeatures = (cappedNodes[0]["features"] as? [Double])?.count ?? 9
+        let featureCount = 16
+        guard cappedNodes.allSatisfy({ ($0["features"] as? [Double])?.count == featureCount }) else {
+            print("[CoreMLGNN] Invalid node feature dimensions — using rule-based fallback")
+            return fallbackResponse(nodes: cappedNodes)
+        }
         print("[CoreMLGNN] JSON parse: \(Date().timeIntervalSince(overallStart))s, nodes: \(nodeCount)")
 
-        if loadModel() == nil {
+        guard let loadedModel = loadModel() else {
             print("[CoreMLGNN] No model available — using rule-based fallback")
             return fallbackResponse(nodes: cappedNodes)
         }
+        guard let inputConstraint = loadedModel.modelDescription.inputDescriptionsByName["node_features"]?.multiArrayConstraint,
+              inputConstraint.shape.count == 2,
+              inputConstraint.shape.last?.intValue == featureCount,
+              loadedModel.modelDescription.outputDescriptionsByName["predictions"] != nil else {
+            print("[CoreMLGNN] Model interface or feature dimensions are invalid — using rule-based fallback")
+            return fallbackResponse(nodes: cappedNodes)
+        }
 
-        // Create input arrays
+        // Create input array
         let arrayStart = Date()
-        guard let nodeFeatures = try? MLMultiArray(shape: [1, NSNumber(value: nodeCount), NSNumber(value: numFeatures)], dataType: .float32) else {
-            print("[CoreMLGNN] Failed to create MLMultiArray inputs")
+        guard let nodeFeatures = try? MLMultiArray(shape: [NSNumber(value: nodeCount), NSNumber(value: featureCount)], dataType: .float32) else {
+            print("[CoreMLGNN] Failed to create MLMultiArray input")
             return fallbackResponse(nodes: cappedNodes)
         }
 
         // Fill node features
         for (i, node) in cappedNodes.enumerated() {
-            if let features = node["features"] as? [Double] {
-                for (j, f) in features.enumerated() {
-                    nodeFeatures[[0, NSNumber(value: i), NSNumber(value: j)]] = NSNumber(value: Float(f))
-                }
+            guard let features = node["features"] as? [Double] else {
+                return fallbackResponse(nodes: cappedNodes)
             }
-        }
-
-        // Create edge index array [2, num_edges]
-        let edgeCount = min(edges.count, nodeCount * 10)
-        let cappedEdges = Array(edges.prefix(edgeCount))
-        guard let edgeIndex = try? MLMultiArray(shape: [2, NSNumber(value: max(edgeCount, 1))], dataType: .int32) else {
-            print("[CoreMLGNN] Failed to create edge index array")
-            return fallbackResponse(nodes: cappedNodes)
-        }
-
-        for (i, edge) in cappedEdges.enumerated() {
-            if let src = edge["source"] as? Int, let tgt = edge["target"] as? Int,
-               src < nodeCount, tgt < nodeCount {
-                edgeIndex[[0, NSNumber(value: i)]] = NSNumber(value: Int32(src))
-                edgeIndex[[1, NSNumber(value: i)]] = NSNumber(value: Int32(tgt))
+            for (j, feature) in features.enumerated() {
+                nodeFeatures[[NSNumber(value: i), NSNumber(value: j)]] = NSNumber(value: Float(feature))
             }
         }
         print("[CoreMLGNN] Array prep: \(Date().timeIntervalSince(arrayStart))s")
@@ -135,44 +130,55 @@ final class CoreMLGNNManager {
         // Run prediction with a strict timeout. CoreML can hang on dynamic shapes.
         let inputDict: [String: Any] = [
             "node_features": nodeFeatures,
-            "edge_index": edgeIndex,
         ]
 
         do {
             let features = try MLDictionaryFeatureProvider(dictionary: inputDict)
             let predStart = Date()
             let output = try await withTimeout(seconds: 5) {
-                return try await self.model!.prediction(from: features)
+                return try await loadedModel.prediction(from: features)
             }
             print("[CoreMLGNN] Prediction: \(Date().timeIntervalSince(predStart))s")
 
-            // Extract output — safety scores and anomaly scores
+            // Extract predictions: class logits 0...26, safety 27, anomaly 28
             let extractStart = Date()
             var scores: [GNNScore] = []
 
-            if let safetyOutput = output.featureValue(for: "safety_score")?.multiArrayValue {
-                for i in 0..<nodeCount {
-                    let safety = safetyOutput[[0, NSNumber(value: i)]].doubleValue
-                    let anomaly = output.featureValue(for: "anomaly_score")?.multiArrayValue?[[0, NSNumber(value: i)]].doubleValue ?? 0.0
-                    let path = cappedNodes[i]["path"] as? String ?? ""
-                    let sizeBytes = cappedNodes[i]["size_bytes"] as? Int
-                    let label = classifyNode(safety: safety, anomaly: anomaly, node: cappedNodes[i])
-
-                    let confidence = abs(safety - anomaly)
-                    let explanation = explainScore(safety: safety, anomaly: anomaly, node: cappedNodes[i])
-                    scores.append(GNNScore(
-                        path: path,
-                        label: label,
-                        safety_score: safety,
-                        anomaly_score: anomaly,
-                        confidence: confidence,
-                        explanation: explanation,
-                        size_bytes: sizeBytes
-                    ))
-                }
-            } else {
-                print("[CoreMLGNN] Missing output features — using fallback")
+            guard let predictions = output.featureValue(for: "predictions")?.multiArrayValue,
+                  predictions.shape.count == 2,
+                  predictions.shape[0].intValue == nodeCount,
+                  predictions.shape[1].intValue == 29 else {
+                print("[CoreMLGNN] Invalid predictions output — using fallback")
                 return fallbackResponse(nodes: cappedNodes)
+            }
+
+            for i in 0..<nodeCount {
+                var classIndex = 0
+                var highestLogit = -Double.infinity
+                for column in 0...26 {
+                    let logit = predictions[[NSNumber(value: i), NSNumber(value: column)]].doubleValue
+                    if logit > highestLogit {
+                        highestLogit = logit
+                        classIndex = column
+                    }
+                }
+
+                let safety = predictions[[NSNumber(value: i), NSNumber(value: 27)]].doubleValue
+                let anomaly = predictions[[NSNumber(value: i), NSNumber(value: 28)]].doubleValue
+                let path = cappedNodes[i]["path"] as? String ?? ""
+                let sizeBytes = cappedNodes[i]["size_bytes"] as? Int
+                let label = reverseLabelMap[classIndex] ?? classifyNode(safety: safety, anomaly: anomaly, node: cappedNodes[i])
+                let confidence = abs(safety - anomaly)
+                let explanation = explainScore(safety: safety, anomaly: anomaly, node: cappedNodes[i])
+                scores.append(GNNScore(
+                    path: path,
+                    label: label,
+                    safety_score: safety,
+                    anomaly_score: anomaly,
+                    confidence: confidence,
+                    explanation: explanation,
+                    size_bytes: sizeBytes
+                ))
             }
             print("[CoreMLGNN] Output extraction: \(Date().timeIntervalSince(extractStart))s")
             print("[CoreMLGNN] Total: \(Date().timeIntervalSince(overallStart))s")

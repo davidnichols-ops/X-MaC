@@ -1,0 +1,22 @@
+To: gouws.xander@gmail.com
+Name: Xander
+GitHub: https://github.com/gouwsxander
+
+Subject: Reef and X-MaC — macOS open source, would value your perspective
+
+---
+
+Hi Xander,
+
+Reef is a beautifully designed macOS window manager — the per-app Alt-Tab concept is unique, and the SwiftUI implementation is clean.
+
+I'm building X-MaC, an open source macOS diagnostic and maintenance tool. It has a Rust core that handles system scanning (disk usage, cache bloat, PATH conflicts, broken symlinks, missing dylibs, environment mapping) and a SwiftUI frontend with a custom neural-network-themed visual identity. It also includes a GNN model (CoreML) for filesystem anomaly detection.
+
+Your experience building polished macOS utilities with SwiftUI would make your feedback really valuable to me. The project is here:
+
+https://github.com/davidnichols-ops/X-MaC
+
+Discussions are enabled — I'd welcome any thoughts, even just a quick look.
+
+Best,
+David

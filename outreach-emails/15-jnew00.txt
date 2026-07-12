@@ -1,0 +1,22 @@
+To: jnew00@gmail.com
+Name: —
+GitHub: https://github.com/jnew00
+
+Subject: gargantua and X-MaC — open source macOS cleaners, would love to connect
+
+---
+
+Hi,
+
+I came across your work on gargantua — a native macOS system cleaner with YAML-driven safety rules and local AI explainability via MLX. The safety-first approach and the AI integration are both really interesting directions.
+
+I'm building X-MaC, an open source macOS diagnostic and maintenance tool with a similar philosophy. It has a Rust core for scanning (disk usage, cache bloat, PATH conflicts, broken symlinks, missing dylibs, environment mapping, system maintenance) and a SwiftUI frontend. It also includes a GNN model (CoreML) for filesystem anomaly detection and generates safe remediation scripts with a review-first approach.
+
+Since we're both exploring the intersection of macOS cleanup and AI/ML, I'd really value your perspective:
+
+https://github.com/davidnichols-ops/X-MaC
+
+Discussions are enabled. I'd welcome any feedback, collaboration, or exchange of ideas — especially on the ML side.
+
+Best,
+David

@@ -1,0 +1,164 @@
+{
+  "app_bundle": {
+    "nodes": 10585,
+    "node_fraction": 0.012056412849846689,
+    "graphs": 5226,
+    "graph_fraction": 0.7465714285714286
+  },
+  "archive": {
+    "nodes": 21627,
+    "node_fraction": 0.024633352924292334,
+    "graphs": 6587,
+    "graph_fraction": 0.941
+  },
+  "audio": {
+    "nodes": 16514,
+    "node_fraction": 0.018809598658702714,
+    "graphs": 6216,
+    "graph_fraction": 0.888
+  },
+  "backup_dir": {
+    "nodes": 6154,
+    "node_fraction": 0.007009462888800806,
+    "graphs": 3949,
+    "graph_fraction": 0.5641428571428572
+  },
+  "build_output": {
+    "nodes": 43836,
+    "node_fraction": 0.0499296092287085,
+    "graphs": 7000,
+    "graph_fraction": 1.0
+  },
+  "cache_dir": {
+    "nodes": 48819,
+    "node_fraction": 0.05560529229255225,
+    "graphs": 7000,
+    "graph_fraction": 1.0
+  },
+  "cache_file": {
+    "nodes": 57787,
+    "node_fraction": 0.06581992719452912,
+    "graphs": 6989,
+    "graph_fraction": 0.9984285714285714
+  },
+  "cargo_target": {
+    "nodes": 34667,
+    "node_fraction": 0.03948603346864763,
+    "graphs": 7000,
+    "graph_fraction": 1.0
+  },
+  "config_file": {
+    "nodes": 48886,
+    "node_fraction": 0.05568160591191358,
+    "graphs": 6984,
+    "graph_fraction": 0.9977142857142857
+  },
+  "directory": {
+    "nodes": 115700,
+    "node_fraction": 0.1317833695538273,
+    "graphs": 7000,
+    "graph_fraction": 1.0
+  },
+  "disk_image": {
+    "nodes": 6106,
+    "node_fraction": 0.006954790445079252,
+    "graphs": 3904,
+    "graph_fraction": 0.5577142857142857
+  },
+  "document": {
+    "nodes": 32042,
+    "node_fraction": 0.03649613420262519,
+    "graphs": 6870,
+    "graph_fraction": 0.9814285714285714
+  },
+  "executable": {
+    "nodes": 21912,
+    "node_fraction": 0.024957970558889056,
+    "graphs": 6603,
+    "graph_fraction": 0.9432857142857143
+  },
+  "file": {
+    "nodes": 73687,
+    "node_fraction": 0.08393017417729362,
+    "graphs": 7000,
+    "graph_fraction": 1.0
+  },
+  "git_dir": {
+    "nodes": 27982,
+    "node_fraction": 0.03187175667117714,
+    "graphs": 6887,
+    "graph_fraction": 0.9838571428571429
+  },
+  "image": {
+    "nodes": 26995,
+    "node_fraction": 0.030747554547152705,
+    "graphs": 6801,
+    "graph_fraction": 0.9715714285714285
+  },
+  "language_file": {
+    "nodes": 12121,
+    "node_fraction": 0.013805931048936394,
+    "graphs": 5618,
+    "graph_fraction": 0.8025714285714286
+  },
+  "library_dir": {
+    "nodes": 26318,
+    "node_fraction": 0.029976445288829964,
+    "graphs": 7000,
+    "graph_fraction": 1.0
+  },
+  "library_file": {
+    "nodes": 24440,
+    "node_fraction": 0.027837385928224195,
+    "graphs": 6715,
+    "graph_fraction": 0.9592857142857143
+  },
+  "log_dir": {
+    "nodes": 31492,
+    "node_fraction": 0.03586967911831573,
+    "graphs": 7000,
+    "graph_fraction": 1.0
+  },
+  "log_file": {
+    "nodes": 41446,
+    "node_fraction": 0.04720737713507283,
+    "graphs": 6961,
+    "graph_fraction": 0.9944285714285714
+  },
+  "object_file": {
+    "nodes": 31977,
+    "node_fraction": 0.03642209860175225,
+    "graphs": 6878,
+    "graph_fraction": 0.9825714285714285
+  },
+  "python_cache": {
+    "nodes": 29996,
+    "node_fraction": 0.034165721288993985,
+    "graphs": 6876,
+    "graph_fraction": 0.9822857142857143
+  },
+  "root": {
+    "nodes": 7000,
+    "node_fraction": 0.007973064709393182,
+    "graphs": 7000,
+    "graph_fraction": 1.0
+  },
+  "source_code": {
+    "nodes": 60038,
+    "node_fraction": 0.06838383700322112,
+    "graphs": 6993,
+    "graph_fraction": 0.999
+  },
+  "trash": {
+    "nodes": 6110,
+    "node_fraction": 0.006959346482056049,
+    "graphs": 3890,
+    "graph_fraction": 0.5557142857142857
+  },
+  "video": {
+    "nodes": 13719,
+    "node_fraction": 0.015626067821166437,
+    "graphs": 5869,
+    "graph_fraction": 0.8384285714285714
+  }
+}

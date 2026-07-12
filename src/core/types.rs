@@ -71,6 +71,7 @@ pub enum Category {
     TrashBin,
     DocumentVersion,
     SystemMaintenance,
+    RamOptimization,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

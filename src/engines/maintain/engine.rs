@@ -2,11 +2,12 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::cli::args::MaintainArgs;
+use crate::cli::args::{MaintainArgs, RamBoostArgs};
 use crate::core::context::ScanContext;
 use crate::core::engine::Engine;
 use crate::core::error::EngineError;
 use crate::core::types::{Category, EngineId, EngineStats, Finding, Severity, Target};
+use crate::util::memory::MemoryStats;
 
 /// The maintain engine runs system maintenance tasks.
 ///
@@ -570,6 +571,271 @@ impl MaintainEngine {
         ];
         ctx.emit(findings[0].clone()).await;
         (findings, 1)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  RAM Boost — memory optimizer
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Run the RAM boost pipeline: report → purge → kill processes → report.
+    pub async fn run_ram_boost(
+        args: RamBoostArgs,
+        ctx: Arc<ScanContext>,
+    ) -> std::result::Result<EngineStats, EngineError> {
+        let start = Instant::now();
+        let mut items_scanned = 0u64;
+        let mut findings_count = 0u64;
+
+        // ── 1. Before snapshot ──────────────────────────────────────────────
+        let before = MemoryStats::collect();
+        items_scanned += 1;
+
+        let before_finding = Finding::new(
+            EngineId::All,
+            Severity::Info,
+            Category::RamOptimization,
+            Target::Path(std::path::PathBuf::from("/")),
+            "Memory report (before)",
+            before.report(),
+        )
+        .with_metadata("phase", serde_json::json!("before"))
+        .with_metadata("used_bytes", serde_json::json!(before.used_bytes))
+        .with_metadata("available_bytes", serde_json::json!(before.available_bytes))
+        .with_metadata(
+            "memory_pressure",
+            serde_json::json!(format!("{:?}", before.memory_pressure)),
+        );
+        ctx.emit(before_finding.clone()).await;
+        findings_count += 1;
+
+        if args.report_only {
+            return Ok(EngineStats {
+                engine: EngineId::All,
+                duration: start.elapsed(),
+                items_scanned,
+                findings_count,
+                errors_count: 0,
+            });
+        }
+
+        // ── 2. Purge inactive memory ────────────────────────────────────────
+        if args.purge {
+            items_scanned += 1;
+            let (ok, msg) = if cfg!(target_os = "macos") {
+                Self::run_command("purge", &[])
+            } else {
+                // Linux: try drop_caches (needs root)
+                Self::run_command(
+                    "sh",
+                    &["-c", "echo 3 > /proc/sys/vm/drop_caches"],
+                )
+            };
+
+            let purge_finding = Finding::new(
+                EngineId::All,
+                if ok { Severity::Info } else { Severity::Medium },
+                Category::RamOptimization,
+                Target::Path(std::path::PathBuf::from("/")),
+                "Purge inactive memory",
+                if ok {
+                    let reclaimable = before.reclaimable_bytes();
+                    format!(
+                        "Inactive memory purged — up to {} could be freed",
+                        crate::util::disk::format_bytes(reclaimable)
+                    )
+                } else {
+                    format!(
+                        "Memory purge failed (may need sudo): {}",
+                        msg
+                    )
+                },
+            )
+            .with_hint(if cfg!(target_os = "macos") {
+                "purge  # may require sudo".to_string()
+            } else {
+                "sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'".to_string()
+            });
+            ctx.emit(purge_finding).await;
+            findings_count += 1;
+        }
+
+        // ── 3. Kill memory-hungry processes ─────────────────────────────────
+        let mut killed = 0u64;
+        if args.kill_top > 0 {
+            let candidates = Self::select_processes_to_kill(&before, args.kill_top, &args);
+            for proc in &candidates {
+                items_scanned += 1;
+                let success = Self::kill_process(proc.pid, args.force);
+                killed += if success { 1 } else { 0 };
+
+                let kill_finding = Finding::new(
+                    EngineId::All,
+                    if success { Severity::Info } else { Severity::Medium },
+                    Category::RamOptimization,
+                    Target::Process(proc.pid),
+                    format!("Kill process: {} (PID {})", proc.name, proc.pid),
+                    if success {
+                        format!(
+                            "Terminated {} (PID {}) — was using {} ({:.1}%)",
+                            proc.name,
+                            proc.pid,
+                            crate::util::disk::format_bytes(proc.rss_bytes),
+                            proc.percent
+                        )
+                    } else {
+                        format!(
+                            "Failed to kill {} (PID {}) — may need elevated permissions",
+                            proc.name, proc.pid
+                        )
+                    },
+                )
+                .with_hint(format!(
+                    "kill -{} {}  # {}",
+                    if args.force { "9" } else { "15" },
+                    proc.pid,
+                    proc.name
+                ));
+                ctx.emit(kill_finding).await;
+                findings_count += 1;
+            }
+        }
+
+        // Kill by name
+        if let Some(names) = &args.kill_name {
+            for name in names.split(',') {
+                let name = name.trim();
+                if name.is_empty() {
+                    continue;
+                }
+                let pids = Self::find_pids_by_name(name);
+                for pid in pids {
+                    items_scanned += 1;
+                    let success = Self::kill_process(pid, args.force);
+                    killed += if success { 1 } else { 0 };
+
+                    let kill_finding = Finding::new(
+                        EngineId::All,
+                        if success { Severity::Info } else { Severity::Medium },
+                        Category::RamOptimization,
+                        Target::Process(pid),
+                        format!("Kill process by name: {} (PID {})", name, pid),
+                        if success {
+                            format!("Terminated '{}' (PID {})", name, pid)
+                        } else {
+                            format!("Failed to kill '{}' (PID {})", name, pid)
+                        },
+                    );
+                    ctx.emit(kill_finding).await;
+                    findings_count += 1;
+                }
+            }
+        }
+
+        // ── 4. After snapshot ───────────────────────────────────────────────
+        // Small delay to let the OS reclaim freed pages
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        let after = MemoryStats::collect();
+        items_scanned += 1;
+
+        let freed = before.used_bytes.saturating_sub(after.used_bytes);
+        let freed_swap = before.swap_used_bytes.saturating_sub(after.swap_used_bytes);
+
+        let summary = format!(
+            "{}\n  ── After Boost ──\n{}\n  Freed: {} RAM, {} swap\n  Processes killed: {}",
+            "─".repeat(40),
+            after.report(),
+            crate::util::disk::format_bytes(freed),
+            crate::util::disk::format_bytes(freed_swap),
+            killed,
+        );
+
+        let after_finding = Finding::new(
+            EngineId::All,
+            if freed > 0 { Severity::Info } else { Severity::Low },
+            Category::RamOptimization,
+            Target::Path(std::path::PathBuf::from("/")),
+            "Memory report (after)",
+            summary,
+        )
+        .with_metadata("phase", serde_json::json!("after"))
+        .with_metadata("used_bytes", serde_json::json!(after.used_bytes))
+        .with_metadata("available_bytes", serde_json::json!(after.available_bytes))
+        .with_metadata("freed_bytes", serde_json::json!(freed))
+        .with_metadata("freed_swap_bytes", serde_json::json!(freed_swap))
+        .with_metadata("processes_killed", serde_json::json!(killed))
+        .with_metadata(
+            "memory_pressure",
+            serde_json::json!(format!("{:?}", after.memory_pressure)),
+        );
+        ctx.emit(after_finding).await;
+        findings_count += 1;
+
+        Ok(EngineStats {
+            engine: EngineId::All,
+            duration: start.elapsed(),
+            items_scanned,
+            findings_count,
+            errors_count: 0,
+        })
+    }
+
+    /// Select processes to kill based on memory usage and safety rules.
+    fn select_processes_to_kill<'a>(
+        stats: &'a MemoryStats,
+        count: usize,
+        args: &RamBoostArgs,
+    ) -> Vec<&'a crate::util::memory::ProcessMemory> {
+        let min_rss = args.min_rss_mb * 1024 * 1024;
+        let protected = [
+            "kernel_task",
+            "launchd",
+            "WindowServer",
+            "loginwindow",
+            "Finder",
+            "Dock",
+            "SystemUIServer",
+            "coreaudiod",
+            "bluetoothd",
+            "systemd",
+            "init",
+            "udev",
+        ];
+
+        stats
+            .top_consumers
+            .iter()
+            .filter(|p| p.rss_bytes >= min_rss)
+            .filter(|p| {
+                if !args.protect_system {
+                    return true;
+                }
+                !protected.iter().any(|&name| p.name.contains(name))
+            })
+            .take(count)
+            .collect()
+    }
+
+    /// Send a signal to a process. Returns true if the signal was sent.
+    fn kill_process(pid: u32, force: bool) -> bool {
+        let signal = if force { "9" } else { "15" };
+        Self::run_command("kill", &["-".to_string() + signal, pid.to_string()].iter().map(String::as_str).collect::<Vec<_>>().as_slice()).0
+    }
+
+    /// Find PIDs by process name using pgrep.
+    fn find_pids_by_name(name: &str) -> Vec<u32> {
+        let output = std::process::Command::new("pgrep")
+            .arg("-x")
+            .arg(name)
+            .output();
+        match output {
+            Ok(o) if o.status.success() => {
+                String::from_utf8_lossy(&o.stdout)
+                    .lines()
+                    .filter_map(|l| l.trim().parse::<u32>().ok())
+                    .collect()
+            }
+            _ => Vec::new(),
+        }
     }
 }
 

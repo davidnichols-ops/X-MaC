@@ -92,6 +92,9 @@ async fn main() -> Result<()> {
         cli::args::Commands::Purge(args) => {
             return run_purge(&cli, args).await;
         }
+        cli::args::Commands::RamBoost(args) => {
+            return run_ram_boost(&cli, args.clone()).await;
+        }
     };
 
     drop(ctx);
@@ -470,4 +473,45 @@ async fn run_quick(
     }
 
     results
+}
+
+/// The `ram-boost` command — memory optimizer with before/after comparison.
+async fn run_ram_boost(
+    cli: &Cli,
+    args: cli::args::RamBoostArgs,
+) -> Result<()> {
+    use tokio::sync::mpsc;
+
+    let (tx, mut rx) = mpsc::channel::<core::types::Finding>(1000);
+    let ctx = Arc::new(ScanContext::new(cli, tx).await?);
+
+    // Run the RAM boost pipeline
+    let boost_handle = {
+        let ctx = ctx.clone();
+        tokio::spawn(async move {
+            engines::maintain::MaintainEngine::run_ram_boost(args, ctx).await
+        })
+    };
+
+    drop(ctx);
+
+    // Print findings as they arrive
+    let mut findings = Vec::new();
+    while let Some(finding) = rx.recv().await {
+        findings.push(finding);
+    }
+
+    boost_handle.await??;
+
+    // Print the report
+    for finding in &findings {
+        println!("{}", finding.title);
+        println!("{}", finding.description);
+        if let Some(hint) = &finding.remediation_hint {
+            println!("  → {}", hint);
+        }
+        println!();
+    }
+
+    Ok(())
 }

@@ -77,6 +77,7 @@ impl CleanupPolicy {
         for cat in [
             "system_info",
             "system_maintenance",
+            "ram_optimization",
             "permission_issue",
             "broken_symlink",
             "missing_dylib",

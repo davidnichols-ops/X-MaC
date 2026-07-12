@@ -142,9 +142,9 @@ impl FixScriptGenerator {
                 | Category::EnvVarConflict
                 | Category::ShellConflict
                 | Category::InvalidSignature => review.push(f),
-                // System maintenance tasks are informational — the command
-                // is in the remediation hint.
-                Category::SystemMaintenance => review.push(f),
+                // System maintenance and RAM optimization tasks are
+                // informational — the command is in the remediation hint.
+                Category::SystemMaintenance | Category::RamOptimization => review.push(f),
                 // Pure discovery / informational — no fix to apply.
                 Category::PythonEnv
                 | Category::NodeEnv
@@ -266,7 +266,7 @@ impl FixScriptGenerator {
                     s.push_str(&format!("# rm -rf -- {}\n", shell_quote(p)));
                 }
             }
-            Category::SystemMaintenance => {
+            Category::SystemMaintenance | Category::RamOptimization => {
                 // The remediation hint contains the command to run.
                 if let Some(hint) = &f.remediation_hint {
                     s.push_str(&format!("# {}\n", hint));
@@ -360,6 +360,7 @@ impl FixScriptGenerator {
             Category::TrashBin => "Trash bins",
             Category::DocumentVersion => "Document versions",
             Category::SystemMaintenance => "System maintenance tasks",
+            Category::RamOptimization => "RAM optimization tasks",
             _ => "Other",
         }
     }
@@ -383,6 +384,7 @@ impl FixScriptGenerator {
             Category::TrashBin => "Empty trash to reclaim space. Use 'rm -rf' for locked files that won't empty normally.",
             Category::DocumentVersion => "macOS document version history. Removing frees space but loses revision history.",
             Category::SystemMaintenance => "System maintenance commands. Some require sudo. Review each command before running.",
+            Category::RamOptimization => "RAM optimization commands. Purging inactive memory is safe but may cause brief I/O slowdown. Killing processes will interrupt active work.",
             Category::PortConflict => "Killing a process may interrupt active work. Confirm the PID is the one you want to stop.",
             Category::PermissionIssue => "Removing SUID/SGID bits may break binaries that legitimately need elevated privileges.",
             _ => "Review before applying.",

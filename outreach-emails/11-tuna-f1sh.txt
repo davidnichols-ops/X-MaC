@@ -1,0 +1,22 @@
+To: git@jbrengineering.co.uk
+Name: John Whittington
+GitHub: https://github.com/tuna-f1sh
+
+Subject: cyme and X-MaC — Rust cross-platform system tools, would love your input
+
+---
+
+Hi John,
+
+Cyme is a great piece of work — a modern cross-platform lsusb in Rust with real attention to detail. I like the approach of maintaining compatibility while adding new features.
+
+I'm building X-MaC, an open source macOS (and now Linux) diagnostic and maintenance tool with a Rust core. It scans for disk usage, cache bloat, PATH conflicts, broken symlinks, missing shared libraries (otool on macOS, ldd on Linux), environment mapping, and system maintenance. It also has a GNN model (CoreML) for filesystem anomaly detection and a SwiftUI frontend.
+
+Since you've navigated the cross-platform Rust system tool challenge with cyme, I'd really value your perspective on how we've structured the cross-platform support:
+
+https://github.com/davidnichols-ops/X-MaC
+
+Discussions are enabled. Any feedback on the Rust architecture or the cross-platform approach would be much appreciated.
+
+Best,
+David

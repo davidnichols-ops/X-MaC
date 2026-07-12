@@ -1,484 +1,285 @@
 #!/usr/bin/env python3
-"""
-X-MaC GNN Training Script
-=========================
-Generates synthetic file-system graphs, trains the GAT model, and exports
-to CoreML (.mlpackage) for on-device inference.
 
-The synthetic data generator creates realistic file-system graphs with:
-- Cache directories (safe to clean, safety=0.9)
-- Build artifacts (safe to clean, safety=0.85)
-- Log files (safe to clean, safety=0.8)
-- Config files (NOT safe, safety=0.1)
-- Source code (NOT safe, safety=0.05)
-- System files (NOT safe, safety=0.0)
-- Large media files (review, safety=0.5)
-- Trash (very safe, safety=0.95)
-
-Features (9-dim, matching Rust extractor):
-  [log_size, depth_norm, is_dir, is_file, is_symlink, is_hidden,
-   age_days_norm, access_age_days_norm, has_extension]
-"""
-
-import os
-import sys
+import argparse
+import copy
 import json
+import os
 import random
-import math
 import time
+from collections import Counter
 from pathlib import Path
 
-# Must set before importing torch
-os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.data import Data, DataLoader
-from torch_geometric.nn import GATConv, global_mean_pool
+from torch_geometric.loader import DataLoader
+from torch_geometric.utils import subgraph
 
-# ─── Config ───────────────────────────────────────────────────────────────
+from data_generator import DATA_DIR, IDX_TO_LABEL, NUM_FEATURES, save_datasets
+from model.gnn import GATModel
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-MODEL_DIR = PROJECT_ROOT / "gnn"
-LABEL_MAP_PATH = MODEL_DIR / "label_map.json"
-COREML_EXPORT_PATH = MODEL_DIR / "XMacGNN.mlpackage"
-
-NUM_FEATURES = 9
-HIDDEN_DIM = 64
+MODEL_DIR = PROJECT_ROOT / "gnn" / "model"
+CHECKPOINT_PATH = MODEL_DIR / "xmac_gnn.pt"
+METRICS_PATH = MODEL_DIR / "training_metrics.json"
 NUM_CLASSES = 27
-NUM_HEADS = 4
-EPOCHS = 200
-BATCH_SIZE = 32
-LR = 0.001
-NUM_SYNTHETIC_GRAPHS = 500
-NODES_PER_GRAPH = 80
-
-# ─── Label map ────────────────────────────────────────────────────────────
-
-with open(LABEL_MAP_PATH) as f:
-    LABEL_MAP = json.load(f)
-LABEL_TO_IDX = {v: k for k, v in LABEL_MAP.items()}
-IDX_TO_LABEL = {v: k for k, v in LABEL_MAP.items()}
-
-# ─── Synthetic data generator ─────────────────────────────────────────────
-
-# Category → (label_idx, safety_score, anomaly_score, typical_size_range)
-CATEGORIES = [
-    # (label_name, safety, anomaly, size_min, size_max, depth_max, is_dir, ext)
-    ("cache_dir",      0.92, 0.15, 1e6, 5e9,   4, True,  None),
-    ("cache_file",     0.90, 0.10, 1e3, 5e8,   5, False, "cache"),
-    ("build_output",   0.85, 0.20, 1e4, 1e9,   5, False, "o"),
-    ("cargo_target",   0.88, 0.15, 1e4, 5e8,   5, False, "rlib"),
-    ("python_cache",   0.90, 0.10, 1e2, 5e7,   5, False, "pyc"),
-    ("log_file",       0.80, 0.30, 1e2, 5e7,   4, False, "log"),
-    ("log_dir",        0.82, 0.25, 1e5, 5e8,   3, True,  None),
-    ("trash",          0.95, 0.05, 1e3, 1e9,   2, False, None),
-    ("temp_file",      0.85, 0.20, 1e2, 5e8,   4, False, "tmp"),
-    ("disk_image",     0.60, 0.40, 1e7, 5e9,   3, False, "dmg"),
-    ("archive",        0.55, 0.35, 1e6, 5e9,   4, False, "zip"),
-    ("backup_dir",     0.50, 0.45, 1e8, 5e10,  3, True,  None),
-    ("language_file",  0.70, 0.20, 1e3, 5e6,   5, False, "lproj"),
-    ("package_manager_cache", 0.88, 0.15, 1e4, 5e8, 4, False, "gz"),
-    ("config_file",    0.10, 0.50, 1e2, 5e5,   4, False, "json"),
-    ("source_code",    0.05, 0.60, 1e2, 5e6,   5, False, "rs"),
-    ("executable",     0.15, 0.55, 1e4, 5e7,   4, False, None),
-    ("library_file",   0.20, 0.50, 1e5, 5e8,   4, False, "dylib"),
-    ("library_dir",    0.15, 0.40, 1e6, 5e9,   3, True,  None),
-    ("document",       0.25, 0.35, 1e3, 5e7,   4, False, "pdf"),
-    ("image",          0.40, 0.30, 1e4, 5e8,   4, False, "png"),
-    ("video",          0.45, 0.35, 1e6, 5e9,   4, False, "mp4"),
-    ("audio",          0.35, 0.30, 1e4, 5e8,   4, False, "mp3"),
-    ("git_dir",        0.08, 0.55, 1e3, 5e8,   3, True,  None),
-    ("app_bundle",     0.12, 0.45, 1e7, 5e9,   2, True,  None),
-    ("directory",      0.30, 0.25, 0,   0,     3, True,  None),
-    ("root",           0.00, 0.50, 0,   0,     0, True,  None),
-]
 
 
-def make_node_features(size_bytes, depth, is_dir, is_file, is_symlink,
-                       is_hidden, age_days, access_days, has_ext, max_depth=6):
-    return [
-        math.log(size_bytes + 1) / 30.0 if size_bytes > 0 else 0.0,
-        min(depth / max_depth, 1.0),
-        1.0 if is_dir else 0.0,
-        1.0 if is_file else 0.0,
-        1.0 if is_symlink else 0.0,
-        1.0 if is_hidden else 0.0,
-        min(age_days / 365.0, 1.0),
-        min(access_days / 365.0, 1.0),
-        1.0 if has_ext else 0.0,
-    ]
+def load_graphs(path):
+    return torch.load(path, weights_only=False)
 
 
-def generate_graph(num_nodes=NODES_PER_GRAPH):
-    """Generate a synthetic file-system graph with realistic labels."""
-    nodes = []
-    edges_src = []
-    edges_dst = []
-
-    # Root node
-    nodes.append({
-        "features": make_node_features(0, 0, True, False, False, False, 0, 0, False),
-        "label": LABEL_MAP["root"],  # 23
-        "safety": 0.0,
-        "anomaly": 0.5,
-    })
-
-    for i in range(1, num_nodes):
-        cat = random.choice(CATEGORIES)
-        label_name, safety, anomaly, smin, smax, dmax, is_dir, ext = cat
-
-        depth = random.randint(1, max(dmax, 1))
-        size = random.uniform(smin, smax) if smax > 0 else 0
-        is_hidden = random.random() < 0.3
-        age_days = random.randint(0, 365 * 3)
-        access_days = random.randint(0, age_days + 1) if age_days > 0 else 0
-        has_ext = ext is not None
-        is_symlink = random.random() < 0.02
-
-        features = make_node_features(
-            size, depth, is_dir, not is_dir, is_symlink,
-            is_hidden, age_days, access_days, has_ext
-        )
-
-        # Add some noise to safety/anomaly for realism
-        safety_noisy = max(0.0, min(1.0, safety + random.gauss(0, 0.05)))
-        anomaly_noisy = max(0.0, min(1.0, anomaly + random.gauss(0, 0.05)))
-
-        label_idx = LABEL_MAP.get(label_name, 13)  # default: file
-
-        nodes.append({
-            "features": features,
-            "label": label_idx,  # already an int
-            "safety": safety_noisy,
-            "anomaly": anomaly_noisy,
-        })
-
-        # Connect to a random parent (earlier node)
-        parent = random.randint(0, i - 1)
-        edges_src.append(parent)
-        edges_dst.append(i)
-
-    # Add some same-directory edges (siblings)
-    for _ in range(num_nodes // 4):
-        a = random.randint(1, num_nodes - 1)
-        b = random.randint(1, num_nodes - 1)
-        if a != b:
-            edges_src.append(a)
-            edges_dst.append(b)
-
-    x = torch.tensor([n["features"] for n in nodes], dtype=torch.float32)
-    edge_index = torch.tensor([edges_src, edges_dst], dtype=torch.long)
-    labels = torch.tensor([n["label"] for n in nodes], dtype=torch.long)
-    safety = torch.tensor([n["safety"] for n in nodes], dtype=torch.float32)
-    anomaly = torch.tensor([n["anomaly"] for n in nodes], dtype=torch.float32)
-
-    return Data(x=x, edge_index=edge_index, y=labels,
-                safety=safety, anomaly=anomaly)
+def choose_device(requested):
+    if requested != "auto":
+        return torch.device(requested)
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
 
 
-def generate_dataset(n=NUM_SYNTHETIC_GRAPHS):
-    """Generate a dataset of synthetic file-system graphs."""
-    graphs = []
-    for _ in range(n):
-        n_nodes = random.randint(30, NODES_PER_GRAPH)
-        graphs.append(generate_graph(n_nodes))
-    return graphs
+def class_weights(graphs):
+    counts = Counter(label for graph in graphs for label in graph.y.tolist())
+    total = sum(counts.values())
+    weights = torch.tensor([
+        total / (NUM_CLASSES * max(counts.get(index, 1), 1)) for index in range(NUM_CLASSES)
+    ], dtype=torch.float32)
+    return weights / weights.mean()
 
 
-# ─── GAT Model (matches gnn/model/gnn.py) ─────────────────────────────────
-
-class GATModel(nn.Module):
-    def __init__(self, num_features=NUM_FEATURES, hidden_dim=HIDDEN_DIM,
-                 num_classes=NUM_CLASSES, num_heads=NUM_HEADS):
-        super().__init__()
-        self.conv1 = GATConv(num_features, hidden_dim, heads=num_heads, dropout=0.1)
-        self.conv2 = GATConv(hidden_dim * num_heads, hidden_dim, heads=1, dropout=0.1)
-
-        self.safety_head = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(hidden_dim // 2, 1)
-        )
-        self.anomaly_head = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(hidden_dim // 2, 1)
-        )
-        self.class_head = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.ReLU(),
-            nn.Linear(hidden_dim // 2, num_classes)
-        )
-
-    def forward(self, x, edge_index, batch=None):
-        x = F.elu(self.conv1(x, edge_index))
-        x = F.dropout(x, p=0.1, training=self.training)
-        x = F.elu(self.conv2(x, edge_index))
-
-        safety = self.safety_head(x)
-        anomaly = self.anomaly_head(x)
-        logits = self.class_head(x)
-
-        return logits, safety, anomaly
+def augment_batch(batch, edge_dropout=0.2, feature_mask=0.1):
+    batch = batch.clone()
+    if random.random() < 0.5:
+        keep = torch.rand(batch.edge_index.size(1), device=batch.edge_index.device) > edge_dropout
+        batch.edge_index = batch.edge_index[:, keep]
+    if random.random() < 0.5:
+        mask = torch.rand(batch.x.shape, device=batch.x.device) < feature_mask
+        batch.x = batch.x.masked_fill(mask, 0.0)
+    if random.random() < 0.3:
+        keep_count = max(2, int(batch.num_nodes * random.uniform(0.7, 1.0)))
+        keep = torch.randperm(batch.num_nodes, device=batch.x.device)[:keep_count].sort().values
+        batch.edge_index, _ = subgraph(keep, batch.edge_index, relabel_nodes=True, num_nodes=batch.num_nodes)
+        for attribute in ("x", "y", "safety", "anomaly", "batch"):
+            setattr(batch, attribute, getattr(batch, attribute)[keep])
+        batch.ptr = None
+    return batch
 
 
-# ─── Training loop ────────────────────────────────────────────────────────
+def loss_components(model, batch, weights, classification_weight=3.0):
+    logits, safety, anomaly = model(batch.x, batch.edge_index, getattr(batch, "batch", None))
+    class_loss = F.cross_entropy(logits, batch.y, weight=weights)
+    safety = torch.sigmoid(safety.squeeze(-1))
+    anomaly = torch.sigmoid(anomaly.squeeze(-1))
+    safety_loss = F.mse_loss(safety, batch.safety)
+    anomaly_loss = F.mse_loss(anomaly, batch.anomaly)
+    loss = classification_weight * class_loss + safety_loss + 0.5 * anomaly_loss
+    return loss, logits, safety, anomaly
 
-def train():
-    print("=" * 60)
-    print("X-MaC GNN Training")
-    print("=" * 60)
 
-    # Generate dataset
-    print(f"\nGenerating {NUM_SYNTHETIC_GRAPHS} synthetic graphs...")
-    graphs = generate_dataset(NUM_SYNTHETIC_GRAPHS)
-    print(f"  Total nodes: {sum(g.num_nodes for g in graphs)}")
-    print(f"  Total edges: {sum(g.num_edges for g in graphs)}")
-
-    # Split 80/20
-    split = int(len(graphs) * 0.8)
-    train_graphs = graphs[:split]
-    val_graphs = graphs[split:]
-    print(f"  Train: {len(train_graphs)}  Val: {len(val_graphs)}")
-
-    train_loader = DataLoader(train_graphs, batch_size=BATCH_SIZE, shuffle=True)
-    val_loader = DataLoader(val_graphs, batch_size=BATCH_SIZE, shuffle=False)
-
-    # Model
-    device = torch.device("cpu")
-    model = GATModel().to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=LR, weight_decay=1e-4)
-
-    # Loss weights
-    W_CLASS = 1.0
-    W_SAFETY = 2.0
-    W_ANOMALY = 1.0
-
-    best_val_loss = float("inf")
-    best_state = None
-
-    print(f"\nTraining for {EPOCHS} epochs...")
-    print(f"  Features: {NUM_FEATURES}  Hidden: {HIDDEN_DIM}  Classes: {NUM_CLASSES}")
-    print(f"  LR: {LR}  Batch: {BATCH_SIZE}  Heads: {NUM_HEADS}")
-    print()
-
-    for epoch in range(1, EPOCHS + 1):
-        # Train
-        model.train()
-        total_loss = 0
-        for batch in train_loader:
+def evaluate_loader(model, loader, device, weights, classification_weight=3.0):
+    model.eval()
+    total_loss = 0.0
+    total_nodes = 0
+    correct = 0
+    safety_error = 0.0
+    anomaly_error = 0.0
+    per_class_correct = torch.zeros(NUM_CLASSES, dtype=torch.long)
+    per_class_total = torch.zeros(NUM_CLASSES, dtype=torch.long)
+    with torch.no_grad():
+        for batch in loader:
             batch = batch.to(device)
-            optimizer.zero_grad()
-            logits, safety, anomaly = model(batch.x, batch.edge_index)
+            loss, logits, safety, anomaly = loss_components(model, batch, weights, classification_weight)
+            predictions = logits.argmax(dim=1)
+            nodes = batch.y.numel()
+            total_loss += loss.item() * nodes
+            total_nodes += nodes
+            correct += (predictions == batch.y).sum().item()
+            safety_error += (safety - batch.safety).abs().sum().item()
+            anomaly_error += (anomaly - batch.anomaly).abs().sum().item()
+            labels_cpu = batch.y.detach().cpu()
+            predictions_cpu = predictions.detach().cpu()
+            per_class_total += torch.bincount(labels_cpu, minlength=NUM_CLASSES)
+            matched = labels_cpu[predictions_cpu == labels_cpu]
+            per_class_correct += torch.bincount(matched, minlength=NUM_CLASSES)
+    per_class = {
+        IDX_TO_LABEL[index]: per_class_correct[index].item() / max(per_class_total[index].item(), 1)
+        for index in range(NUM_CLASSES)
+    }
+    return {
+        "loss": total_loss / total_nodes,
+        "acc": correct / total_nodes,
+        "safety_mae": safety_error / total_nodes,
+        "anomaly_mae": anomaly_error / total_nodes,
+        "per_class": per_class,
+    }
 
-            loss_class = F.cross_entropy(logits, batch.y)
-            loss_safety = F.mse_loss(safety.squeeze(-1), batch.safety)
-            loss_anomaly = F.mse_loss(anomaly.squeeze(-1), batch.anomaly)
 
-            loss = W_CLASS * loss_class + W_SAFETY * loss_safety + W_ANOMALY * loss_anomaly
-            loss.backward()
-            optimizer.step()
-            total_loss += loss.item() * batch.num_graphs
-
-        train_loss = total_loss / len(train_graphs)
-
-        # Validate
-        model.eval()
-        val_loss = 0
-        val_acc = 0
-        val_safety_mae = 0
-        with torch.no_grad():
-            for batch in val_loader:
-                batch = batch.to(device)
-                logits, safety, anomaly = model(batch.x, batch.edge_index)
-
-                loss_class = F.cross_entropy(logits, batch.y)
-                loss_safety = F.mse_loss(safety.squeeze(-1), batch.safety)
-                loss_anomaly = F.mse_loss(anomaly.squeeze(-1), batch.anomaly)
-                loss = W_CLASS * loss_class + W_SAFETY * loss_safety + W_ANOMALY * loss_anomaly
-                val_loss += loss.item() * batch.num_graphs
-
-                pred = logits.argmax(dim=1)
-                val_acc += (pred == batch.y).float().mean().item() * batch.num_graphs
-                val_safety_mae += (safety.squeeze(-1) - batch.safety).abs().mean().item() * batch.num_graphs
-
-        val_loss /= len(val_graphs)
-        val_acc /= len(val_graphs)
-        val_safety_mae /= len(val_graphs)
-
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            best_state = {k: v.clone() for k, v in model.state_dict().items()}
-
-        if epoch % 10 == 0 or epoch == 1:
-            print(f"  Epoch {epoch:3d}/{EPOCHS}  "
-                  f"train_loss={train_loss:.4f}  val_loss={val_loss:.4f}  "
-                  f"val_acc={val_acc:.3f}  safety_mae={val_safety_mae:.4f}")
-
-    print(f"\nBest validation loss: {best_val_loss:.4f}")
-
-    # Load best model
-    if best_state:
-        model.load_state_dict(best_state)
-
-    # Save PyTorch checkpoint
-    ckpt_path = MODEL_DIR / "model" / "xmac_gnn.pt"
-    ckpt_path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save({
+def checkpoint_payload(model, config, epoch, val_metrics):
+    return {
         "model_state_dict": model.state_dict(),
         "num_features": NUM_FEATURES,
         "num_classes": NUM_CLASSES,
-        "hidden_dim": HIDDEN_DIM,
-        "num_heads": NUM_HEADS,
-    }, ckpt_path)
-    print(f"Saved PyTorch checkpoint: {ckpt_path}")
-
-    # Export to CoreML
-    export_coreml(model)
-
-    # Quick sanity check
-    print("\n=== Sanity check ===")
-    test_graph = generate_graph(20)
-    model.eval()
-    with torch.no_grad():
-        logits, safety, anomaly = model(test_graph.x, test_graph.edge_index)
-        safety_scores = torch.sigmoid(safety.squeeze(-1))
-        print(f"  Test graph: {test_graph.num_nodes} nodes, {test_graph.num_edges} edges")
-        print(f"  Safety scores: min={safety_scores.min():.3f} max={safety_scores.max():.3f} mean={safety_scores.mean():.3f}")
-        print(f"  Label accuracy: {(logits.argmax(1) == test_graph.y).float().mean():.3f}")
-
-    print("\nDone!")
+        "hidden_dim": config["hidden_dim"],
+        "num_heads": config["num_heads"],
+        "num_layers": config["num_layers"],
+        "dropout": config["dropout"],
+        "epoch": epoch,
+        "val_metrics": val_metrics,
+        "config": config,
+    }
 
 
-def export_coreml(model):
-    """Export a simplified MLP-only model to CoreML.
-
-    CoreML doesn't support graph neural network operations (scatter_reduce,
-    edge_index-based message passing). We export a per-node MLP that takes
-    the 9-feature vector and outputs [logits(27), safety, anomaly] = 29 values.
-
-    The graph structure is handled in Swift/Rust — the CoreML model just
-    does the per-node scoring on the already-extracted features.
-    """
-    try:
-        import coremltools as ct
-    except ImportError:
-        print("  coremltools not available — skipping CoreML export")
-        return
-
-    print("\nExporting to CoreML (per-node MLP)...")
-
-    model.eval()
-
-    # Build a standalone MLP that replicates the heads after a frozen
-    # 2-layer feature transform (we just use the heads directly since
-    # the GAT conv output can't be replicated without edge_index).
-    # In practice, the Swift side feeds pre-computed features and the
-    # CoreML model acts as a safety classifier.
-    class NodeMLP(nn.Module):
-        """Per-node safety/anomaly/classification MLP for CoreML."""
-        def __init__(self, in_features=NUM_FEATURES, hidden=HIDDEN_DIM, num_classes=NUM_CLASSES):
-            super().__init__()
-            self.fc1 = nn.Linear(in_features, hidden)
-            self.fc2 = nn.Linear(hidden, hidden)
-            self.safety_head = nn.Sequential(
-                nn.Linear(hidden, hidden // 2),
-                nn.ReLU(),
-                nn.Linear(hidden // 2, 1)
+def train(config, train_graphs, val_graphs, checkpoint_path=CHECKPOINT_PATH):
+    device = choose_device(config["device"])
+    train_loader = DataLoader(train_graphs, batch_size=config["batch_size"], shuffle=True)
+    val_loader = DataLoader(val_graphs, batch_size=config["batch_size"], shuffle=False)
+    weights = class_weights(train_graphs).to(device)
+    model = GATModel(
+        num_features=NUM_FEATURES,
+        hidden_dim=config["hidden_dim"],
+        num_classes=NUM_CLASSES,
+        num_heads=config["num_heads"],
+        num_layers=config["num_layers"],
+        dropout=config["dropout"],
+    ).to(device)
+    start_epoch = 1
+    resume_checkpoint = None
+    if config.get("resume"):
+        resume_checkpoint = torch.load(config["resume"], map_location=device, weights_only=False)
+        model.load_state_dict(resume_checkpoint["model_state_dict"])
+        start_epoch = resume_checkpoint.get("epoch", 0) + 1
+    optimizer = torch.optim.AdamW(model.parameters(), lr=config["lr"], weight_decay=config["weight_decay"])
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=50, T_mult=2)
+    history = []
+    best_metrics = resume_checkpoint.get("val_metrics", {}) if resume_checkpoint else {}
+    best_acc = best_metrics.get("acc", -1.0)
+    best_loss = best_metrics.get("loss", float("inf"))
+    best_per_class = best_metrics.get("per_class", {})
+    best_meets_class_gate = bool(best_per_class) and min(best_per_class.values()) >= 0.85
+    epochs_without_improvement = 0
+    if start_epoch > 1:
+        scheduler.step(start_epoch - 1)
+    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    print(f"device={device} train_graphs={len(train_graphs)} val_graphs={len(val_graphs)}")
+    print(f"features={NUM_FEATURES} hidden={config['hidden_dim']} heads={config['num_heads']} layers={config['num_layers']}")
+    for epoch in range(start_epoch, config["epochs"] + 1):
+        started = time.perf_counter()
+        model.train()
+        train_loss = 0.0
+        train_nodes = 0
+        train_correct = 0
+        for batch_index, source_batch in enumerate(train_loader):
+            batch = augment_batch(source_batch.to(device))
+            optimizer.zero_grad(set_to_none=True)
+            loss, logits, _, _ = loss_components(model, batch, weights, config.get("w_class", 3.0))
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
+            optimizer.step()
+            scheduler.step(epoch - 1 + (batch_index + 1) / len(train_loader))
+            nodes = batch.y.numel()
+            train_loss += loss.item() * nodes
+            train_nodes += nodes
+            train_correct += (logits.argmax(dim=1) == batch.y).sum().item()
+        val_metrics = evaluate_loader(model, val_loader, device, weights, config.get("w_class", 3.0))
+        train_loss /= train_nodes
+        train_acc = train_correct / train_nodes
+        lr = optimizer.param_groups[0]["lr"]
+        record = {
+            "epoch": epoch,
+            "lr": lr,
+            "train_loss": train_loss,
+            "train_acc": train_acc,
+            "val_loss": val_metrics["loss"],
+            "val_acc": val_metrics["acc"],
+            "val_safety_mae": val_metrics["safety_mae"],
+            "val_anomaly_mae": val_metrics["anomaly_mae"],
+            "seconds": time.perf_counter() - started,
+            "per_class": val_metrics["per_class"],
+        }
+        history.append(record)
+        worst = sorted(val_metrics["per_class"].items(), key=lambda item: item[1])[:5]
+        print(f"Epoch {epoch}/{config['epochs']}  lr={lr:.6f}")
+        print(f"  train_loss={train_loss:.4f}  train_acc={train_acc:.4f}")
+        print(f"  val_loss={val_metrics['loss']:.4f}  val_acc={val_metrics['acc']:.4f}")
+        print(f"  val_safety_mae={val_metrics['safety_mae']:.4f}  val_anomaly_mae={val_metrics['anomaly_mae']:.4f}")
+        print(f"  worst_classes={dict(worst)}  seconds={record['seconds']:.2f}", flush=True)
+        meets_class_gate = min(val_metrics["per_class"].values()) >= 0.85
+        improved = (
+            meets_class_gate and not best_meets_class_gate
+            or meets_class_gate == best_meets_class_gate and (
+                val_metrics["acc"] > best_acc
+                or val_metrics["acc"] == best_acc and val_metrics["loss"] < best_loss
             )
-            self.anomaly_head = nn.Sequential(
-                nn.Linear(hidden, hidden // 2),
-                nn.ReLU(),
-                nn.Linear(hidden // 2, 1)
-            )
-            self.class_head = nn.Sequential(
-                nn.Linear(hidden, hidden // 2),
-                nn.ReLU(),
-                nn.Linear(hidden // 2, num_classes)
-            )
+        )
+        if improved:
+            best_acc = val_metrics["acc"]
+            best_loss = val_metrics["loss"]
+            best_meets_class_gate = meets_class_gate
+            epochs_without_improvement = 0
+            cpu_model = copy.deepcopy(model).cpu()
+            torch.save(checkpoint_payload(cpu_model, config, epoch, val_metrics), checkpoint_path)
+        else:
+            epochs_without_improvement += 1
+        with METRICS_PATH.open("w") as metrics_file:
+            json.dump(history, metrics_file, indent=2)
+        if epochs_without_improvement >= config["patience"]:
+            print(f"Early stopping after {config['patience']} epochs without improvement")
+            break
+    best_checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    print(f"BEST VAL ACCURACY: {best_checkpoint['val_metrics']['acc']:.4f} at epoch {best_checkpoint['epoch']}")
+    return best_checkpoint, history
 
-        def forward(self, x):
-            x = F.elu(self.fc1(x))
-            x = F.elu(self.fc2(x))
-            safety = torch.sigmoid(self.safety_head(x))
-            anomaly = torch.sigmoid(self.anomaly_head(x))
-            logits = self.class_head(x)
-            return torch.cat([logits, safety, anomaly], dim=1)
 
-    # Train the MLP to match the GNN's per-node outputs
-    print("  Training distillation MLP to match GNN outputs...")
-    mlp = NodeMLP()
-    mlp_optimizer = torch.optim.Adam(mlp.parameters(), lr=0.001)
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--generate", action="store_true")
+    parser.add_argument("--graphs", type=int, default=10_000)
+    parser.add_argument("--epochs", type=int, default=500)
+    parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--hidden-dim", type=int, default=128)
+    parser.add_argument("--num-heads", type=int, default=8)
+    parser.add_argument("--num-layers", type=int, default=3)
+    parser.add_argument("--dropout", type=float, default=0.2)
+    parser.add_argument("--lr", type=float, default=0.001)
+    parser.add_argument("--weight-decay", type=float, default=0.001)
+    parser.add_argument("--w-class", type=float, default=3.0)
+    parser.add_argument("--patience", type=int, default=100)
+    parser.add_argument("--device", choices=("auto", "cpu", "mps"), default="auto")
+    parser.add_argument("--train-limit", type=int)
+    parser.add_argument("--val-limit", type=int)
+    parser.add_argument("--checkpoint", type=Path, default=CHECKPOINT_PATH)
+    parser.add_argument("--resume", type=Path)
+    return parser.parse_args()
 
-    # Generate distillation data: run GNN on synthetic graphs, collect (features → outputs)
-    print("  Generating distillation dataset...")
-    distill_x = []
-    distill_y = []
-    model.eval()
-    with torch.no_grad():
-        for _ in range(50):
-            g = generate_graph(random.randint(40, 80))
-            logits, safety, anomaly = model(g.x, g.edge_index)
-            safety_sig = torch.sigmoid(safety.squeeze(-1))
-            anomaly_sig = torch.sigmoid(anomaly.squeeze(-1))
-            target = torch.cat([logits, safety_sig.unsqueeze(-1), anomaly_sig.unsqueeze(-1)], dim=1)
-            distill_x.append(g.x)
-            distill_y.append(target)
 
-    distill_x = torch.cat(distill_x)
-    distill_y = torch.cat(distill_y)
-    print(f"  Distillation data: {distill_x.shape[0]} samples")
-
-    # Train MLP
-    for epoch in range(100):
-        mlp_optimizer.zero_grad()
-        pred = mlp(distill_x)
-        loss = F.mse_loss(pred, distill_y)
-        loss.backward()
-        mlp_optimizer.step()
-        if (epoch + 1) % 20 == 0:
-            print(f"    Distill epoch {epoch+1}/100  loss={loss.item():.4f}")
-
-    mlp.eval()
-
-    # Verify
-    with torch.no_grad():
-        test_out = mlp(distill_x[:5])
-        gnn_out = distill_y[:5]
-        mae = (test_out - gnn_out).abs().mean().item()
-        print(f"  Distillation MAE: {mae:.4f}")
-
-    # Export to CoreML
-    dummy = torch.randn(1, NUM_FEATURES)
-    traced = torch.jit.trace(mlp, dummy)
-
-    mlmodel = ct.convert(
-        traced,
-        inputs=[ct.TensorType(name="node_features", shape=[1, NUM_FEATURES])],
-        outputs=[ct.TensorType(name="predictions")],
-        minimum_deployment_target=ct.target.iOS15,
-    )
-
-    mlmodel.short_description = "X-MaC GNN: per-node safety + anomaly + classification (distilled from GAT)"
-    mlmodel.author = "X-MaC"
-    mlmodel.license = "MIT"
-
-    # Remove old model
-    if COREML_EXPORT_PATH.exists():
-        import shutil
-        shutil.rmtree(COREML_EXPORT_PATH)
-
-    mlmodel.save(str(COREML_EXPORT_PATH))
-    size_kb = sum(f.stat().st_size for f in COREML_EXPORT_PATH.rglob("*") if f.is_file()) // 1024
-    print(f"  CoreML model saved: {COREML_EXPORT_PATH}")
-    print(f"  Size: {size_kb} KB")
+def main():
+    args = parse_args()
+    random.seed(42)
+    torch.manual_seed(42)
+    if args.generate or not all((DATA_DIR / f"{split}.pt").exists() for split in ("train", "val", "test")):
+        save_datasets(args.graphs)
+    train_graphs = load_graphs(DATA_DIR / "train.pt")
+    val_graphs = load_graphs(DATA_DIR / "val.pt")
+    if args.train_limit:
+        train_graphs = train_graphs[:args.train_limit]
+    if args.val_limit:
+        val_graphs = val_graphs[:args.val_limit]
+    config = {
+        "epochs": args.epochs,
+        "batch_size": args.batch_size,
+        "hidden_dim": args.hidden_dim,
+        "num_heads": args.num_heads,
+        "num_layers": args.num_layers,
+        "dropout": args.dropout,
+        "lr": args.lr,
+        "weight_decay": args.weight_decay,
+        "w_class": args.w_class,
+        "patience": args.patience,
+        "device": args.device,
+        "resume": str(args.resume) if args.resume else None,
+    }
+    train(config, train_graphs, val_graphs, args.checkpoint)
 
 
 if __name__ == "__main__":
-    random.seed(42)
-    torch.manual_seed(42)
-    train()
+    main()
