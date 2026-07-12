@@ -132,7 +132,7 @@ impl Engine for EnvmapEngine {
             let dirs = if self.args.app_dirs.is_empty() {
                 apps::default_app_dirs()
             } else {
-                self.args.app_dirs.iter().cloned().collect()
+                self.args.app_dirs.to_vec()
             };
             for dir in dirs {
                 let apps = apps::enumerate_apps_in(&dir, 3);

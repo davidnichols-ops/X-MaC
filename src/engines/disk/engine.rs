@@ -233,7 +233,7 @@ impl Engine for DiskEngine {
                 }
             }
 
-            entries.sort_by(|a, b| b.1.cmp(&a.1));
+            entries.sort_by_key(|e| std::cmp::Reverse(e.1));
             entries.truncate(self.args.top);
 
             for (path, size, is_dir) in entries {
@@ -286,7 +286,7 @@ impl Engine for DiskEngine {
                 }
             }
 
-            large_files.sort_by(|a, b| b.1.cmp(&a.1));
+            large_files.sort_by_key(|e| std::cmp::Reverse(e.1));
             large_files.truncate(self.args.top);
 
             for (path, size) in large_files {

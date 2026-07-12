@@ -45,7 +45,7 @@ impl FixScriptGenerator {
         s.push_str("# consequences of executing this script.\n");
         s.push_str("#\n");
         s.push_str(&format!("# Findings covered: {}\n", findings.len()));
-        s.push_str("\n");
+        s.push('\n');
 
         // Confirmation gate for the active (non-destructive) section.
         s.push_str("set -euo pipefail\n\n");
@@ -166,7 +166,7 @@ impl FixScriptGenerator {
             by_severity(Severity::Low), by_severity(Severity::Info)));
         s.push_str(&format!("#   Active fixes:           {}\n", safe.len()));
         s.push_str(&format!("#   Review-required fixes:  {}\n", review.len()));
-        s.push_str("\n");
+        s.push('\n');
     }
 
     fn write_safe_section(s: &mut String, safe: &[&Finding]) {
@@ -213,7 +213,7 @@ impl FixScriptGenerator {
             for f in items {
                 Self::write_review_finding(s, f);
             }
-            s.push_str("\n");
+            s.push('\n');
         }
     }
 
@@ -317,7 +317,7 @@ impl FixScriptGenerator {
                 s.push_str("# (informational)\n");
             }
         }
-        s.push_str("\n");
+        s.push('\n');
     }
 
     fn category_label(c: Category) -> &'static str {

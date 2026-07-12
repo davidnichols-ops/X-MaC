@@ -321,17 +321,14 @@ impl PackageManager {
     /// All diagnostics including those that may require network.
     fn all_diagnostics(&self) -> Vec<Diagnostic> {
         let mut diags = self.safe_diagnostics();
-        match self.binary {
-            "brew" => {
-                diags.push(Diagnostic {
-                    label: "brew outdated",
-                    args: vec!["outdated"],
-                    severity_on_issue: Severity::Low,
-                    remediation_hint: "Run `brew upgrade` to update outdated packages",
-                    requires_network: true,
-                });
-            }
-            _ => {}
+        if self.binary == "brew" {
+            diags.push(Diagnostic {
+                label: "brew outdated",
+                args: vec!["outdated"],
+                severity_on_issue: Severity::Low,
+                remediation_hint: "Run `brew upgrade` to update outdated packages",
+                requires_network: true,
+            });
         }
         diags
     }

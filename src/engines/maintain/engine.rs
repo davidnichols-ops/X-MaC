@@ -163,10 +163,9 @@ impl MaintainEngine {
     }
 
     async fn task_repair_permissions(&self, ctx: &ScanContext) -> (Vec<Finding>, u64) {
-        let mut findings = Vec::new();
         // diskutil repairPermissions is deprecated on APFS but still works
         // on HFS+ volumes. We emit it as a finding with the command.
-        findings.push(
+        let findings = vec![
             Finding::new(
                 EngineId::All,
                 Severity::Medium,
@@ -176,16 +175,15 @@ impl MaintainEngine {
                 "Disk permission repair requires sudo and is only applicable to HFS+ volumes (not APFS)".to_string(),
             )
             .with_hint("sudo diskutil repairPermissions /  # only for HFS+ volumes".to_string()),
-        );
+        ];
         ctx.emit(findings[0].clone()).await;
         (findings, 1)
     }
 
     async fn task_purge_ram(&self, ctx: &ScanContext) -> (Vec<Finding>, u64) {
-        let mut findings = Vec::new();
         let (ok, msg) = Self::run_command("purge", &[]);
 
-        findings.push(
+        let findings = vec![
             Finding::new(
                 EngineId::All,
                 if ok { Severity::Info } else { Severity::Medium },
@@ -195,14 +193,13 @@ impl MaintainEngine {
                 if ok { "Inactive memory purged".to_string() } else { format!("RAM purge failed (may need sudo): {}", msg) },
             )
             .with_hint("purge  # may require sudo".to_string()),
-        );
+        ];
         ctx.emit(findings[0].clone()).await;
         (findings, 1)
     }
 
     async fn task_rebuild_dyld(&self, ctx: &ScanContext) -> (Vec<Finding>, u64) {
-        let mut findings = Vec::new();
-        findings.push(
+        let findings = vec![
             Finding::new(
                 EngineId::All,
                 Severity::High,
@@ -212,16 +209,15 @@ impl MaintainEngine {
                 "Rebuilding the dyld shared cache requires sudo and can slow down app launches temporarily. Use with caution.".to_string(),
             )
             .with_hint("sudo update_dyld_shared_cache  # requires sudo, use with caution".to_string()),
-        );
+        ];
         ctx.emit(findings[0].clone()).await;
         (findings, 1)
     }
 
     async fn task_clear_quicklook(&self, ctx: &ScanContext) -> (Vec<Finding>, u64) {
-        let mut findings = Vec::new();
         let (ok, msg) = Self::run_command("qlmanage", &["-r", "cache"]);
 
-        findings.push(
+        let findings = vec![
             Finding::new(
                 EngineId::All,
                 if ok { Severity::Info } else { Severity::Medium },
@@ -231,7 +227,7 @@ impl MaintainEngine {
                 if ok { "Quick Look thumbnail cache cleared".to_string() } else { format!("Quick Look cache clear failed: {}", msg) },
             )
             .with_hint("qlmanage -r cache".to_string()),
-        );
+        ];
         ctx.emit(findings[0].clone()).await;
         (findings, 1)
     }

@@ -56,7 +56,7 @@ impl PathConflictScanner {
                         format!("Found {} at: {}", binary_name, path_strings.join(", ")),
                     )
                     .with_metadata("paths".to_string(), serde_json::json!(path_strings))
-                    .with_hint(format!("The first occurrence in PATH will be used. Consider removing duplicates.")),
+                    .with_hint("The first occurrence in PATH will be used. Consider removing duplicates.".to_string()),
                 );
             }
         }

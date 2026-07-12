@@ -39,7 +39,7 @@ impl EnvConflictScanner {
                 }
 
                 let descriptions: Vec<String> = occurrences.iter()
-                    .map(|(path, value)| format!("{}={}", path.split('/').last().unwrap_or(""), value))
+                    .map(|(path, value)| format!("{}={}", path.split('/').next_back().unwrap_or(""), value))
                     .collect();
 
                 findings.push(
