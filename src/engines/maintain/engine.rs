@@ -599,8 +599,14 @@ impl MaintainEngine {
             before.report(),
         )
         .with_metadata("phase", serde_json::json!("before"))
+        .with_metadata("total_bytes", serde_json::json!(before.total_bytes))
         .with_metadata("used_bytes", serde_json::json!(before.used_bytes))
         .with_metadata("available_bytes", serde_json::json!(before.available_bytes))
+        .with_metadata("app_memory_bytes", serde_json::json!(before.app_memory_bytes))
+        .with_metadata("wired_bytes", serde_json::json!(before.wired_bytes))
+        .with_metadata("compressed_bytes", serde_json::json!(before.compressed_bytes))
+        .with_metadata("swap_used_bytes", serde_json::json!(before.swap_used_bytes))
+        .with_metadata("swap_total_bytes", serde_json::json!(before.swap_total_bytes))
         .with_metadata(
             "memory_pressure",
             serde_json::json!(format!("{:?}", before.memory_pressure)),
@@ -758,8 +764,14 @@ impl MaintainEngine {
             summary,
         )
         .with_metadata("phase", serde_json::json!("after"))
+        .with_metadata("total_bytes", serde_json::json!(after.total_bytes))
         .with_metadata("used_bytes", serde_json::json!(after.used_bytes))
         .with_metadata("available_bytes", serde_json::json!(after.available_bytes))
+        .with_metadata("app_memory_bytes", serde_json::json!(after.app_memory_bytes))
+        .with_metadata("wired_bytes", serde_json::json!(after.wired_bytes))
+        .with_metadata("compressed_bytes", serde_json::json!(after.compressed_bytes))
+        .with_metadata("swap_used_bytes", serde_json::json!(after.swap_used_bytes))
+        .with_metadata("swap_total_bytes", serde_json::json!(after.swap_total_bytes))
         .with_metadata("freed_bytes", serde_json::json!(freed))
         .with_metadata("freed_swap_bytes", serde_json::json!(freed_swap))
         .with_metadata("processes_killed", serde_json::json!(killed))

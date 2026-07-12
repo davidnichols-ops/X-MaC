@@ -24,7 +24,7 @@ final class XMacRunner: ObservableObject {
     @Published var scanProgress: Double = 0
 
     enum ScanMode: String {
-        case dashboard, idle, full, clean, maintain, disk, neural, apps, settings, history, automation
+        case dashboard, idle, full, clean, maintain, disk, neural, apps, settings, history, automation, ramBoost
     }
 
     private var appSettings: AppSettings?
@@ -139,6 +139,11 @@ final class XMacRunner: ObservableObject {
     func openAutomation() {
         guard !isScanning else { return }
         scanMode = .automation
+    }
+
+    func openRamBoost() {
+        guard !isScanning else { return }
+        scanMode = .ramBoost
     }
 
     func clearResults() {
@@ -562,5 +567,95 @@ final class XMacRunner: ObservableObject {
             return Double(info.phys_footprint) / 1_048_576.0
         }
         return 0
+    }
+
+    // MARK: - RAM Boost
+
+    /// Run the `xmac ram-boost` command and parse the before/after memory snapshots.
+    /// Returns (before, after, freedBytes, freedSwapBytes, processesKilled).
+    func runRamBoost(
+        purge: Bool,
+        killTop: Int,
+        killName: String?,
+        force: Bool,
+        minRssMB: Int,
+        protectSystem: Bool
+    ) async -> Result<(MemoryStatsSnapshot, MemoryStatsSnapshot?, UInt64, UInt64, Int), Error> {
+        var args: [String] = [xmacPath, "--format", "json", "ram-boost"]
+        if purge {
+            args += ["--purge", "true"]
+        } else {
+            args += ["--purge", "false"]
+        }
+        if killTop > 0 {
+            args += ["--kill-top", "\(killTop)"]
+        }
+        if let names = killName, !names.isEmpty {
+            args += ["--kill-name", names]
+        }
+        if force {
+            args += ["--force"]
+        }
+        args += ["--min-rss-mb", "\(minRssMB)"]
+        if !protectSystem {
+            args += ["--protect-system", "false"]
+        }
+
+        do {
+            let (stdout, _) = try await runProcess(args)
+            let (before, after, freed, freedSwap, killed) = parseRamBoostFindings(from: stdout)
+            if before == nil {
+                return .failure(NSError(domain: "XMacRunner", code: 10, userInfo: [
+                    NSLocalizedDescriptionKey: "No memory data returned from ram-boost"
+                ]))
+            }
+            return .success((before!, after, freed, freedSwap, killed))
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    /// Parse the JSON findings from `xmac ram-boost` and extract before/after snapshots.
+    private func parseRamBoostFindings(from output: String) -> (MemoryStatsSnapshot?, MemoryStatsSnapshot?, UInt64, UInt64, Int) {
+        var before: MemoryStatsSnapshot? = nil
+        var after: MemoryStatsSnapshot? = nil
+        var freed: UInt64 = 0
+        var freedSwap: UInt64 = 0
+        var killed: Int = 0
+
+        for line in output.split(separator: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("{"),
+                  let data = trimmed.data(using: .utf8),
+                  let finding = try? JSONDecoder().decode(Finding.self, from: data) else { continue }
+
+            // The metadata contains phase, used_bytes, available_bytes, etc.
+            let phase = finding.metadata["phase"]?.stringValue ?? ""
+
+            // Build a MemoryStatsSnapshot from the metadata fields
+            let snapshot = MemoryStatsSnapshot(
+                total_bytes: UInt64(finding.metadata["total_bytes"]?.intValue ?? 0),
+                used_bytes: UInt64(finding.metadata["used_bytes"]?.intValue ?? 0),
+                available_bytes: UInt64(finding.metadata["available_bytes"]?.intValue ?? 0),
+                app_memory_bytes: UInt64(finding.metadata["app_memory_bytes"]?.intValue ?? 0),
+                wired_bytes: UInt64(finding.metadata["wired_bytes"]?.intValue ?? 0),
+                compressed_bytes: UInt64(finding.metadata["compressed_bytes"]?.intValue ?? 0),
+                swap_used_bytes: UInt64(finding.metadata["swap_used_bytes"]?.intValue ?? 0),
+                swap_total_bytes: UInt64(finding.metadata["swap_total_bytes"]?.intValue ?? 0),
+                memory_pressure: finding.metadata["memory_pressure"]?.stringValue ?? "Nominal",
+                top_consumers: []
+            )
+
+            if phase == "before" {
+                before = snapshot
+            } else if phase == "after" {
+                after = snapshot
+                freed = UInt64(finding.metadata["freed_bytes"]?.intValue ?? 0)
+                freedSwap = UInt64(finding.metadata["freed_swap_bytes"]?.intValue ?? 0)
+                killed = finding.metadata["processes_killed"]?.intValue ?? 0
+            }
+        }
+
+        return (before, after, freed, freedSwap, killed)
     }
 }

@@ -19,6 +19,8 @@ struct ContentView: View {
                 CleanView()
             case .maintain:
                 MaintainView()
+            case .ramBoost:
+                RamBoostView()
             case .disk:
                 DiskView()
             case .neural:
@@ -85,6 +87,9 @@ struct SidebarView: View {
             }
             NavButton(icon: "wrench.and.screwdriver", label: "Maintain", isActive: runner.scanMode == .maintain, disabled: scanning) {
                 runner.startMaintainScan()
+            }
+            NavButton(icon: "bolt.fill", label: "RAM Boost", isActive: runner.scanMode == .ramBoost, disabled: scanning) {
+                runner.openRamBoost()
             }
             NavButton(icon: "internaldrive", label: "Disk Usage", isActive: runner.scanMode == .disk, disabled: scanning) {
                 runner.startDiskScan()
