@@ -79,7 +79,20 @@ impl FixScriptGenerator {
 
     /// Write the generator's script to disk and return the path written.
     pub fn write(&self, findings: &[Finding]) -> std::io::Result<PathBuf> {
-        let body = Self::build_script(findings);
+        // Defense-in-depth: filter out any findings that point into a
+        // Time Machine / backup volume, even if a scan engine somehow
+        // produced one. We never want fix-script commands touching backups.
+        let filtered: Vec<Finding> = findings
+            .iter()
+            .filter(|f| match &f.target {
+                crate::core::types::Target::Path(p) => {
+                    !crate::util::backup::is_backup_path(p)
+                }
+                _ => true,
+            })
+            .cloned()
+            .collect();
+        let body = Self::build_script(&filtered);
         let mut file = std::fs::File::create(&self.out_path)?;
         file.write_all(body.as_bytes())?;
 

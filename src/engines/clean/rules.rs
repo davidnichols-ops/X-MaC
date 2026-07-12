@@ -216,7 +216,7 @@ impl CleanRules {
     }
 
     /// Directories to skip when sweeping for build artifacts / temp files,
-    /// to avoid breaking installed tooling.
+    /// to avoid breaking installed tooling and to protect backup volumes.
     pub fn sweep_skip_dirs(&self) -> Vec<PathBuf> {
         let home = MacosUtils::home_dir();
         let mut paths = vec![
@@ -231,6 +231,8 @@ impl CleanRules {
             paths.push(PathBuf::from("/System"));
         }
         paths.push(PathBuf::from("/usr"));
+        // Always skip Time Machine / backup volumes during sweeps.
+        paths.extend(crate::util::backup::backup_volumes());
         paths
     }
 

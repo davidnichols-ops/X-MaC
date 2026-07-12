@@ -258,6 +258,11 @@ impl Engine for DiskEngine {
             if !search_path.exists() {
                 continue;
             }
+            // Never scan Time Machine / backup volumes — they're not cleanable
+            // and walking them is extremely slow (millions of hardlinks).
+            if crate::util::backup::is_backup_path(search_path) {
+                continue;
+            }
 
             // ---- Directory-level breakdown (immediate children) ----
             // Emitted as SystemInfo so they don't contribute to

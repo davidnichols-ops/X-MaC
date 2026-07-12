@@ -94,12 +94,20 @@ impl CleanupPolicy {
             category_actions.insert(cat.to_string(), CleanupAction::Blocked);
         }
 
+        // Add Time Machine / backup volumes as protected paths so the
+        // cleanup executor will never delete anything on them, even if a
+        // scan somehow produced a finding pointing into a backup.
+        let mut protected_paths = default_protected_paths();
+        protected_paths.extend(crate::util::backup::backup_volumes());
+        let mut protected_prefixes = default_protected_prefixes();
+        protected_prefixes.extend(crate::util::backup::backup_volumes());
+
         Self {
             default_action: CleanupAction::Trash,
             allow_permanent_delete: false,
             category_actions,
-            protected_paths: default_protected_paths(),
-            protected_path_prefixes: default_protected_prefixes(),
+            protected_paths,
+            protected_path_prefixes: protected_prefixes,
             allow_trash_overrides: true,
             follow_symlinks: false,
         }

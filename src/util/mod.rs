@@ -1,3 +1,4 @@
+pub mod backup;
 pub mod macos;
 pub mod progress;
 pub mod disk;
@@ -8,3 +9,5 @@ pub use macos::MacosUtils;
 pub use progress::ProgressReporter;
 #[allow(unused_imports)]
 pub use disk::{dir_size, format_bytes};
+#[allow(unused_imports)]
+pub use backup::{is_backup_path, backup_volumes};

@@ -240,6 +240,10 @@ impl CleanEngine {
             if !search_path.exists() {
                 continue;
             }
+            // Never scan inside Time Machine / backup volumes.
+            if crate::util::backup::is_backup_path(&search_path) {
+                continue;
+            }
 
             let entries = WalkDir::new(&search_path)
                 .follow_links(false)
@@ -896,6 +900,10 @@ impl CleanEngine {
             if !trash_path.exists() {
                 continue;
             }
+            // Skip trash on Time Machine / backup volumes — never touch backups.
+            if crate::util::backup::is_backup_path(&trash_path) {
+                continue;
+            }
             items += 1;
             let size = CleanScanner::dir_size(&trash_path);
             if size > 0 {
@@ -934,6 +942,10 @@ impl CleanEngine {
 
         for search_path in search_paths {
             if !search_path.exists() {
+                continue;
+            }
+            // Never scan inside Time Machine / backup volumes.
+            if crate::util::backup::is_backup_path(&search_path) {
                 continue;
             }
 
@@ -976,6 +988,10 @@ impl CleanEngine {
 
         for path in self.rules.document_version_paths() {
             if !path.exists() {
+                continue;
+            }
+            // Skip document versions on Time Machine / backup volumes.
+            if crate::util::backup::is_backup_path(&path) {
                 continue;
             }
             items += 1;
