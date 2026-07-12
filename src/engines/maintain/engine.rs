@@ -8,13 +8,17 @@ use crate::core::engine::Engine;
 use crate::core::error::EngineError;
 use crate::core::types::{Category, EngineId, EngineStats, Finding, Severity, Target};
 
-/// The maintain engine runs macOS system maintenance tasks. Unlike other
-/// engines, these tasks may actually execute commands (not just scan) — but
-/// each task is emitted as a finding with the command in the remediation
-/// hint, so the user can review via `--fix-script` before running.
+/// The maintain engine runs system maintenance tasks.
 ///
-/// Tasks that require `sudo` (repair permissions, dyld rebuild) are always
-/// emitted as findings with the command commented out in fix scripts.
+/// On macOS: DNS flush, Spotlight reindex, LaunchServices rebuild, periodic
+/// scripts, RAM purge, Quick Look cache, dyld rebuild, disk permissions.
+///
+/// On Linux: systemd journal vacuum, DNS cache flush (systemd-resolved),
+/// apt/dnf cache cleanup, thumbnail cache clear, tmp cleanup, RAM drop caches,
+/// systemd-tmpfiles clean, updatedb refresh.
+///
+/// Tasks that require `sudo` are emitted as findings with the command in the
+/// remediation hint, so the user can review via `--fix-script` before running.
 pub struct MaintainEngine {
     args: MaintainArgs,
 }
@@ -36,34 +40,94 @@ impl MaintainEngine {
         }
     }
 
-    async fn task_flush_dns(&self, ctx: &ScanContext) -> (Vec<Finding>, u64) {
-        let mut findings = Vec::new();
-        let (ok, msg) = Self::run_command("dscacheutil", &["-flushcache"]);
-        let _ = Self::run_command("killall", &["-HUP", "mDNSResponder"]);
-
-        findings.push(
-            Finding::new(
-                EngineId::All,
-                if ok { Severity::Info } else { Severity::Medium },
-                Category::SystemMaintenance,
-                Target::Path(std::path::PathBuf::from("/")),
-                "DNS cache flush",
-                if ok { "DNS cache flushed successfully".to_string() } else { format!("DNS cache flush failed: {}", msg) },
-            )
-            .with_hint("dscacheutil -flushcache; killall -HUP mDNSResponder".to_string()),
-        );
-        ctx.emit(findings[0].clone()).await;
-        (findings, 1)
+    fn command_exists(cmd: &str) -> bool {
+        std::process::Command::new("which")
+            .arg(cmd)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
     }
 
-    async fn task_reindex_spotlight(&self, ctx: &ScanContext) -> (Vec<Finding>, u64) {
+    // ═══════════════════════════════════════════════════════════════════════
+    //  Cross-platform / shared tasks
+    // ═══════════════════════════════════════════════════════════════════════
+
+    async fn task_flush_dns(&self, ctx: &ScanContext) -> (Vec<Finding>, u64) {
         let mut findings = Vec::new();
-        // mdutil -E / requires root on most macOS versions.
-        // Try without sudo first; if it fails, emit as a sudo-required finding.
+
+        if cfg!(target_os = "macos") {
+            let (ok, msg) = Self::run_command("dscacheutil", &["-flushcache"]);
+            let _ = Self::run_command("killall", &["-HUP", "mDNSResponder"]);
+            findings.push(
+                Finding::new(
+                    EngineId::All,
+                    if ok { Severity::Info } else { Severity::Medium },
+                    Category::SystemMaintenance,
+                    Target::Path(std::path::PathBuf::from("/")),
+                    "DNS cache flush",
+                    if ok { "DNS cache flushed successfully".to_string() } else { format!("DNS cache flush failed: {}", msg) },
+                )
+                .with_hint("dscacheutil -flushcache; killall -HUP mDNSResponder".to_string()),
+            );
+        } else if cfg!(target_os = "linux") {
+            // Try systemd-resolved first, then nscd
+            if Self::command_exists("resolvectl") {
+                let (ok, msg) = Self::run_command("resolvectl", &["flush-caches"]);
+                findings.push(
+                    Finding::new(
+                        EngineId::All,
+                        if ok { Severity::Info } else { Severity::Medium },
+                        Category::SystemMaintenance,
+                        Target::Path(std::path::PathBuf::from("/")),
+                        "DNS cache flush (systemd-resolved)",
+                        if ok { "systemd-resolved DNS cache flushed".to_string() } else { format!("DNS flush failed: {}", msg) },
+                    )
+                    .with_hint("sudo resolvectl flush-caches".to_string()),
+                );
+            } else if Self::command_exists("nscd") {
+                let (ok, msg) = Self::run_command("nscd", &["-i", "hosts"]);
+                findings.push(
+                    Finding::new(
+                        EngineId::All,
+                        if ok { Severity::Info } else { Severity::Medium },
+                        Category::SystemMaintenance,
+                        Target::Path(std::path::PathBuf::from("/")),
+                        "DNS cache flush (nscd)",
+                        if ok { "nscd DNS cache invalidated".to_string() } else { format!("nscd flush failed: {}", msg) },
+                    )
+                    .with_hint("sudo nscd -i hosts".to_string()),
+                );
+            } else {
+                findings.push(
+                    Finding::new(
+                        EngineId::All,
+                        Severity::Low,
+                        Category::SystemMaintenance,
+                        Target::Path(std::path::PathBuf::from("/")),
+                        "DNS cache flush",
+                        "No DNS cache daemon detected (systemd-resolved or nscd). DNS may be cached by individual applications.".to_string(),
+                    )
+                    .with_hint("sudo resolvectl flush-caches  # if systemd-resolved is active".to_string()),
+                );
+            }
+        }
+
+        if !findings.is_empty() {
+            ctx.emit(findings[0].clone()).await;
+        }
+        let count = findings.len() as u64;
+        (findings, count)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  macOS-only tasks
+    // ═══════════════════════════════════════════════════════════════════════
+
+    async fn task_reindex_spotlight(&self, ctx: &ScanContext) -> (Vec<Finding>, u64) {
         let (ok, msg) = Self::run_command("mdutil", &["-E", "/"]);
         let needs_sudo = !ok && (msg.contains("Try as root") || msg.contains("Operation not permitted"));
 
-        findings.push(
+        let findings = vec![
             Finding::new(
                 EngineId::All,
                 if ok { Severity::Info } else if needs_sudo { Severity::Low } else { Severity::Medium },
@@ -79,26 +143,21 @@ impl MaintainEngine {
                 },
             )
             .with_hint("sudo mdutil -E /  # requires root".to_string()),
-        );
+        ];
         ctx.emit(findings[0].clone()).await;
         (findings, 1)
     }
 
     async fn task_rebuild_launchservices(&self, ctx: &ScanContext) -> (Vec<Finding>, u64) {
-        let mut findings = Vec::new();
-        // Rebuild the LaunchServices database via lsregister.
-        // The -kill flag was removed in macOS 15+. Use -r -domain args without -kill.
         let lsregister = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
-        // Try without -kill first (works on macOS 15+), fall back to -kill for older macOS
         let (ok, msg) = Self::run_command(lsregister, &["-r", "-domain", "local", "-domain", "system", "-domain", "user"]);
         let (ok, msg) = if ok {
             (true, msg)
         } else {
-            // Try with -kill for older macOS versions
             Self::run_command(lsregister, &["-kill", "-r", "-domain", "local", "-domain", "system", "-domain", "user"])
         };
 
-        findings.push(
+        let findings = vec![
             Finding::new(
                 EngineId::All,
                 if ok { Severity::Info } else { Severity::Medium },
@@ -108,7 +167,7 @@ impl MaintainEngine {
                 if ok { "LaunchServices database rebuilt".to_string() } else { format!("LaunchServices rebuild failed: {}", msg) },
             )
             .with_hint("lsregister -r -domain local -domain system -domain user".to_string()),
-        );
+        ];
         ctx.emit(findings[0].clone()).await;
         (findings, 1)
     }
@@ -117,15 +176,7 @@ impl MaintainEngine {
         let mut findings = Vec::new();
         let mut items = 0u64;
 
-        // Check if the periodic command exists at all
-        let periodic_exists = std::process::Command::new("which")
-            .arg("periodic")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false);
-
-        if !periodic_exists {
-            // periodic not available — emit a single informational finding
+        if !Self::command_exists("periodic") {
             items = 1;
             findings.push(
                 Finding::new(
@@ -163,8 +214,6 @@ impl MaintainEngine {
     }
 
     async fn task_repair_permissions(&self, ctx: &ScanContext) -> (Vec<Finding>, u64) {
-        // diskutil repairPermissions is deprecated on APFS but still works
-        // on HFS+ volumes. We emit it as a finding with the command.
         let findings = vec![
             Finding::new(
                 EngineId::All,
@@ -231,6 +280,297 @@ impl MaintainEngine {
         ctx.emit(findings[0].clone()).await;
         (findings, 1)
     }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  Linux-only tasks
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Vacuum old systemd journal logs to free disk space.
+    async fn task_journal_vacuum(&self, ctx: &ScanContext) -> (Vec<Finding>, u64) {
+        let mut findings = Vec::new();
+
+        if !Self::command_exists("journalctl") {
+            findings.push(
+                Finding::new(
+                    EngineId::All,
+                    Severity::Low,
+                    Category::SystemMaintenance,
+                    Target::Path(std::path::PathBuf::from("/var/log/journal")),
+                    "Journal vacuum",
+                    "journalctl not found — systemd journal not active on this system".to_string(),
+                )
+                .with_hint("sudo journalctl --vacuum-time=7d  # if systemd is active".to_string()),
+            );
+            ctx.emit(findings[0].clone()).await;
+            return (findings, 1);
+        }
+
+        // Try vacuum to 7 days (non-sudo may work if user is in systemd-journal group)
+        let (ok, msg) = Self::run_command("journalctl", &["--vacuum-time=7d", "--quiet"]);
+        let size_msg = if ok { msg.clone() } else { String::new() };
+
+        findings.push(
+            Finding::new(
+                EngineId::All,
+                if ok { Severity::Info } else { Severity::Low },
+                Category::SystemMaintenance,
+                Target::Path(std::path::PathBuf::from("/var/log/journal")),
+                "Systemd journal vacuum",
+                if ok {
+                    if size_msg.is_empty() { "Journal vacuumed to 7 days".to_string() } else { format!("Journal vacuumed: {}", size_msg) }
+                } else {
+                    format!("Journal vacuum requires sudo: {}", msg)
+                },
+            )
+            .with_hint("sudo journalctl --vacuum-time=7d  # removes journal entries older than 7 days".to_string()),
+        );
+        ctx.emit(findings[0].clone()).await;
+        (findings, 1)
+    }
+
+    /// Clean package manager caches (apt, dnf, pacman, zypper).
+    async fn task_pkg_cache_clean(&self, ctx: &ScanContext) -> (Vec<Finding>, u64) {
+        let mut findings = Vec::new();
+        let mut items = 0u64;
+
+        // Debian/Ubuntu: apt-get clean + autoremove
+        if Self::command_exists("apt-get") {
+            items += 1;
+            let (ok, msg) = Self::run_command("apt-get", &["clean"]);
+            findings.push(
+                Finding::new(
+                    EngineId::All,
+                    if ok { Severity::Info } else { Severity::Low },
+                    Category::SystemMaintenance,
+                    Target::Path(std::path::PathBuf::from("/var/cache/apt")),
+                    "APT cache clean",
+                    if ok { "APT package cache cleared (/var/cache/apt/archives/)".to_string() } else { format!("apt clean requires sudo: {}", msg) },
+                )
+                .with_hint("sudo apt-get clean && sudo apt-get autoremove --yes".to_string()),
+            );
+            ctx.emit(findings.last().unwrap().clone()).await;
+        }
+
+        // Fedora/RHEL: dnf clean all
+        if Self::command_exists("dnf") {
+            items += 1;
+            let (ok, msg) = Self::run_command("dnf", &["clean", "all"]);
+            findings.push(
+                Finding::new(
+                    EngineId::All,
+                    if ok { Severity::Info } else { Severity::Low },
+                    Category::SystemMaintenance,
+                    Target::Path(std::path::PathBuf::from("/var/cache/dnf")),
+                    "DNF cache clean",
+                    if ok { "DNF package cache cleared".to_string() } else { format!("dnf clean requires sudo: {}", msg) },
+                )
+                .with_hint("sudo dnf clean all".to_string()),
+            );
+            ctx.emit(findings.last().unwrap().clone()).await;
+        }
+
+        // Arch: pacman -Sc (clear uninstalled package cache)
+        if Self::command_exists("pacman") {
+            items += 1;
+            let (ok, msg) = Self::run_command("pacman", &["-Sc", "--noconfirm"]);
+            findings.push(
+                Finding::new(
+                    EngineId::All,
+                    if ok { Severity::Info } else { Severity::Low },
+                    Category::SystemMaintenance,
+                    Target::Path(std::path::PathBuf::from("/var/cache/pacman/pkg")),
+                    "Pacman cache clean",
+                    if ok { "Pacman package cache cleaned (uninstalled packages removed)".to_string() } else { format!("pacman -Sc requires sudo: {}", msg) },
+                )
+                .with_hint("sudo pacman -Sc --noconfirm  # clears uninstalled package cache".to_string()),
+            );
+            ctx.emit(findings.last().unwrap().clone()).await;
+        }
+
+        // openSUSE: zypper clean
+        if Self::command_exists("zypper") {
+            items += 1;
+            let (ok, msg) = Self::run_command("zypper", &["clean", "-a"]);
+            findings.push(
+                Finding::new(
+                    EngineId::All,
+                    if ok { Severity::Info } else { Severity::Low },
+                    Category::SystemMaintenance,
+                    Target::Path(std::path::PathBuf::from("/var/cache/zypp")),
+                    "Zypper cache clean",
+                    if ok { "Zypper package cache cleared".to_string() } else { format!("zypper clean requires sudo: {}", msg) },
+                )
+                .with_hint("sudo zypper clean -a".to_string()),
+            );
+            ctx.emit(findings.last().unwrap().clone()).await;
+        }
+
+        if findings.is_empty() {
+            items = 1;
+            findings.push(
+                Finding::new(
+                    EngineId::All,
+                    Severity::Low,
+                    Category::SystemMaintenance,
+                    Target::Path(std::path::PathBuf::from("/var/cache")),
+                    "Package manager cache clean",
+                    "No supported package manager detected (apt, dnf, pacman, zypper)".to_string(),
+                )
+                .with_hint("# install apt/dnf/pacman/zypper to enable cache cleanup".to_string()),
+            );
+            ctx.emit(findings[0].clone()).await;
+        }
+
+        (findings, items)
+    }
+
+    /// Clear thumbnail and font caches.
+    async fn task_clear_thumbnail_cache(&self, ctx: &ScanContext) -> (Vec<Finding>, u64) {
+        let home = crate::util::macos::MacosUtils::home_dir();
+        let thumb_cache = home.join(".cache/thumbnails");
+        let font_cache = std::path::PathBuf::from("/var/cache/fontconfig");
+
+        let mut findings = Vec::new();
+        let mut items = 0u64;
+
+        // Thumbnail cache
+        if thumb_cache.exists() {
+            items += 1;
+            let cache_size = crate::util::disk::dir_size(&thumb_cache);
+            findings.push(
+                Finding::new(
+                    EngineId::All,
+                    Severity::Info,
+                    Category::SystemMaintenance,
+                    Target::Path(thumb_cache.clone()),
+                    "Thumbnail cache",
+                    format!("Thumbnail cache: {} — safe to clear", crate::util::disk::format_bytes(cache_size)),
+                )
+                .with_hint(format!("rm -rf {}  # frees thumbnail cache", thumb_cache.display())),
+            );
+            ctx.emit(findings.last().unwrap().clone()).await;
+        }
+
+        // Font cache
+        if font_cache.exists() {
+            items += 1;
+            let (ok, msg) = Self::run_command("fc-cache", &["-f"]);
+            findings.push(
+                Finding::new(
+                    EngineId::All,
+                    if ok { Severity::Info } else { Severity::Low },
+                    Category::SystemMaintenance,
+                    Target::Path(font_cache.clone()),
+                    "Font cache rebuild",
+                    if ok { "Font cache rebuilt (fc-cache -f)".to_string() } else { format!("Font cache rebuild failed: {}", msg) },
+                )
+                .with_hint("fc-cache -f  # rebuilds fontconfig cache".to_string()),
+            );
+            ctx.emit(findings.last().unwrap().clone()).await;
+        }
+
+        if findings.is_empty() {
+            items = 1;
+            findings.push(
+                Finding::new(
+                    EngineId::All,
+                    Severity::Low,
+                    Category::SystemMaintenance,
+                    Target::Path(home.join(".cache")),
+                    "Thumbnail/font cache",
+                    "No thumbnail or font caches found".to_string(),
+                )
+                .with_hint("rm -rf ~/.cache/thumbnails  # if exists".to_string()),
+            );
+            ctx.emit(findings[0].clone()).await;
+        }
+
+        (findings, items)
+    }
+
+    /// Drop kernel caches to free RAM (requires root).
+    async fn task_drop_caches(&self, ctx: &ScanContext) -> (Vec<Finding>, u64) {
+        let findings = vec![
+            Finding::new(
+                EngineId::All,
+                Severity::Medium,
+                Category::SystemMaintenance,
+                Target::Path(std::path::PathBuf::from("/proc/sys/vm/drop_caches")),
+                "Drop kernel page cache",
+                "Writing to /proc/sys/vm/drop_caches frees page cache, dentries, and inodes. Requires root. Safe but may cause temporary I/O slowdown as cache is rebuilt.".to_string(),
+            )
+            .with_hint("sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'  # frees page cache + dentries + inodes".to_string()),
+        ];
+        ctx.emit(findings[0].clone()).await;
+        (findings, 1)
+    }
+
+    /// Run systemd-tmpfiles --clean to remove stale temp files.
+    async fn task_tmpfiles_clean(&self, ctx: &ScanContext) -> (Vec<Finding>, u64) {
+        if !Self::command_exists("systemd-tmpfiles") {
+            let findings = vec![
+                Finding::new(
+                    EngineId::All,
+                    Severity::Low,
+                    Category::SystemMaintenance,
+                    Target::Path(std::path::PathBuf::from("/tmp")),
+                    "Tmpfiles clean",
+                    "systemd-tmpfiles not found — stale temp files not cleaned automatically".to_string(),
+                )
+                .with_hint("sudo systemd-tmpfiles --clean  # if systemd is active".to_string()),
+            ];
+            ctx.emit(findings[0].clone()).await;
+            return (findings, 1);
+        }
+
+        let (ok, msg) = Self::run_command("systemd-tmpfiles", &["--clean"]);
+        let findings = vec![
+            Finding::new(
+                EngineId::All,
+                if ok { Severity::Info } else { Severity::Low },
+                Category::SystemMaintenance,
+                Target::Path(std::path::PathBuf::from("/tmp")),
+                "Systemd tmpfiles clean",
+                if ok { "Stale temp files cleaned via systemd-tmpfiles".to_string() } else { format!("systemd-tmpfiles --clean requires sudo: {}", msg) },
+            )
+            .with_hint("sudo systemd-tmpfiles --clean  # removes stale files per tmpfiles.d config".to_string()),
+        ];
+        ctx.emit(findings[0].clone()).await;
+        (findings, 1)
+    }
+
+    /// Refresh the locate database (updatedb).
+    async fn task_updatedb(&self, ctx: &ScanContext) -> (Vec<Finding>, u64) {
+        if !Self::command_exists("updatedb") {
+            let findings = vec![
+                Finding::new(
+                    EngineId::All,
+                    Severity::Low,
+                    Category::SystemMaintenance,
+                    Target::Path(std::path::PathBuf::from("/var/lib/mlocate")),
+                    "Locate database refresh",
+                    "updatedb not found — install mlocate or plocate to enable fast file search".to_string(),
+                )
+                .with_hint("sudo updatedb  # if mlocate/plocate is installed".to_string()),
+            ];
+            ctx.emit(findings[0].clone()).await;
+            return (findings, 1);
+        }
+
+        let findings = vec![
+            Finding::new(
+                EngineId::All,
+                Severity::Low,
+                Category::SystemMaintenance,
+                Target::Path(std::path::PathBuf::from("/var/lib/mlocate")),
+                "Locate database refresh",
+                "updatedb refreshes the file index used by the `locate` command. Requires sudo and may take a few minutes.".to_string(),
+            )
+            .with_hint("sudo updatedb  # refreshes the locate database".to_string()),
+        ];
+        ctx.emit(findings[0].clone()).await;
+        (findings, 1)
+    }
 }
 
 #[async_trait]
@@ -244,7 +584,7 @@ impl Engine for MaintainEngine {
     }
 
     fn description(&self) -> &'static str {
-        "Runs macOS system maintenance: DNS flush, Spotlight reindex, LaunchServices rebuild, periodic scripts, RAM purge"
+        "Runs system maintenance: DNS flush, cache cleanup, journal vacuum, RAM purge, tmpfiles clean"
     }
 
     async fn validate(&self, _ctx: &ScanContext) -> std::result::Result<(), EngineError> {
@@ -256,52 +596,97 @@ impl Engine for MaintainEngine {
         let mut items_scanned = 0u64;
         let mut findings_count = 0u64;
 
-        if self.args.dns {
-            let (f, i) = self.task_flush_dns(&ctx).await;
-            items_scanned += i;
-            findings_count += f.len() as u64;
-        }
-
-        if self.args.spotlight {
-            let (f, i) = self.task_reindex_spotlight(&ctx).await;
-            items_scanned += i;
-            findings_count += f.len() as u64;
-        }
-
-        if self.args.launchservices {
-            let (f, i) = self.task_rebuild_launchservices(&ctx).await;
-            items_scanned += i;
-            findings_count += f.len() as u64;
-        }
-
-        if self.args.periodic {
-            let (f, i) = self.task_run_periodic(&ctx).await;
-            items_scanned += i;
-            findings_count += f.len() as u64;
-        }
-
-        if self.args.repair_permissions {
-            let (f, i) = self.task_repair_permissions(&ctx).await;
-            items_scanned += i;
-            findings_count += f.len() as u64;
-        }
-
-        if self.args.purge_ram {
-            let (f, i) = self.task_purge_ram(&ctx).await;
-            items_scanned += i;
-            findings_count += f.len() as u64;
-        }
-
-        if self.args.dyld {
-            let (f, i) = self.task_rebuild_dyld(&ctx).await;
-            items_scanned += i;
-            findings_count += f.len() as u64;
-        }
-
-        if self.args.quicklook {
-            let (f, i) = self.task_clear_quicklook(&ctx).await;
-            items_scanned += i;
-            findings_count += f.len() as u64;
+        if cfg!(target_os = "macos") {
+            // macOS tasks
+            if self.args.dns {
+                let (f, i) = self.task_flush_dns(&ctx).await;
+                items_scanned += i;
+                findings_count += f.len() as u64;
+            }
+            if self.args.spotlight {
+                let (f, i) = self.task_reindex_spotlight(&ctx).await;
+                items_scanned += i;
+                findings_count += f.len() as u64;
+            }
+            if self.args.launchservices {
+                let (f, i) = self.task_rebuild_launchservices(&ctx).await;
+                items_scanned += i;
+                findings_count += f.len() as u64;
+            }
+            if self.args.periodic {
+                let (f, i) = self.task_run_periodic(&ctx).await;
+                items_scanned += i;
+                findings_count += f.len() as u64;
+            }
+            if self.args.repair_permissions {
+                let (f, i) = self.task_repair_permissions(&ctx).await;
+                items_scanned += i;
+                findings_count += f.len() as u64;
+            }
+            if self.args.purge_ram {
+                let (f, i) = self.task_purge_ram(&ctx).await;
+                items_scanned += i;
+                findings_count += f.len() as u64;
+            }
+            if self.args.dyld {
+                let (f, i) = self.task_rebuild_dyld(&ctx).await;
+                items_scanned += i;
+                findings_count += f.len() as u64;
+            }
+            if self.args.quicklook {
+                let (f, i) = self.task_clear_quicklook(&ctx).await;
+                items_scanned += i;
+                findings_count += f.len() as u64;
+            }
+        } else if cfg!(target_os = "linux") {
+            // Linux tasks — map the same flags to Linux equivalents
+            if self.args.dns {
+                let (f, i) = self.task_flush_dns(&ctx).await;
+                items_scanned += i;
+                findings_count += f.len() as u64;
+            }
+            // spotlight → journal vacuum
+            if self.args.spotlight {
+                let (f, i) = self.task_journal_vacuum(&ctx).await;
+                items_scanned += i;
+                findings_count += f.len() as u64;
+            }
+            // launchservices → pkg cache clean
+            if self.args.launchservices {
+                let (f, i) = self.task_pkg_cache_clean(&ctx).await;
+                items_scanned += i;
+                findings_count += f.len() as u64;
+            }
+            // periodic → tmpfiles clean
+            if self.args.periodic {
+                let (f, i) = self.task_tmpfiles_clean(&ctx).await;
+                items_scanned += i;
+                findings_count += f.len() as u64;
+            }
+            // repair_permissions → updatedb refresh
+            if self.args.repair_permissions {
+                let (f, i) = self.task_updatedb(&ctx).await;
+                items_scanned += i;
+                findings_count += f.len() as u64;
+            }
+            // purge_ram → drop caches
+            if self.args.purge_ram {
+                let (f, i) = self.task_drop_caches(&ctx).await;
+                items_scanned += i;
+                findings_count += f.len() as u64;
+            }
+            // dyld → thumbnail/font cache clean
+            if self.args.dyld {
+                let (f, i) = self.task_clear_thumbnail_cache(&ctx).await;
+                items_scanned += i;
+                findings_count += f.len() as u64;
+            }
+            // quicklook → also thumbnail cache (already handled by dyld flag above)
+            if self.args.quicklook && !self.args.dyld {
+                let (f, i) = self.task_clear_thumbnail_cache(&ctx).await;
+                items_scanned += i;
+                findings_count += f.len() as u64;
+            }
         }
 
         Ok(EngineStats {

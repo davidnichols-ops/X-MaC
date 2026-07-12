@@ -82,6 +82,52 @@ fn apfs_stats() -> Option<ApfsStats> {
     })
 }
 
+/// Linux volume stats via statvfs on the root filesystem.
+/// Returns total, free, used, and /usr size as a proxy for "system".
+fn linux_stats() -> Option<ApfsStats> {
+    use std::ffi::CString;
+    use std::mem::MaybeUninit;
+
+    let path_c = CString::new("/").ok()?;
+    unsafe {
+        let mut buf: MaybeUninit<libc::statvfs> = MaybeUninit::uninit();
+        if libc::statvfs(path_c.as_ptr(), buf.as_mut_ptr()) != 0 {
+            return None;
+        }
+        let buf = buf.assume_init();
+
+        let block_size = buf.f_frsize as u64;
+        let total = buf.f_blocks as u64 * block_size;
+        let free = buf.f_bavail as u64 * block_size;
+        let used = (buf.f_blocks as u64 - buf.f_bfree as u64) * block_size;
+
+        // Best-effort: /usr as "system", home as "data"
+        let system_used = dir_size_fast(std::path::Path::new("/usr"));
+        let data_used = used.saturating_sub(system_used);
+        let applications_used = dir_size_fast(std::path::Path::new("/opt"));
+
+        Some(ApfsStats {
+            total,
+            free,
+            system_used,
+            data_used,
+            applications_used,
+        })
+    }
+}
+
+/// Cross-platform volume stats — dispatches to apfs_stats on macOS,
+/// linux_stats on Linux.
+fn volume_stats() -> Option<ApfsStats> {
+    if cfg!(target_os = "macos") {
+        apfs_stats()
+    } else if cfg!(target_os = "linux") {
+        linux_stats()
+    } else {
+        None
+    }
+}
+
 /// Quick physical size sum (no recursion limit) — used only for /Applications.
 fn dir_size_fast(path: &std::path::Path) -> u64 {
     if !path.exists() {
@@ -167,8 +213,9 @@ impl Engine for DiskEngine {
         // Emit a volume-level summary finding so the GUI can render the
         // full disk donut chart (total / system / data / free / apps)
         // without needing a separate API call.
-        if let Some(stats) = apfs_stats() {
+        if let Some(stats) = volume_stats() {
             let total_known_used = stats.system_used + stats.data_used;
+            let vol_label = if cfg!(target_os = "macos") { "Macintosh HD" } else { "Root filesystem (/)" };
             let vol_finding = Finding::new(
                 EngineId::All,
                 Severity::Info,
@@ -178,7 +225,8 @@ impl Engine for DiskEngine {
                     crate::util::disk::format_bytes(stats.total),
                     crate::util::disk::format_bytes(total_known_used),
                     crate::util::disk::format_bytes(stats.free)),
-                format!("Macintosh HD — {} total capacity, {} data + {} system used, {} available",
+                format!("{} — {} total capacity, {} data + {} system used, {} available",
+                    vol_label,
                     crate::util::disk::format_bytes(stats.total),
                     crate::util::disk::format_bytes(stats.data_used),
                     crate::util::disk::format_bytes(stats.system_used),
@@ -186,12 +234,12 @@ impl Engine for DiskEngine {
             )
             .with_size(total_known_used)
             // Rich JSON so Swift can build accurate donut segments:
-            // volume_total  — APFS container total bytes
+            // volume_total  — total capacity bytes
             // volume_used   — system + data combined (for the "used%" centre label)
-            // volume_free   — APFS container free bytes
-            // volume_system — macOS sealed system volume bytes
-            // volume_data   — writable Data volume bytes (home + apps + etc)
-            // volume_apps   — /Applications physical size (subset of data)
+            // volume_free   — free bytes
+            // volume_system — system volume bytes
+            // volume_data   — writable data volume bytes (home + apps + etc)
+            // volume_apps   — /Applications (macOS) or /opt (Linux) physical size
             .with_hint(format!(
                 "{{\"volume_total\":{},\"volume_used\":{},\"volume_free\":{},\
                  \"volume_system\":{},\"volume_data\":{},\"volume_apps\":{}}}",

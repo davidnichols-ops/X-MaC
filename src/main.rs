@@ -268,10 +268,15 @@ fn run_install(cli: &Cli, args: &cli::args::InstallArgs) -> Result<()> {
     let install_dir = match &args.dir {
         Some(d) => d.clone(),
         None => {
-            // Default: /opt/homebrew/bin on Apple Silicon, /usr/local/bin on Intel.
-            if util::macos::MacosUtils::is_apple_silicon() {
-                std::path::PathBuf::from("/opt/homebrew/bin")
+            if cfg!(target_os = "macos") {
+                // Default: /opt/homebrew/bin on Apple Silicon, /usr/local/bin on Intel.
+                if util::macos::MacosUtils::is_apple_silicon() {
+                    std::path::PathBuf::from("/opt/homebrew/bin")
+                } else {
+                    std::path::PathBuf::from("/usr/local/bin")
+                }
             } else {
+                // Linux: /usr/local/bin is the standard user-installed binary location.
                 std::path::PathBuf::from("/usr/local/bin")
             }
         }

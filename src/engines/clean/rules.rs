@@ -115,49 +115,92 @@ pub const SWAP_FILE_PATTERNS: &[&str] = &[".swp", ".swo"];
 impl CleanRules {
     pub fn cache_paths(&self) -> Vec<PathBuf> {
         let home = MacosUtils::home_dir();
-        vec![home.join("Library/Caches"), PathBuf::from("/Library/Caches")]
+        if cfg!(target_os = "macos") {
+            vec![home.join("Library/Caches"), PathBuf::from("/Library/Caches")]
+        } else {
+            // Linux: XDG cache + system caches
+            let xdg_cache = std::env::var("XDG_CACHE_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| home.join(".cache"));
+            vec![
+                xdg_cache,
+                PathBuf::from("/var/cache"),
+            ]
+        }
     }
 
     pub fn xcode_paths(&self) -> Vec<PathBuf> {
-        let home = MacosUtils::home_dir();
-        vec![
-            home.join("Library/Developer/Xcode/DerivedData"),
-            home.join("Library/Developer/Xcode/Archives"),
-            home.join("Library/Developer/Xcode/iOS DeviceSupport"),
-        ]
+        if cfg!(target_os = "macos") {
+            let home = MacosUtils::home_dir();
+            vec![
+                home.join("Library/Developer/Xcode/DerivedData"),
+                home.join("Library/Developer/Xcode/Archives"),
+                home.join("Library/Developer/Xcode/iOS DeviceSupport"),
+            ]
+        } else {
+            vec![] // Xcode doesn't exist on Linux
+        }
     }
 
     /// Package-manager cache directories. These are regenerated on demand and
     /// safe to clear.
     pub fn pkg_cache_paths(&self) -> Vec<PathBuf> {
         let home = MacosUtils::home_dir();
-        vec![
+        let mut paths = vec![
             home.join(".npm/_cacache"),
             home.join(".npm/_npx"),
             home.join(".npm/_logs"),
-            home.join(".cache"),
             home.join(".cargo/registry/cache"),
             home.join(".cargo/registry/src"),
             home.join(".cargo/registry/index"),
-            home.join("Library/Caches/pip"),
-            home.join("Library/Caches/Homebrew"),
-            home.join("Library/Caches/go-build"),
             home.join(".gradle/caches"),
             home.join(".m2/repository"),
-        ]
+        ];
+        if cfg!(target_os = "macos") {
+            paths.push(home.join("Library/Caches/pip"));
+            paths.push(home.join("Library/Caches/Homebrew"));
+            paths.push(home.join("Library/Caches/go-build"));
+            paths.push(home.join(".cache"));
+        } else {
+            // Linux: XDG cache home covers pip, go-build, etc.
+            let xdg_cache = std::env::var("XDG_CACHE_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| home.join(".cache"));
+            paths.push(xdg_cache.clone());
+            paths.push(xdg_cache.join("pip"));
+            paths.push(xdg_cache.join("go-build"));
+            paths.push(xdg_cache.join("Homebrew"));
+            // Linux system package manager caches
+            paths.push(PathBuf::from("/var/cache/apt/archives"));
+            paths.push(PathBuf::from("/var/cache/dnf"));
+            paths.push(PathBuf::from("/var/cache/pacman/pkg"));
+            paths.push(PathBuf::from("/var/cache/zypp"));
+        }
+        paths
     }
 
-    /// System temp directories (resolved through firmlinks).
+    /// System temp directories (resolved through firmlinks on macOS).
     pub fn temp_paths(&self) -> Vec<PathBuf> {
-        vec![
-            MacosUtils::resolve_firmlink(&PathBuf::from("/tmp")),
-            MacosUtils::resolve_firmlink(&PathBuf::from("/var/tmp")),
-        ]
+        if cfg!(target_os = "macos") {
+            vec![
+                MacosUtils::resolve_firmlink(&PathBuf::from("/tmp")),
+                MacosUtils::resolve_firmlink(&PathBuf::from("/var/tmp")),
+            ]
+        } else {
+            vec![
+                PathBuf::from("/tmp"),
+                PathBuf::from("/var/tmp"),
+            ]
+        }
     }
 
     /// User log directory.
     pub fn user_log_paths(&self) -> Vec<PathBuf> {
-        vec![MacosUtils::home_dir().join("Library/Logs")]
+        if cfg!(target_os = "macos") {
+            vec![MacosUtils::home_dir().join("Library/Logs")]
+        } else {
+            vec![MacosUtils::home_dir().join(".local/share/logs")]
+        }
     }
 
     /// System log directory (for rotated log detection only — active logs
@@ -176,71 +219,118 @@ impl CleanRules {
     /// to avoid breaking installed tooling.
     pub fn sweep_skip_dirs(&self) -> Vec<PathBuf> {
         let home = MacosUtils::home_dir();
-        vec![
+        let mut paths = vec![
             home.join(".cargo/bin"),
             home.join(".cursor"),
             home.join(".windsurf"),
             home.join(".vscode"),
             home.join(".rustup"),
             home.join(".local"),
-            PathBuf::from("/System"),
-            PathBuf::from("/usr"),
-        ]
+        ];
+        if cfg!(target_os = "macos") {
+            paths.push(PathBuf::from("/System"));
+        }
+        paths.push(PathBuf::from("/usr"));
+        paths
     }
 
     // ---- Browser cache paths --------------------------------------------
 
-    /// Browser cache directories for Safari, Chrome, Firefox, Edge, Brave,
-    /// and Arc. Each entry is (browser_name, cache_path).
+    /// Browser cache directories. On macOS: Safari, Chrome, Firefox, Edge,
+    /// Brave, Arc. On Linux: Chrome, Firefox, Brave, Edge (XDG paths).
     pub fn browser_cache_paths(&self) -> Vec<(&'static str, PathBuf)> {
         let home = MacosUtils::home_dir();
-        vec![
-            ("Safari", home.join("Library/Caches/com.apple.Safari")),
-            ("Safari Containers", home.join("Library/Containers/com.apple.Safari/Data/Library/Caches/com.apple.Safari")),
-            ("Chrome", home.join("Library/Caches/Google/Chrome")),
-            ("Firefox", home.join("Library/Caches/Firefox")),
-            ("Edge", home.join("Library/Caches/Microsoft Edge")),
-            ("Brave", home.join("Library/Caches/BraveSoftware")),
-            ("Arc", home.join("Library/Caches/com.thebrowser.Browser")),
-        ]
+        if cfg!(target_os = "macos") {
+            vec![
+                ("Safari", home.join("Library/Caches/com.apple.Safari")),
+                ("Safari Containers", home.join("Library/Containers/com.apple.Safari/Data/Library/Caches/com.apple.Safari")),
+                ("Chrome", home.join("Library/Caches/Google/Chrome")),
+                ("Firefox", home.join("Library/Caches/Firefox")),
+                ("Edge", home.join("Library/Caches/Microsoft Edge")),
+                ("Brave", home.join("Library/Caches/BraveSoftware")),
+                ("Arc", home.join("Library/Caches/com.thebrowser.Browser")),
+            ]
+        } else {
+            let xdg_cache = std::env::var("XDG_CACHE_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| home.join(".cache"));
+            let xdg_config = std::env::var("XDG_CONFIG_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| home.join(".config"));
+            vec![
+                ("Chrome", xdg_cache.join("google-chrome")),
+                ("Firefox", xdg_cache.join("mozilla/firefox")),
+                ("Edge", xdg_cache.join("microsoft-edge")),
+                ("Brave", xdg_cache.join("BraveSoftware/Brave-Browser")),
+                ("Chromium", xdg_cache.join("chromium")),
+                // Firefox stores profiles under .mozilla/firefox/*/cache2
+                ("Firefox Profiles", xdg_config.join("mozilla/firefox")),
+            ]
+        }
     }
 
     // ---- Mail attachment paths -------------------------------------------
 
-    /// Mail attachment and download directories.
+    /// Mail attachment and download directories (macOS only — Linux mail
+    /// clients use varied locations).
     pub fn mail_paths(&self) -> Vec<PathBuf> {
-        let home = MacosUtils::home_dir();
-        vec![
-            home.join("Library/Containers/com.apple.mail/Data/Library/Mail Downloads"),
-            home.join("Library/Mail/V2/MailData"),
-            home.join("Library/Mail/V3/MailData"),
-            home.join("Library/Mail/V4/MailData"),
-            home.join("Library/Mail/V5/MailData"),
-            home.join("Library/Mail/V6/MailData"),
-            home.join("Library/Mail/V7/MailData"),
-            home.join("Library/Mail/V8/MailData"),
-        ]
+        if cfg!(target_os = "macos") {
+            let home = MacosUtils::home_dir();
+            vec![
+                home.join("Library/Containers/com.apple.mail/Data/Library/Mail Downloads"),
+                home.join("Library/Mail/V2/MailData"),
+                home.join("Library/Mail/V3/MailData"),
+                home.join("Library/Mail/V4/MailData"),
+                home.join("Library/Mail/V5/MailData"),
+                home.join("Library/Mail/V6/MailData"),
+                home.join("Library/Mail/V7/MailData"),
+                home.join("Library/Mail/V8/MailData"),
+            ]
+        } else {
+            vec![]
+        }
     }
 
     // ---- iOS backup paths ------------------------------------------------
 
-    /// iOS device backup directory (Finder/iTunes backups).
+    /// iOS device backup directory (Finder/iTunes backups — macOS only).
     pub fn ios_backup_paths(&self) -> Vec<PathBuf> {
-        let home = MacosUtils::home_dir();
-        vec![home.join("Library/Application Support/MobileSync/Backup")]
+        if cfg!(target_os = "macos") {
+            let home = MacosUtils::home_dir();
+            vec![home.join("Library/Application Support/MobileSync/Backup")]
+        } else {
+            vec![]
+        }
     }
 
     // ---- Trash paths -----------------------------------------------------
 
     /// Trash directories on all mounted volumes.
     pub fn trash_paths(&self) -> Vec<PathBuf> {
-        let mut paths = vec![MacosUtils::home_dir().join(".Trash")];
-        // External/volume trashes
-        if let Ok(entries) = std::fs::read_dir("/Volumes") {
-            for entry in entries.flatten() {
-                let trash = entry.path().join(".Trashes");
-                if trash.exists() {
-                    paths.push(trash);
+        let home = MacosUtils::home_dir();
+        let mut paths = if cfg!(target_os = "macos") {
+            vec![home.join(".Trash")]
+        } else {
+            // Linux: XDG trash spec
+            let xdg_data = std::env::var("XDG_DATA_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| home.join(".local/share"));
+            vec![xdg_data.join("Trash")]
+        };
+        // External/volume trashes (macOS: /Volumes, Linux: /media, /mnt)
+        let volume_roots = if cfg!(target_os = "macos") {
+            vec!["/Volumes"]
+        } else {
+            vec!["/media", "/mnt"]
+        };
+        for root in volume_roots {
+            if let Ok(entries) = std::fs::read_dir(root) {
+                for entry in entries.flatten() {
+                    let trash_name = if cfg!(target_os = "macos") { ".Trashes" } else { ".Trash-1000" };
+                    let trash = entry.path().join(trash_name);
+                    if trash.exists() {
+                        paths.push(trash);
+                    }
                 }
             }
         }
@@ -249,29 +339,38 @@ impl CleanRules {
 
     // ---- Document version paths ------------------------------------------
 
-    /// Document revision stores on volumes.
+    /// Document revision stores on volumes (macOS APFS only).
     pub fn document_version_paths(&self) -> Vec<PathBuf> {
-        let mut paths = vec![PathBuf::from("/.DocumentRevisions-V100")];
-        if let Ok(entries) = std::fs::read_dir("/Volumes") {
-            for entry in entries.flatten() {
-                let rev = entry.path().join(".DocumentRevisions-V100");
-                if rev.exists() {
-                    paths.push(rev);
+        if cfg!(target_os = "macos") {
+            let mut paths = vec![PathBuf::from("/.DocumentRevisions-V100")];
+            if let Ok(entries) = std::fs::read_dir("/Volumes") {
+                for entry in entries.flatten() {
+                    let rev = entry.path().join(".DocumentRevisions-V100");
+                    if rev.exists() {
+                        paths.push(rev);
+                    }
                 }
             }
+            paths
+        } else {
+            vec![]
         }
-        paths
     }
 
     // ---- Application directories (for language file scanning) -----------
 
     /// Directories containing .app bundles to scan for language files.
+    /// On Linux, returns empty (no .app bundles).
     pub fn app_dirs(&self) -> Vec<PathBuf> {
-        let home = MacosUtils::home_dir();
-        vec![
-            PathBuf::from("/Applications"),
-            home.join("Applications"),
-        ]
+        if cfg!(target_os = "macos") {
+            let home = MacosUtils::home_dir();
+            vec![
+                PathBuf::from("/Applications"),
+                home.join("Applications"),
+            ]
+        } else {
+            vec![]
+        }
     }
 
     /// Language codes to preserve when scanning for removable .lproj dirs.

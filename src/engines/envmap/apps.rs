@@ -1,17 +1,20 @@
-//! Installed application enumeration from `/Applications` and
-//! `~/Applications`.
+//! Installed application enumeration.
 //!
-//! Walks each Applications directory for `*.app` bundles, reads each bundle's
-//! `Contents/Info.plist`, and extracts the bundle name
+//! On macOS: walks `/Applications` and `~/Applications` for `*.app` bundles,
+//! reads each bundle's `Contents/Info.plist`, and extracts the bundle name
 //! (`CFBundleName` / `CFBundleExecutable`) and version
-//! (`CFBundleShortVersionString`, falling back to `CFBundleVersion`). Uses the
-//! `plist` crate — no CoreFoundation linkage required, so this stays
-//! cross-platform and unit-testable with a tempdir.
+//! (`CFBundleShortVersionString`, falling back to `CFBundleVersion`).
+//!
+//! On Linux: scans Freedesktop `.desktop` files from standard XDG data dirs,
+//! plus flatpak and snap application listings.
+//!
+//! Uses the `plist` crate for macOS bundles — no CoreFoundation linkage
+//! required, so this stays cross-platform and unit-testable with a tempdir.
 
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
-/// One enumerated macOS application bundle.
+/// One enumerated application (macOS .app bundle or Linux .desktop entry).
 #[derive(Debug, Clone)]
 pub struct InstalledApp {
     pub bundle_path: PathBuf,
@@ -20,20 +23,56 @@ pub struct InstalledApp {
     pub version: String,
 }
 
-/// Default Applications directories scanned on macOS.
+/// Default application directories scanned.
+/// On macOS: `/Applications` and `~/Applications`.
+/// On Linux: standard XDG data directories for `.desktop` files.
 pub fn default_app_dirs() -> Vec<PathBuf> {
-    let mut dirs = vec![PathBuf::from("/Applications")];
-    if let Ok(home) = std::env::var("HOME") {
-        dirs.push(PathBuf::from(home).join("Applications"));
+    if cfg!(target_os = "macos") {
+        let mut dirs = vec![PathBuf::from("/Applications")];
+        if let Ok(home) = std::env::var("HOME") {
+            dirs.push(PathBuf::from(home).join("Applications"));
+        }
+        dirs
+    } else {
+        // Linux: XDG data directories for .desktop files
+        let mut dirs = vec![
+            PathBuf::from("/usr/share/applications"),
+            PathBuf::from("/usr/local/share/applications"),
+        ];
+        // XDG_DATA_HOME
+        if let Ok(home) = std::env::var("HOME") {
+            dirs.push(PathBuf::from(home).join(".local/share/applications"));
+        }
+        // XDG_DATA_DIRS
+        if let Ok(xdg_data_dirs) = std::env::var("XDG_DATA_DIRS") {
+            for d in xdg_data_dirs.split(':') {
+                if !d.is_empty() {
+                    dirs.push(PathBuf::from(d).join("applications"));
+                }
+            }
+        }
+        // Flatpak and snap application dirs
+        if let Ok(home) = std::env::var("HOME") {
+            dirs.push(PathBuf::from(home).join(".local/share/flatpak/exports/share/applications"));
+        }
+        dirs.push(PathBuf::from("/var/lib/flatpak/exports/share/applications"));
+        dirs.push(PathBuf::from("/var/lib/snapd/desktop/applications"));
+        dirs
     }
-    dirs
 }
 
-/// Enumerate `.app` bundles under `dir`. `max_depth` bounds the walk so a
-/// deeply nested Applications folder stays fast. Returns one `InstalledApp`
-/// per bundle whose `Info.plist` could be parsed; bundles missing a plist are
-/// skipped silently.
+/// Enumerate applications under `dir`. On macOS, looks for `.app` bundles;
+/// on Linux, looks for `.desktop` files. `max_depth` bounds the walk.
 pub fn enumerate_apps_in(dir: &Path, max_depth: usize) -> Vec<InstalledApp> {
+    if cfg!(target_os = "macos") {
+        enumerate_macos_apps(dir, max_depth)
+    } else {
+        enumerate_linux_apps(dir, max_depth)
+    }
+}
+
+/// macOS: enumerate `.app` bundles under `dir`.
+fn enumerate_macos_apps(dir: &Path, max_depth: usize) -> Vec<InstalledApp> {
     let mut apps = Vec::new();
 
     if !dir.exists() {
@@ -62,6 +101,40 @@ pub fn enumerate_apps_in(dir: &Path, max_depth: usize) -> Vec<InstalledApp> {
         }
 
         if let Some(app) = parse_app_bundle(path) {
+            apps.push(app);
+        }
+    }
+
+    apps
+}
+
+/// Linux: enumerate `.desktop` files under `dir`.
+fn enumerate_linux_apps(dir: &Path, max_depth: usize) -> Vec<InstalledApp> {
+    let mut apps = Vec::new();
+
+    if !dir.exists() {
+        return apps;
+    }
+
+    for entry in WalkDir::new(dir)
+        .max_depth(max_depth)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        if !path
+            .extension()
+            .map(|ext| ext == "desktop")
+            .unwrap_or(false)
+        {
+            continue;
+        }
+
+        if let Some(app) = parse_desktop_file(path) {
             apps.push(app);
         }
     }
@@ -105,6 +178,69 @@ pub fn parse_app_bundle(bundle_path: &Path) -> Option<InstalledApp> {
 
     Some(InstalledApp {
         bundle_path: bundle_path.to_path_buf(),
+        bundle_name,
+        bundle_id,
+        version,
+    })
+}
+
+/// Parse a Freedesktop `.desktop` file and return its metadata.
+/// Extracts `Name`, `X-Flatpak`/`Icon` (for bundle_id proxy), and version
+/// if available. Returns `None` if the file is unreadable or has no `Name`.
+pub fn parse_desktop_file(path: &Path) -> Option<InstalledApp> {
+    let content = std::fs::read_to_string(path).ok()?;
+
+    let mut name: Option<String> = None;
+    let mut desktop_id: Option<String> = None;
+    let mut version: Option<String> = None;
+    let mut in_desktop_entry = false;
+
+    for line in content.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            in_desktop_entry = line == "[Desktop Entry]";
+            continue;
+        }
+        if !in_desktop_entry {
+            continue;
+        }
+        if let Some((key, value)) = line.split_once('=') {
+            let key = key.trim();
+            let value = value.trim();
+            match key {
+                "Name" => {
+                    if name.is_none() {
+                        name = Some(value.to_string());
+                    }
+                }
+                "X-Flatpak" | "X-SnapInstanceName" => {
+                    if desktop_id.is_none() {
+                        desktop_id = Some(value.to_string());
+                    }
+                }
+                "Version" => {
+                    version = Some(value.to_string());
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let bundle_name = name.unwrap_or_else(|| {
+        path.file_stem()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "unknown".to_string())
+    });
+
+    // Use the filename (without .desktop) as a fallback bundle_id
+    let bundle_id = desktop_id.or_else(|| {
+        path.file_stem().map(|n| n.to_string_lossy().to_string())
+    });
+
+    let version = version.unwrap_or_else(|| "unknown".to_string());
+
+    Some(InstalledApp {
+        bundle_path: path.to_path_buf(),
         bundle_name,
         bundle_id,
         version,
@@ -207,7 +343,33 @@ mod tests {
     #[test]
     fn default_app_dirs_includes_system_applications() {
         let dirs = default_app_dirs();
-        assert!(dirs.iter().any(|d| d == &PathBuf::from("/Applications")));
+        if cfg!(target_os = "macos") {
+            assert!(dirs.iter().any(|d| d == &PathBuf::from("/Applications")));
+        } else {
+            // Linux: should include /usr/share/applications
+            assert!(dirs.iter().any(|d| d == &PathBuf::from("/usr/share/applications")));
+        }
+    }
+
+    #[test]
+    fn parse_desktop_file_extracts_name() {
+        let tmp = TempDir::new().unwrap();
+        let desktop = tmp.path().join("firefox.desktop");
+        fs::write(&desktop, "[Desktop Entry]\nName=Firefox\nVersion=124.0\n").unwrap();
+        let parsed = parse_desktop_file(&desktop).expect("parse");
+        assert_eq!(parsed.bundle_name, "Firefox");
+        assert_eq!(parsed.version, "124.0");
+        assert_eq!(parsed.bundle_id.as_deref(), Some("firefox"));
+    }
+
+    #[test]
+    fn parse_desktop_file_falls_back_to_filename() {
+        let tmp = TempDir::new().unwrap();
+        let desktop = tmp.path().join("chromium-browser.desktop");
+        // No Name= line — should fall back to filename stem
+        fs::write(&desktop, "[Desktop Entry]\nExec=chromium-browser\n").unwrap();
+        let parsed = parse_desktop_file(&desktop).expect("parse");
+        assert_eq!(parsed.bundle_name, "chromium-browser");
     }
 
     #[test]

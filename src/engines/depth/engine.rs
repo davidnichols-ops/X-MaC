@@ -89,10 +89,27 @@ impl DepthEngine {
     async fn scan_dylibs(&self, _ctx: &ScanContext) -> Vec<crate::core::types::Finding> {
         let mut findings = Vec::new();
 
-        let target_paths = vec![
-            PathBuf::from("/usr/local/lib"),
-            PathBuf::from("/opt/homebrew/lib"),
-        ];
+        // Platform-appropriate library directories and extensions.
+        let (target_paths, ext): (Vec<PathBuf>, &str) = if cfg!(target_os = "macos") {
+            (
+                vec![
+                    PathBuf::from("/usr/local/lib"),
+                    PathBuf::from("/opt/homebrew/lib"),
+                ],
+                "dylib",
+            )
+        } else {
+            (
+                vec![
+                    PathBuf::from("/usr/local/lib"),
+                    PathBuf::from("/usr/lib"),
+                    PathBuf::from("/usr/lib/x86_64-linux-gnu"),
+                    PathBuf::from("/usr/lib/aarch64-linux-gnu"),
+                    PathBuf::from("/usr/lib64"),
+                ],
+                "so",
+            )
+        };
 
         for target_path in target_paths {
             if !target_path.exists() {
@@ -106,7 +123,7 @@ impl DepthEngine {
                 .filter(|e| {
                     e.path()
                         .extension()
-                        .map(|ext| ext == "dylib")
+                        .map(|x| x == ext)
                         .unwrap_or(false)
                 });
 
@@ -123,6 +140,14 @@ impl DepthEngine {
     }
 
     fn check_dylib(path: &PathBuf) -> Option<crate::core::types::Finding> {
+        if cfg!(target_os = "macos") {
+            Self::check_dylib_macos(path)
+        } else {
+            Self::check_dylib_linux(path)
+        }
+    }
+
+    fn check_dylib_macos(path: &PathBuf) -> Option<crate::core::types::Finding> {
         use std::process::Command;
 
         let output = Command::new("otool")
@@ -168,6 +193,45 @@ impl DepthEngine {
                                 .with_hint("Reinstall the package or rebuild the library".to_string()),
                             );
                         }
+                    }
+                }
+                None
+            }
+            Err(_) => None,
+        }
+    }
+
+    /// Linux: parse `ldd` output to find missing shared libraries.
+    /// ldd prints lines like:
+    ///   libfoo.so.1 => /usr/lib/libfoo.so.1 (0x...)
+    ///   libbar.so.1 => not found
+    fn check_dylib_linux(path: &PathBuf) -> Option<crate::core::types::Finding> {
+        use std::process::Command;
+
+        let output = Command::new("ldd")
+            .arg(path.to_str().unwrap_or(""))
+            .output();
+
+        match output {
+            Ok(out) => {
+                let output_str = String::from_utf8_lossy(&out.stdout);
+                for line in output_str.lines() {
+                    let line = line.trim();
+                    // "not found" is the key indicator of a missing dependency.
+                    if line.contains("not found") {
+                        // Extract the library name: "libfoo.so.1 => not found"
+                        let lib_name = line.split("=>").next().unwrap_or(line).trim();
+                        return Some(
+                            crate::core::types::Finding::new(
+                                EngineId::Depth,
+                                crate::core::types::Severity::Medium,
+                                crate::core::types::Category::MissingDylib,
+                                crate::core::types::Target::Path(path.clone()),
+                                "Missing shared library dependency",
+                                format!("{} depends on missing library: {}", path.display(), lib_name),
+                            )
+                            .with_hint(format!("Reinstall the package providing {} (check with `apt-file search {}` or `dnf provides {}`)", lib_name, lib_name, lib_name)),
+                        );
                     }
                 }
                 None
