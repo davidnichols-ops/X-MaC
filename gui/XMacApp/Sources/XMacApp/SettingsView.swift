@@ -148,6 +148,17 @@ struct SettingsView: View {
                     SettingsRow(label: "Version", value: appVersion)
                     SettingsRow(label: "Description", value: "macOS cleaner, optimizer, and system scanner")
                     SettingsRow(label: "Engine", value: "Rust + CoreML GNN")
+                    SettingsRow(label: "GNN Accuracy", value: "99.74%")
+                }
+
+                SettingsSectionCard(title: "What's New in 2.0", icon: "sparkles") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        whatsNewRow(icon: "bolt.fill", text: "RAM Boost — purge inactive memory, kill hungry processes, before/after comparison")
+                        whatsNewRow(icon: "brain.head.profile", text: "GNN Neural Scan — 99.74% accuracy, 27 file categories, on-device CoreML")
+                        whatsNewRow(icon: "externaldrive.badge.timemachine", text: "Time Machine & backup volume protection across all engines")
+                        whatsNewRow(icon: "shield.lefthalf.filled", text: "Backup-aware cleanup policies and fix script generation")
+                        whatsNewRow(icon: "wrench.and.screwdriver", text: "Maintenance tasks: DNS flush, Spotlight, LaunchServices, RAM purge")
+                    }
                 }
 
                 Spacer()
@@ -157,6 +168,19 @@ struct SettingsView: View {
         .background(XTheme.voidGradient)
         .sheet(isPresented: $showingImportSheet) {
             ImportProfileSheet(importJSON: $importJSON, profiles: profiles, isPresented: $showingImportSheet)
+        }
+    }
+
+    private func whatsNewRow(icon: String, text: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 11))
+                .foregroundStyle(XTheme.accent)
+                .frame(width: 16)
+            Text(text)
+                .font(.system(size: 11))
+                .foregroundStyle(XTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
