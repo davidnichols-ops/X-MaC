@@ -207,7 +207,11 @@ mod tests {
     fn legacy_plain_json_still_loads() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("history.json");
-        std::fs::write(&path, r#"{"snapshots":[],"transactions":[],"max_entries":100}"#).unwrap();
+        std::fs::write(
+            &path,
+            r#"{"snapshots":[],"transactions":[],"max_entries":100}"#,
+        )
+        .unwrap();
 
         let loaded = load_history(&path);
         assert_eq!(loaded.max_entries, 100);
