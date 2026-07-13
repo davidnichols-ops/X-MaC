@@ -475,7 +475,7 @@ impl AdaptiveState {
         let (accepted_n, dismissed_n) = *entry;
         let total = accepted_n + dismissed_n;
         if total > 0 {
-            let rate = accepted_n as f64 / total as f64;
+            let _rate = accepted_n as f64 / total as f64;
             // Smooth with a prior of 0.5 (5 pseudo-observations).
             let smoothed = (accepted_n as f64 + 2.5) / (total as f64 + 5.0);
             self.category_weights

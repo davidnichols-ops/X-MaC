@@ -146,7 +146,7 @@ impl Daemon {
         rule: &crate::config::store::AutomationRule,
         snapshot: &crate::intelligence::SystemSnapshot,
     ) -> Option<crate::config::store::AutomationAction> {
-        use crate::config::store::{AutomationAction, AutomationCondition};
+        use crate::config::store::AutomationCondition;
 
         let triggered = match &rule.condition {
             AutomationCondition::MemoryPressure { threshold } => {
@@ -253,7 +253,7 @@ impl Daemon {
                     // Check if process exists
                     #[cfg(unix)]
                     {
-        use libc::{kill, SIGTERM};
+        use libc::kill;
                         if unsafe { kill(pid, 0) } == 0 {
                             anyhow::bail!(
                                 "xmac daemon is already running (pid {}). Use --stop to stop it first.",
@@ -289,7 +289,7 @@ impl Daemon {
         let pid: i32 = content.trim().parse().ok()?;
         #[cfg(unix)]
         {
-            use libc::{kill, SIGTERM};
+            use libc::kill;
             if unsafe { kill(pid, 0) } == 0 {
                 return Some(pid);
             }

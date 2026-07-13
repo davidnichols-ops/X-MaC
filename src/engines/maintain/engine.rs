@@ -610,7 +610,8 @@ impl MaintainEngine {
         .with_metadata(
             "memory_pressure",
             serde_json::json!(format!("{:?}", before.memory_pressure)),
-        );
+        )
+        .with_metadata("top_consumers", serde_json::json!(before.top_consumers));
         ctx.emit(before_finding.clone()).await;
         findings_count += 1;
 
@@ -629,18 +630,30 @@ impl MaintainEngine {
         let mut purge_message = String::new();
         if args.purge {
             items_scanned += 1;
-            let (ok, msg) = if cfg!(target_os = "macos") {
-                // Try without sudo first, then with sudo
-                let (ok1, msg1) = Self::run_command("purge", &[]);
-                if ok1 {
-                    (true, msg1)
-                } else {
-                    // Try with sudo -n (non-interactive, uses cached credentials)
-                    let (ok2, msg2) = Self::run_command("sudo", &["-n", "purge"]);
-                    if ok2 {
-                        (true, msg2)
+            let (ok, _msg) = if cfg!(target_os = "macos") {
+                if args.privileged {
+                    // Use osascript to prompt for admin privileges
+                    let (ok_os, msg_os) = Self::run_command(
+                        "osascript",
+                        &["-e", "do shell script \"purge\" with administrator privileges"],
+                    );
+                    if ok_os {
+                        (true, msg_os)
                     } else {
-                        (false, format!("{} (tried sudo: {})", msg1, msg2))
+                        (false, format!("osascript purge failed: {}", msg_os))
+                    }
+                } else {
+                    // Try without sudo first, then with sudo -n
+                    let (ok1, msg1) = Self::run_command("purge", &[]);
+                    if ok1 {
+                        (true, msg1)
+                    } else {
+                        let (ok2, msg2) = Self::run_command("sudo", &["-n", "purge"]);
+                        if ok2 {
+                            (true, msg2)
+                        } else {
+                            (false, format!("{} (tried sudo: {})", msg1, msg2))
+                        }
                     }
                 }
             } else {
@@ -811,7 +824,8 @@ impl MaintainEngine {
         .with_metadata(
             "memory_pressure",
             serde_json::json!(format!("{:?}", after.memory_pressure)),
-        );
+        )
+        .with_metadata("top_consumers", serde_json::json!(after.top_consumers));
         ctx.emit(after_finding).await;
         findings_count += 1;
 
