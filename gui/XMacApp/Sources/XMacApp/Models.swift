@@ -46,6 +46,21 @@ struct Finding: Identifiable, Codable, Hashable {
 struct TargetInfo: Codable, Hashable {
     let type: String
     let value: String
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        type = try container.decode(String.self, forKey: .type)
+        // Accept both string and numeric values
+        if let s = try? container.decode(String.self, forKey: .value) {
+            value = s
+        } else if let i = try? container.decode(Int.self, forKey: .value) {
+            value = "\(i)"
+        } else if let d = try? container.decode(Double.self, forKey: .value) {
+            value = "\(d)"
+        } else {
+            value = ""
+        }
+    }
 }
 
 struct TimeInfo: Codable, Hashable {
@@ -100,6 +115,10 @@ enum JSONValue: Codable, Hashable {
     var doubleValue: Double? {
         if case .double(let d) = self { return d }
         if case .int(let i) = self { return Double(i) }
+        return nil
+    }
+    var boolValue: Bool? {
+        if case .bool(let b) = self { return b }
         return nil
     }
 }
@@ -301,5 +320,92 @@ func revealInFinder(path: String) {
         NSWorkspace.shared.activateFileViewerSelecting([url])
     } else if fm.fileExists(atPath: url.deletingLastPathComponent().path) {
         NSWorkspace.shared.open(url.deletingLastPathComponent())
+    }
+}
+
+// MARK: - Zen Mode Result
+
+struct ZenResult: Codable {
+    let duration_secs: Double
+    let health_before: Double
+    let health_after: Double
+    let memory_before: ZenMemorySummary
+    let memory_after: ZenMemorySummary
+    let reclaimable_bytes: UInt64
+    let reclaimed_bytes: UInt64
+    let findings_count: Int
+    let maintenance_tasks_run: Int
+    let top_categories: [ZenCategoryEntry]
+    let steps: [ZenStep]
+}
+
+struct ZenMemorySummary: Codable {
+    let total_bytes: UInt64
+    let used_bytes: UInt64
+    let free_bytes: UInt64
+    let utilization: Double
+}
+
+struct ZenCategoryEntry: Codable, Identifiable {
+    let _0: String
+    let _1: UInt64
+    var id: String { _0 }
+    var category: String { _0 }
+    var size: UInt64 { _1 }
+
+    init(from decoder: Decoder) throws {
+        var container = try decoder.unkeyedContainer()
+        _0 = try container.decode(String.self)
+        _1 = try container.decode(UInt64.self)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.unkeyedContainer()
+        try container.encode(_0)
+        try container.encode(_1)
+    }
+}
+
+struct ZenStep: Codable, Identifiable {
+    let name: String
+    let status: String
+    let detail: String
+    var id: String { name }
+}
+
+// MARK: - AI Advisor Recommendation
+
+struct AdvisorRecommendation: Codable, Identifiable, Hashable {
+    let id: String
+    let severity: String
+    let category: String
+    let title: String
+    let explanation: String
+    let action: String
+    let command: String?
+    let estimated_impact: String
+    let confidence: Double
+    let auto_safe: Bool
+
+    var severityColor: Color {
+        switch severity {
+        case "critical": return XTheme.critical
+        case "high": return XTheme.high
+        case "medium": return XTheme.medium
+        case "low": return XTheme.low
+        case "info": return XTheme.info
+        default: return XTheme.info
+        }
+    }
+
+    var severityIcon: String {
+        switch severity {
+        case "critical": return "xmark.octagon.fill"
+        case "high": return "exclamationmark.octagon.fill"
+        case "medium": return "exclamationmark.triangle.fill"
+        case "low": return "checkmark.circle.fill"
+        case "info": return "info.circle.fill"
+        default: return "info.circle.fill"
+        }
     }
 }

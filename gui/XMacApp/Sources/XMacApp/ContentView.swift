@@ -21,6 +21,10 @@ struct ContentView: View {
                 MaintainView()
             case .ramBoost:
                 RamBoostView()
+            case .zen:
+                ZenView()
+            case .advisor:
+                AdvisorView()
             case .disk:
                 DiskView()
             case .neural:
@@ -177,6 +181,12 @@ struct SidebarView: View {
             }
             NavButton(icon: "bolt.fill", label: "RAM Boost", isActive: runner.scanMode == .ramBoost, disabled: scanning) {
                 runner.openRamBoost()
+            }
+            NavButton(icon: "circle.hexagongrid", label: "Zen Mode", isActive: runner.scanMode == .zen, disabled: scanning) {
+                runner.openZen()
+            }
+            NavButton(icon: "brain.head.profile", label: "AI Advisor", isActive: runner.scanMode == .advisor, disabled: scanning) {
+                runner.openAdvisor()
             }
             NavButton(icon: "internaldrive", label: "Disk Usage", isActive: runner.scanMode == .disk, disabled: scanning) {
                 runner.startDiskScan()

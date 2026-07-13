@@ -1,6 +1,14 @@
 import Foundation
 import Combine
 
+// MARK: - Stderr logging helper
+
+private func logStderr(_ message: String) {
+    message.withCString { cstr in
+        fputs(cstr, stderr)
+    }
+}
+
 // MARK: - Activity Log Entry
 
 struct ActivityLogEntry: Identifiable, Hashable {
@@ -48,7 +56,7 @@ final class XMacRunner: ObservableObject {
     @Published var showActivityBanner: Bool = false
 
     enum ScanMode: String {
-        case dashboard, idle, full, clean, maintain, disk, neural, apps, settings, history, automation, ramBoost
+        case dashboard, idle, full, clean, maintain, disk, neural, apps, settings, history, automation, ramBoost, zen, advisor
     }
 
     private var appSettings: AppSettings?
@@ -97,9 +105,10 @@ final class XMacRunner: ObservableObject {
             showActivityBanner = true
         }
 
-        #if DEBUG
-        print("[XMacRunner] \(status.rawValue.uppercased()) \(operation): \(message)" + (detail != nil ? " — \(detail!)" : ""))
-        #endif
+        // Always log to stderr so it's visible in Console.app
+        let detailStr = detail != nil ? " — \(detail!)" : ""
+        let durStr = durationMs != nil ? String(format: " [%.0fms]", durationMs!) : ""
+        logStderr("[XMacRunner] \(status.rawValue.uppercased()) \(operation): \(message)\(detailStr)\(durStr)\n")
     }
 
     /// Track an async operation with automatic start/success/failure logging.
@@ -167,19 +176,26 @@ final class XMacRunner: ObservableObject {
     }
 
     private func beginScan(mode: ScanMode, phase: String, task: @escaping () async -> Void) {
-        stopScan()
+        // Only stop if actually scanning — don't kill stale processes
+        if isScanning {
+            stopScan()
+        }
         clearResults()
         scanMode = mode
         isScanning = true
         scanPhase = phase
         scanProgress = 0.05
+        logActivity(mode.rawValue, status: .started, message: phase)
         currentScanTask = Task {
             await task()
         }
     }
 
     func stopScan() {
-        currentProcess?.terminate()
+        if let proc = currentProcess, proc.isRunning {
+            proc.terminate()
+            logActivity("stopScan", status: .warning, message: "Process terminated")
+        }
         currentProcess = nil
         currentScanTask?.cancel()
         currentScanTask = nil
@@ -219,6 +235,84 @@ final class XMacRunner: ObservableObject {
     func openRamBoost() {
         guard !isScanning else { return }
         scanMode = .ramBoost
+    }
+
+    func openZen() {
+        guard !isScanning else { return }
+        scanMode = .zen
+    }
+
+    func openAdvisor() {
+        guard !isScanning else { return }
+        scanMode = .advisor
+    }
+
+    // MARK: - Zen Mode
+
+    @Published var zenResult: ZenResult?
+    @Published var isZenRunning = false
+
+    func runZen(execute: Bool) {
+        guard !isZenRunning else { return }
+        isZenRunning = true
+        zenResult = nil
+        logActivity("zen", status: .started, message: execute ? "Running Zen Mode..." : "Previewing Zen Mode...")
+        Task { @MainActor in
+            var args = [xmacPath, "--format", "json", "zen"]
+            if execute { args += ["--execute"] }
+            let result = await runCommandCollect(args)
+            if let data = result.data(using: .utf8),
+               let decoded = try? JSONDecoder().decode(ZenResult.self, from: data) {
+                zenResult = decoded
+                logActivity("zen", status: .success, message: "Zen Mode complete — health \(Int(decoded.health_before))→\(Int(decoded.health_after))")
+            } else {
+                error = "Failed to parse Zen Mode result"
+                logActivity("zen", status: .failed, message: "Failed to parse result")
+            }
+            isZenRunning = false
+        }
+    }
+
+    // MARK: - AI Advisor
+
+    @Published var advisorRecommendations: [AdvisorRecommendation] = []
+    @Published var advisorHealthScore: Double = 0
+    @Published var advisorStatus: String = ""
+    @Published var isAdvisorRunning = false
+
+    func runAdvisor() {
+        guard !isAdvisorRunning else { return }
+        isAdvisorRunning = true
+        advisorRecommendations = []
+        logActivity("advisor", status: .started, message: "Analyzing system...")
+        Task { @MainActor in
+            let args = [xmacPath, "--format", "json", "advisor", "--advisor-format", "json", "--top", "20"]
+            let result = await runCommandCollect(args)
+            if let data = result.data(using: .utf8) {
+                if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    if let score = json["health_score"] as? Double {
+                        advisorHealthScore = score
+                    }
+                    if let status = json["status"] as? String {
+                        advisorStatus = status
+                    }
+                    if let recs = json["recommendations"] as? [[String: Any]] {
+                        advisorRecommendations = recs.compactMap { rec in
+                            guard let data = try? JSONSerialization.data(withJSONObject: rec),
+                                  let decoded = try? JSONDecoder().decode(AdvisorRecommendation.self, from: data) else {
+                                return nil as AdvisorRecommendation?
+                            }
+                            return decoded
+                        }
+                    }
+                }
+                logActivity("advisor", status: .success, message: "Found \(advisorRecommendations.count) recommendations (health: \(Int(advisorHealthScore))/100)")
+            } else {
+                error = "Failed to parse advisor result"
+                logActivity("advisor", status: .failed, message: "Failed to parse result")
+            }
+            isAdvisorRunning = false
+        }
     }
 
     func clearResults() {
@@ -568,6 +662,10 @@ final class XMacRunner: ObservableObject {
         if let override = binaryPathOverride, !args.isEmpty, args[0].contains("xmac") {
             args[0] = override
         }
+
+        let cmdDesc = "\(args[0]) \(args.dropFirst().joined(separator: " "))"
+        logStderr("[XMacRunner] runProcess: \(cmdDesc)\n")
+
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<(String, String), any Error>) in
                 let task = Process()
@@ -582,8 +680,10 @@ final class XMacRunner: ObservableObject {
 
                 do {
                     try task.run()
+                    logStderr("[XMacRunner] runProcess: started pid=\(task.processIdentifier)\n")
                 } catch {
                     self.currentProcess = nil
+                    logStderr("[XMacRunner] runProcess: FAILED to start — \(error.localizedDescription)\n")
                     continuation.resume(throwing: error)
                     return
                 }
@@ -610,8 +710,16 @@ final class XMacRunner: ObservableObject {
                     self.currentProcess = nil
                     let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
                     let stderr = String(data: stderrData, encoding: .utf8) ?? ""
-                    if task.terminationStatus != 0, task.terminationReason == .uncaughtSignal {
+                    let status = task.terminationStatus
+                    let reason = task.terminationReason
+                    logStderr("[XMacRunner] runProcess: exited status=\(status) reason=\(reason.rawValue) stdout=\(stdout.count)b stderr=\(stderr.count)b\n")
+
+                    if status != 0 && reason == .uncaughtSignal {
                         continuation.resume(throwing: NSError(domain: "XMacRunner", code: -1, userInfo: [NSLocalizedDescriptionKey: "Scan was cancelled"]))
+                    } else if status != 0 && stdout.isEmpty {
+                        // Process failed with no stdout — likely an error
+                        let errMsg = stderr.isEmpty ? "Process exited with status \(status)" : stderr
+                        continuation.resume(throwing: NSError(domain: "XMacRunner", code: Int(status), userInfo: [NSLocalizedDescriptionKey: errMsg]))
                     } else {
                         continuation.resume(returning: (stdout, stderr))
                     }
@@ -620,7 +728,63 @@ final class XMacRunner: ObservableObject {
         } onCancel: {
             Task { @MainActor in
                 self.currentProcess?.terminate()
+                logStderr("[XMacRunner] runProcess: cancelled by task\n")
             }
+        }
+    }
+
+    // MARK: - Privileged Command Execution (sudo via AppleScript)
+
+    /// Run a shell command with administrator privileges.
+    /// Shows the native macOS password dialog via AppleScript.
+    /// Returns (success, output) — output includes stdout+stderr.
+    func runPrivileged(_ command: String) async -> (success: Bool, output: String) {
+        logStderr("[XMacRunner] runPrivileged: \(command)")
+
+        // Escape double quotes and backslashes for AppleScript
+        let escaped = command
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+
+        let script = "do shell script \"\(escaped)\" with administrator privileges"
+
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        task.arguments = ["-e", script]
+
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        task.standardOutput = stdoutPipe
+        task.standardError = stderrPipe
+
+        do {
+            try task.run()
+        } catch {
+            logStderr("[XMacRunner] runPrivileged: FAILED to start osascript — \(error.localizedDescription)")
+            return (false, error.localizedDescription)
+        }
+
+        // Store so it can be cancelled
+        currentProcess = task
+
+        let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+        task.waitUntilExit()
+        currentProcess = nil
+
+        let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
+        let stderr = String(data: stderrData, encoding: .utf8) ?? ""
+        let status = task.terminationStatus
+
+        logStderr("[XMacRunner] runPrivileged: exited status=\(status) stdout=\(stdout.count)b stderr=\(stderr.count)b")
+
+        if status == 0 {
+            return (true, stdout)
+        } else {
+            // Common error: user cancelled the password dialog
+            // osascript returns "User canceled" or similar
+            let msg = stderr.isEmpty ? "Command failed with status \(status)" : stderr
+            return (false, msg)
         }
     }
 
@@ -652,8 +816,8 @@ final class XMacRunner: ObservableObject {
 
     // MARK: - RAM Boost
 
-    /// Run the `xmac ram-boost` command and parse the before/after memory snapshots.
-    /// Returns (before, after, freedBytes, freedSwapBytes, processesKilled).
+    /// Run the RAM boost: before snapshot → purge (with admin privileges) → kill processes → after snapshot.
+    /// Returns (before, after, freedBytes, freedSwapBytes, processesKilled, purgeSuccess, purgeMessage).
     func runRamBoost(
         purge: Bool,
         killTop: Int,
@@ -661,59 +825,102 @@ final class XMacRunner: ObservableObject {
         force: Bool,
         minRssMB: Int,
         protectSystem: Bool
-    ) async -> Result<(MemoryStatsSnapshot, MemoryStatsSnapshot?, UInt64, UInt64, Int), Error> {
-        var args: [String] = [xmacPath, "--format", "json", "ram-boost"]
-        if purge {
-            args += ["--purge", "true"]
-        } else {
-            args += ["--purge", "false"]
-        }
-        if killTop > 0 {
-            args += ["--kill-top", "\(killTop)"]
-        }
-        if let names = killName, !names.isEmpty {
-            args += ["--kill-name", names]
-        }
-        if force {
-            args += ["--force"]
-        }
-        args += ["--min-rss-mb", "\(minRssMB)"]
-        if !protectSystem {
-            args += ["--protect-system", "false"]
-        }
+    ) async -> Result<(MemoryStatsSnapshot, MemoryStatsSnapshot?, UInt64, UInt64, Int, Bool, String), Error> {
 
         let start = Date()
-        logActivity("ram-boost", status: .started, message: purge ? "Purging memory..." : "Reading memory stats...")
+        logActivity("ram-boost", status: .started, message: purge ? "Boosting memory (purge + processes)..." : "Reading memory stats...")
 
+        // Step 1: Before snapshot (always report-only to get clean before state)
         do {
-            let (stdout, stderr) = try await runProcess(args)
-
-            if !stderr.isEmpty {
-                logActivity("ram-boost", status: .warning, message: "Process stderr", detail: stderr)
+            let beforeArgs: [String] = [xmacPath, "--format", "json", "ram-boost", "--report-only"]
+            let (beforeOut, beforeErr) = try await runProcess(beforeArgs)
+            if !beforeErr.isEmpty {
+                logActivity("ram-boost", status: .warning, message: "Before snapshot stderr", detail: beforeErr)
             }
 
-            let (before, after, freed, freedSwap, killed) = parseRamBoostFindings(from: stdout)
-            if before == nil {
+            let (beforeSnap, _, _, _, _) = parseRamBoostFindings(from: beforeOut)
+            guard let before = beforeSnap else {
                 let msg = "No memory data returned from ram-boost"
-                logActivity("ram-boost", status: .failed, message: msg, detail: stdout.isEmpty ? "Empty output" : "Output: \(stdout.prefix(200))")
-                return .failure(NSError(domain: "XMacRunner", code: 10, userInfo: [
-                    NSLocalizedDescriptionKey: msg
-                ]))
+                logActivity("ram-boost", status: .failed, message: msg, detail: beforeOut.isEmpty ? "Empty output" : "Output: \(beforeOut.prefix(200))")
+                return .failure(NSError(domain: "XMacRunner", code: 10, userInfo: [NSLocalizedDescriptionKey: msg]))
             }
+
+            // If this is report-only, return now
+            if !purge && killTop == 0 && (killName == nil || killName!.isEmpty) {
+                let duration = Date().timeIntervalSince(start) * 1000
+                logActivity("ram-boost", status: .success, message: "Memory report generated", durationMs: duration)
+                return .success((before, nil, 0, 0, 0, true, "Report only"))
+            }
+
+            // Step 2: Purge with admin privileges if requested
+            var purgeSuccess = false
+            var purgeMessage = ""
+            if purge {
+                logActivity("ram-boost", status: .started, message: "Requesting admin privileges to purge memory...")
+                let (ok, output) = await runPrivileged("purge")
+                purgeSuccess = ok
+                if ok {
+                    purgeMessage = "Inactive memory purged successfully"
+                    logActivity("ram-boost purge", status: .success, message: purgeMessage)
+                } else {
+                    purgeMessage = output.contains("User canceled") || output.contains("canceled")
+                        ? "Purge cancelled — password dialog dismissed"
+                        : "Purge failed: \(output)"
+                    logActivity("ram-boost purge", status: .warning, message: purgeMessage)
+                    // Continue anyway — we still take the after snapshot
+                }
+            }
+
+            // Step 3: Kill processes if requested (via xmac, no sudo needed for user processes)
+            var killed = 0
+            if killTop > 0 || (killName != nil && !killName!.isEmpty) {
+                var killArgs: [String] = [xmacPath, "--format", "json", "ram-boost", "--purge", "false"]
+                if killTop > 0 {
+                    killArgs += ["--kill-top", "\(killTop)"]
+                }
+                if let names = killName, !names.isEmpty {
+                    killArgs += ["--kill-name", names]
+                }
+                if force {
+                    killArgs += ["--force"]
+                }
+                killArgs += ["--min-rss-mb", "\(minRssMB)"]
+                if !protectSystem {
+                    killArgs += ["--protect-system", "false"]
+                }
+
+                do {
+                    let (killOut, _) = try await runProcess(killArgs)
+                    let (_, _, _, _, killCount) = parseRamBoostFindings(from: killOut)
+                    killed = killCount
+                } catch {
+                    logActivity("ram-boost kill", status: .warning, message: "Process kill step failed: \(error.localizedDescription)")
+                }
+            }
+
+            // Step 4: After snapshot (report-only, to get clean after state)
+            let afterArgs: [String] = [xmacPath, "--format", "json", "ram-boost", "--report-only"]
+            let (afterOut, _) = try await runProcess(afterArgs)
+            let (_, afterSnap, _, _, _) = parseRamBoostFindings(from: afterOut)
+
+            // Calculate freed bytes
+            let freed: UInt64 = afterSnap != nil && before.used_bytes > afterSnap!.used_bytes
+                ? before.used_bytes - afterSnap!.used_bytes
+                : 0
+            let freedSwap: UInt64 = afterSnap != nil && before.swap_used_bytes > afterSnap!.swap_used_bytes
+                ? before.swap_used_bytes - afterSnap!.swap_used_bytes
+                : 0
 
             let duration = Date().timeIntervalSince(start) * 1000
-            if let after = after {
-                let purgeOk = after.memory_pressure.contains("purge_success") || true // we check via metadata
-                if freed > 0 {
-                    logActivity("ram-boost", status: .success, message: "Freed \(formatBytes(freed)) RAM, \(formatBytes(freedSwap)) swap, \(killed) processes killed", durationMs: duration)
-                } else {
-                    logActivity("ram-boost", status: .warning, message: "Boost completed but no memory was freed. Purge may require sudo — run 'sudo purge' in Terminal.", detail: nil, durationMs: duration)
-                }
+            if freed > 0 {
+                logActivity("ram-boost", status: .success, message: "Freed \(formatBytes(freed)) RAM, \(formatBytes(freedSwap)) swap, \(killed) processes killed", durationMs: duration)
+            } else if purgeSuccess {
+                logActivity("ram-boost", status: .success, message: "Purge completed. \(killed) processes killed. Memory may have been reallocated already.", durationMs: duration)
             } else {
-                logActivity("ram-boost", status: .success, message: "Memory report generated", durationMs: duration)
+                logActivity("ram-boost", status: .warning, message: purgeMessage, durationMs: duration)
             }
 
-            return .success((before!, after, freed, freedSwap, killed))
+            return .success((before, afterSnap, freed, freedSwap, killed, purgeSuccess, purgeMessage))
         } catch {
             let duration = Date().timeIntervalSince(start) * 1000
             logActivity("ram-boost", status: .failed, message: error.localizedDescription, durationMs: duration)
@@ -738,6 +945,21 @@ final class XMacRunner: ObservableObject {
             // The metadata contains phase, used_bytes, available_bytes, etc.
             let phase = finding.metadata["phase"]?.stringValue ?? ""
 
+            // Parse top_consumers from metadata array
+            var consumers: [ProcessMemoryEntry] = []
+            if case .array(let arr) = finding.metadata["top_consumers"] ?? .null {
+                for item in arr {
+                    if case .object(let obj) = item {
+                        consumers.append(ProcessMemoryEntry(
+                            pid: UInt32(obj["pid"]?.intValue ?? 0),
+                            name: obj["name"]?.stringValue ?? "unknown",
+                            rss_bytes: UInt64(obj["rss_bytes"]?.intValue ?? 0),
+                            percent: obj["percent"]?.doubleValue ?? 0.0
+                        ))
+                    }
+                }
+            }
+
             // Build a MemoryStatsSnapshot from the metadata fields
             let snapshot = MemoryStatsSnapshot(
                 total_bytes: UInt64(finding.metadata["total_bytes"]?.intValue ?? 0),
@@ -749,7 +971,7 @@ final class XMacRunner: ObservableObject {
                 swap_used_bytes: UInt64(finding.metadata["swap_used_bytes"]?.intValue ?? 0),
                 swap_total_bytes: UInt64(finding.metadata["swap_total_bytes"]?.intValue ?? 0),
                 memory_pressure: finding.metadata["memory_pressure"]?.stringValue ?? "Nominal",
-                top_consumers: []
+                top_consumers: consumers
             )
 
             if phase == "before" {
@@ -763,5 +985,257 @@ final class XMacRunner: ObservableObject {
         }
 
         return (before, after, freed, freedSwap, killed)
+    }
+
+    // MARK: - Memory Optimize (GNN)
+
+    @Published var optimizeResult: OptimizeSnapshot? = nil
+    @Published var isOptimizing = false
+
+    /// Run `xmac optimize --observe true --format json` and parse the output.
+    /// Returns the snapshot with graph JSON, system telemetry, and process list.
+    func runOptimize(topN: Int = 15) async {
+        await MainActor.run {
+            isOptimizing = true
+            optimizeResult = nil
+        }
+
+        logActivity("optimize", status: .started, message: "Collecting memory telemetry...")
+
+        do {
+            let args: [String] = [xmacPath, "--format", "json", "optimize", "--observe", "true",
+                                  "--top-n", "\(topN)"]
+            let (output, _) = try await runProcess(args)
+
+            let snapshot = parseOptimizeOutput(output)
+
+            await MainActor.run {
+                self.optimizeResult = snapshot
+                self.isOptimizing = false
+            }
+
+            logActivity("optimize", status: .success,
+                        message: "Memory graph: \(snapshot.processes.count) processes, pressure: \(snapshot.pressureLabel)")
+
+            // Run GNN inference if we have a graph
+            if let graphJSON = snapshot.graphJSON {
+                await runGNNPrediction(graphJSON: graphJSON)
+            }
+
+        } catch {
+            await MainActor.run {
+                self.isOptimizing = false
+            }
+            logActivity("optimize", status: .failed, message: error.localizedDescription)
+        }
+    }
+
+    /// Run the CoreML GNN model on the graph JSON and update the snapshot with predictions.
+    private func runGNNPrediction(graphJSON: String) async {
+        let manager = MemoryGNNManager()
+        let result = await manager.predict(graphJSON: graphJSON)
+
+        if let result = result {
+            await MainActor.run {
+                self.optimizeResult?.gnnResult = result
+            }
+            logActivity("optimize-gnn", status: .success,
+                        message: "GNN: \(result.predictions.count) predictions, pressure: \(result.systemPressure.level), fallback: \(result.usingFallback)")
+        } else {
+            logActivity("optimize-gnn", status: .warning, message: "GNN prediction returned nil")
+        }
+    }
+
+    /// Parse the JSON output from `xmac optimize --format json`.
+    private func parseOptimizeOutput(_ output: String) -> OptimizeSnapshot {
+        var graphJSON: String? = nil
+        var processes: [OptimizeProcess] = []
+        var pressureLabel: String = "Nominal"
+        var predictedPressure: Double = 0
+        var utilizationPct: Double = 0
+        var freeMB: Double = 0
+        var compressedMB: Double = 0
+        var swapMB: Double = 0
+        var totalMB: Double = 0
+        var usedMB: Double = 0
+        var nodeCount: Int = 0
+        var edgeCount: Int = 0
+
+        for line in output.split(separator: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("{"),
+                  let data = trimmed.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+
+            let category = obj["category"] as? String ?? ""
+            let desc = obj["description"] as? String ?? ""
+            let metadata = obj["metadata"] as? [String: Any] ?? [:]
+
+            if category == "system_info" {
+                // Extract the graph as JSON string for CoreML
+                if let graph = metadata["graph"],
+                   let graphData = try? JSONSerialization.data(withJSONObject: graph),
+                   let graphStr = String(data: graphData, encoding: .utf8) {
+                    graphJSON = graphStr
+                }
+
+                // Parse description: "Collected memory graph: 55 nodes, 68 edges. Pressure: Nominal, utilization: 60.8%, free: 447.5 MB, compressed: 1.0 GB, swap: 0.0 B"
+                let parts = desc.split(separator: ",")
+                for part in parts {
+                    let p = part.trimmingCharacters(in: .whitespaces)
+                    if p.contains("nodes") {
+                        // "Collected memory graph: 55 nodes" → extract number before "nodes"
+                        let words = p.split(separator: " ")
+                        if let n = words.first(where: { Int($0) != nil }).flatMap({ Int($0) }) { nodeCount = n }
+                    }
+                    if p.contains("edges") {
+                        let words = p.split(separator: " ")
+                        if let e = words.first(where: { Int($0) != nil }).flatMap({ Int($0) }) { edgeCount = e }
+                    }
+                    if p.hasPrefix("Pressure:") {
+                        let val = p.replacingOccurrences(of: "Pressure:", with: "").trimmingCharacters(in: .whitespaces)
+                        pressureLabel = val
+                    }
+                    if p.hasPrefix("utilization:") {
+                        let val = p.replacingOccurrences(of: "utilization:", with: "").replacingOccurrences(of: "%", with: "").trimmingCharacters(in: .whitespaces)
+                        utilizationPct = Double(val) ?? 0
+                    }
+                    if p.hasPrefix("free:") {
+                        let val = p.replacingOccurrences(of: "free:", with: "").trimmingCharacters(in: .whitespaces)
+                        let words = val.split(separator: " ")
+                        if words.count >= 2 {
+                            freeMB = Double(words[0]) ?? 0
+                            if words[1] == "GB" { freeMB *= 1024 }
+                        }
+                    }
+                    if p.hasPrefix("compressed:") {
+                        let val = p.replacingOccurrences(of: "compressed:", with: "").trimmingCharacters(in: .whitespaces)
+                        let words = val.split(separator: " ")
+                        if words.count >= 2 {
+                            compressedMB = Double(words[0]) ?? 0
+                            if words[1] == "GB" { compressedMB *= 1024 }
+                        }
+                    }
+                    if p.hasPrefix("swap:") {
+                        let val = p.replacingOccurrences(of: "swap:", with: "").trimmingCharacters(in: .whitespaces)
+                        let words = val.split(separator: " ")
+                        if words.count >= 2 {
+                            swapMB = Double(words[0]) ?? 0
+                            if words[1] == "GB" { swapMB *= 1024 }
+                        }
+                    }
+                }
+
+                if let pp = metadata["predicted_pressure_60s"] as? Double {
+                    predictedPressure = pp
+                } else if let pp = metadata["predicted_pressure_60s"] as? Int {
+                    predictedPressure = Double(pp)
+                }
+            }
+
+            if let pt = metadata["process_telemetry"] as? [String: Any] {
+                let name = pt["name"] as? String ?? "unknown"
+                let pid = pt["pid"] as? Int ?? 0
+                let rss = pt["resident_size"] as? Int ?? 0
+                let virtual = pt["virtual_size"] as? Int ?? 0
+                let threads = pt["thread_count"] as? Int ?? 0
+                let isSystem = pt["is_system"] as? Bool ?? false
+                let purgeable = pt["purgeable_volatile"] as? Int ?? 0
+                let compressed = pt["compressed_bytes"] as? Int ?? 0
+                let pageFaults = pt["page_faults"] as? Int ?? 0
+                let physFootprint = pt["phys_footprint"] as? Int ?? 0
+                let severity = obj["severity"] as? String ?? "info"
+
+                processes.append(OptimizeProcess(
+                    pid: pid,
+                    name: name,
+                    rssBytes: UInt64(rss),
+                    virtualBytes: UInt64(virtual),
+                    threadCount: threads,
+                    isSystem: isSystem,
+                    purgeableBytes: UInt64(purgeable),
+                    compressedBytes: UInt64(compressed),
+                    pageFaults: UInt64(pageFaults),
+                    physFootprint: UInt64(physFootprint),
+                    severity: severity
+                ))
+            }
+        }
+
+        // Calculate total/used from utilization
+        // On a Mac with 16GB: utilization 60% → used = 9.6GB, total = 16GB
+        // We can estimate total from the hardware node in the graph, but for now
+        // use the process list sum as an approximation of used
+        let totalRSS = processes.reduce(0.0) { $0 + Double($1.rssBytes) / 1_048_576 }
+        usedMB = totalRSS > 0 ? totalRSS : (utilizationPct / 100.0) * 16384
+        totalMB = utilizationPct > 0 ? (usedMB / (utilizationPct / 100.0)) : 16384
+
+        return OptimizeSnapshot(
+            graphJSON: graphJSON,
+            processes: processes,
+            pressureLabel: pressureLabel,
+            predictedPressure: predictedPressure,
+            utilizationPct: utilizationPct,
+            freeMB: freeMB,
+            compressedMB: compressedMB,
+            swapMB: swapMB,
+            totalMB: totalMB,
+            usedMB: usedMB,
+            nodeCount: nodeCount,
+            edgeCount: edgeCount,
+            gnnResult: nil
+        )
+    }
+}
+
+// MARK: - Optimize Models
+
+struct OptimizeSnapshot: Identifiable {
+    let id = UUID()
+    let graphJSON: String?
+    var processes: [OptimizeProcess]
+    let pressureLabel: String
+    let predictedPressure: Double
+    let utilizationPct: Double
+    let freeMB: Double
+    let compressedMB: Double
+    let swapMB: Double
+    let totalMB: Double
+    let usedMB: Double
+    let nodeCount: Int
+    let edgeCount: Int
+    var gnnResult: MemoryGNNManager.OptimizationResult?
+}
+
+struct OptimizeProcess: Identifiable, Hashable {
+    let pid: Int
+    let name: String
+    let rssBytes: UInt64
+    let virtualBytes: UInt64
+    let threadCount: Int
+    let isSystem: Bool
+    let purgeableBytes: UInt64
+    let compressedBytes: UInt64
+    let pageFaults: UInt64
+    let physFootprint: UInt64
+    let severity: String
+
+    var id: Int { pid }
+    var rssMB: Double { Double(rssBytes) / 1_048_576 }
+    var virtualGB: Double { Double(virtualBytes) / 1_073_741_824 }
+
+    /// Find the GNN prediction for this process (if available).
+    /// Matches by name since graph nodes use labels, not real PIDs.
+    func gnnPrediction(from result: MemoryGNNManager.OptimizationResult?) -> MemoryGNNManager.MemoryPrediction? {
+        guard let result = result else { return nil }
+        // Try exact name match first
+        if let pred = result.predictions.first(where: { $0.processName == name }) {
+            return pred
+        }
+        // Try case-insensitive match
+        if let pred = result.predictions.first(where: { $0.processName.lowercased() == name.lowercased() }) {
+            return pred
+        }
+        return nil
     }
 }
