@@ -8,8 +8,8 @@ use crate::core::engine::Engine;
 use crate::core::error::EngineError;
 use crate::core::types::{EngineId, EngineStats};
 
-use super::path::PathConflictScanner;
 use super::env::EnvConflictScanner;
+use super::path::PathConflictScanner;
 use super::port::PortConflictScanner;
 
 pub struct ConflictEngine {
@@ -47,7 +47,10 @@ impl Engine for ConflictEngine {
 
         if self.args.path {
             let scanner = PathConflictScanner::new();
-            let findings = scanner.scan(&ctx).await.map_err(|e| EngineError::ScanFailed(e.to_string()))?;
+            let findings = scanner
+                .scan(&ctx)
+                .await
+                .map_err(|e| EngineError::ScanFailed(e.to_string()))?;
             items_scanned += findings.len() as u64;
             findings_count += findings.len() as u64;
             for finding in findings {
@@ -57,7 +60,10 @@ impl Engine for ConflictEngine {
 
         if self.args.env {
             let scanner = EnvConflictScanner::new();
-            let findings = scanner.scan(&ctx).await.map_err(|e| EngineError::ScanFailed(e.to_string()))?;
+            let findings = scanner
+                .scan(&ctx)
+                .await
+                .map_err(|e| EngineError::ScanFailed(e.to_string()))?;
             items_scanned += findings.len() as u64;
             findings_count += findings.len() as u64;
             for finding in findings {
@@ -67,7 +73,10 @@ impl Engine for ConflictEngine {
 
         if self.args.ports {
             let scanner = PortConflictScanner::new(self.args.port_list.clone());
-            let findings = scanner.scan(&ctx).await.map_err(|e| EngineError::ScanFailed(e.to_string()))?;
+            let findings = scanner
+                .scan(&ctx)
+                .await
+                .map_err(|e| EngineError::ScanFailed(e.to_string()))?;
             items_scanned += self.args.port_list.len() as u64;
             findings_count += findings.len() as u64;
             for finding in findings {

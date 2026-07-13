@@ -21,9 +21,13 @@ gnn/.venv/
 gnn/venv/
 *.pt
 *.pth
-# Keep the pre-trained CoreML model — it's needed for the build
-# gnn/XMacGNN.mlpackage  <-- intentionally tracked
+# Keep the pre-trained CoreML models — they're needed for the build
+# gnn/XMacGNN.mlpackage        <-- intentionally tracked
+# gnn/XMacMemoryGNN.mlpackage  <-- intentionally tracked
 gnn/XMacGNN.previous*.mlpackage/
+
+# Bundled CoreML model copied into Swift sources by build_app.sh
+gui/XMacApp/Sources/XMacApp/Resources/
 
 # macOS
 .DS_Store

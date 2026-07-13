@@ -7,6 +7,7 @@ use super::verification::verify_can_cleanup;
 
 /// A validated cleanup candidate ready for execution.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct CleanupCandidate {
     pub finding_id: String,
     pub path: PathBuf,
@@ -58,16 +59,22 @@ pub fn build_candidates(findings: &[Finding], policy: &CleanupPolicy) -> Vec<Cle
 fn apply_preflight(candidate: &mut CleanupCandidate, policy: &CleanupPolicy) {
     if policy.is_protected(&candidate.path) {
         candidate.blocked = true;
-        candidate.preflight_errors.push("protected path".to_string());
+        candidate
+            .preflight_errors
+            .push("protected path".to_string());
     }
 
     if candidate.action == CleanupAction::Blocked {
         candidate.blocked = true;
-        candidate.preflight_errors.push("category blocked by policy".to_string());
+        candidate
+            .preflight_errors
+            .push("category blocked by policy".to_string());
     }
 
     if candidate.path.is_symlink() && !policy.follow_symlinks {
-        candidate.preflight_errors.push("symbolic link refused without explicit follow".to_string());
+        candidate
+            .preflight_errors
+            .push("symbolic link refused without explicit follow".to_string());
     }
 
     if let Err(e) = verify_can_cleanup(&candidate.path) {
@@ -75,6 +82,8 @@ fn apply_preflight(candidate: &mut CleanupCandidate, policy: &CleanupPolicy) {
     }
 
     if candidate.path == std::env::current_dir().unwrap_or_default() {
-        candidate.preflight_warnings.push("path is the current working directory".to_string());
+        candidate
+            .preflight_warnings
+            .push("path is the current working directory".to_string());
     }
 }

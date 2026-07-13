@@ -253,7 +253,7 @@ impl MemoryStats {
             })
             .collect();
 
-        procs.sort_by(|a, b| b.rss_bytes.cmp(&a.rss_bytes));
+        procs.sort_by_key(|b| std::cmp::Reverse(b.rss_bytes));
         procs.truncate(10);
 
         // Fill in percentages
@@ -282,7 +282,11 @@ impl MemoryStats {
         let sreclaimable = meminfo.get("SReclaimable").copied().unwrap_or(0) * 1024;
 
         // On Linux, "used" = total - free - buffers - cache - sreclaimable
-        let used = total.saturating_sub(free).saturating_sub(buffers).saturating_sub(cached).saturating_sub(sreclaimable);
+        let used = total
+            .saturating_sub(free)
+            .saturating_sub(buffers)
+            .saturating_sub(cached)
+            .saturating_sub(sreclaimable);
         let app_memory = used; // app memory is the non-cache portion
 
         let top = Self::top_processes_linux(total);
@@ -361,13 +365,17 @@ impl MemoryStats {
                             pid,
                             name: proc_name,
                             rss_bytes: rss,
-                            percent: if total > 0 { (rss as f64 / total as f64) * 100.0 } else { 0.0 },
+                            percent: if total > 0 {
+                                (rss as f64 / total as f64) * 100.0
+                            } else {
+                                0.0
+                            },
                         });
                     }
                 }
             }
         }
-        procs.sort_by(|a, b| b.rss_bytes.cmp(&a.rss_bytes));
+        procs.sort_by_key(|b| std::cmp::Reverse(b.rss_bytes));
         procs.truncate(10);
         procs
     }
@@ -376,6 +384,7 @@ impl MemoryStats {
     //  Shared helpers
     // ═══════════════════════════════════════════════════════════════════════
 
+    #[allow(dead_code)]
     fn run_command(cmd: &str) -> String {
         std::process::Command::new(cmd)
             .output()
@@ -386,7 +395,10 @@ impl MemoryStats {
     /// Format a memory report suitable for display.
     pub fn report(&self) -> String {
         let mut s = String::new();
-        s.push_str(&format!("Memory Pressure: {}\n", self.memory_pressure.as_str()));
+        s.push_str(&format!(
+            "Memory Pressure: {}\n",
+            self.memory_pressure.as_str()
+        ));
         s.push_str(&format!(
             "  Total:      {:>12}\n",
             crate::util::disk::format_bytes(self.total_bytes)
@@ -394,7 +406,11 @@ impl MemoryStats {
         s.push_str(&format!(
             "  Used:       {:>12}  ({:.1}%)\n",
             crate::util::disk::format_bytes(self.used_bytes),
-            if self.total_bytes > 0 { self.used_bytes as f64 / self.total_bytes as f64 * 100.0 } else { 0.0 }
+            if self.total_bytes > 0 {
+                self.used_bytes as f64 / self.total_bytes as f64 * 100.0
+            } else {
+                0.0
+            }
         ));
         s.push_str(&format!(
             "  Available:  {:>12}\n",
@@ -471,7 +487,10 @@ mod tests {
 
     #[test]
     fn pressure_critical_over_90() {
-        assert_eq!(MemoryPressure::from_usage(95, 100), MemoryPressure::Critical);
+        assert_eq!(
+            MemoryPressure::from_usage(95, 100),
+            MemoryPressure::Critical
+        );
     }
 
     #[test]

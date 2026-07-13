@@ -233,9 +233,8 @@ pub fn parse_desktop_file(path: &Path) -> Option<InstalledApp> {
     });
 
     // Use the filename (without .desktop) as a fallback bundle_id
-    let bundle_id = desktop_id.or_else(|| {
-        path.file_stem().map(|n| n.to_string_lossy().to_string())
-    });
+    let bundle_id =
+        desktop_id.or_else(|| path.file_stem().map(|n| n.to_string_lossy().to_string()));
 
     let version = version.unwrap_or_else(|| "unknown".to_string());
 
@@ -347,7 +346,9 @@ mod tests {
             assert!(dirs.iter().any(|d| d == &PathBuf::from("/Applications")));
         } else {
             // Linux: should include /usr/share/applications
-            assert!(dirs.iter().any(|d| d == &PathBuf::from("/usr/share/applications")));
+            assert!(dirs
+                .iter()
+                .any(|d| d == &PathBuf::from("/usr/share/applications")));
         }
     }
 

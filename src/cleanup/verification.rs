@@ -12,7 +12,10 @@ pub enum VerificationResult {
 
 impl VerificationResult {
     pub fn is_success(&self) -> bool {
-        matches!(self, VerificationResult::Success | VerificationResult::AlreadyGone)
+        matches!(
+            self,
+            VerificationResult::Success | VerificationResult::AlreadyGone
+        )
     }
 }
 

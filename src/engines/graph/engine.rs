@@ -61,11 +61,8 @@ impl Engine for GraphEngine {
         for root in &roots {
             let graph = tokio::task::spawn_blocking({
                 let root = root.clone();
-                let extractor = GraphExtractor::new(
-                    self.args.max_depth,
-                    self.args.max_nodes,
-                    include_hidden,
-                );
+                let extractor =
+                    GraphExtractor::new(self.args.max_depth, self.args.max_nodes, include_hidden);
                 move || extractor.extract(&root)
             })
             .await
@@ -138,7 +135,12 @@ impl Engine for GraphEngine {
                     Severity::Info,
                     Category::SystemInfo,
                     Target::Path(root.clone()),
-                    format!("File system graph: {} ({} nodes, {} edges)", root.display(), graph.nodes.len(), graph.edges.len()),
+                    format!(
+                        "File system graph: {} ({} nodes, {} edges)",
+                        root.display(),
+                        graph.nodes.len(),
+                        graph.edges.len()
+                    ),
                     format!(
                         "Extracted graph from {} — {} nodes, {} edges, {} features per node",
                         graph.root_path,
@@ -147,10 +149,22 @@ impl Engine for GraphEngine {
                         graph.num_features,
                     ),
                 )
-                .with_metadata("graph_nodes", serde_json::Value::Number(graph.nodes.len().into()))
-                .with_metadata("graph_edges", serde_json::Value::Number(graph.edges.len().into()))
-                .with_metadata("graph_max_depth", serde_json::Value::Number(self.args.max_depth.into()))
-                .with_metadata("num_features", serde_json::Value::Number(graph.num_features.into()));
+                .with_metadata(
+                    "graph_nodes",
+                    serde_json::Value::Number(graph.nodes.len().into()),
+                )
+                .with_metadata(
+                    "graph_edges",
+                    serde_json::Value::Number(graph.edges.len().into()),
+                )
+                .with_metadata(
+                    "graph_max_depth",
+                    serde_json::Value::Number(self.args.max_depth.into()),
+                )
+                .with_metadata(
+                    "num_features",
+                    serde_json::Value::Number(graph.num_features.into()),
+                );
 
                 let finding = if graph.nodes.len() <= 5000 {
                     // Include full graph for small graphs

@@ -1,0 +1,37 @@
+{
+  "total_graphs": 10000,
+  "train": 7000,
+  "val": 1500,
+  "test": 1500,
+  "action_distribution": {
+    "suggest_purge": 149887,
+    "no_action": 172441,
+    "pressure_relief": 156074,
+    "suspend": 6999,
+    "terminate": 20837,
+    "deprioritize": 2160
+  },
+  "pressure_distribution": {
+    "normal": 4371,
+    "warn": 2521,
+    "critical": 3108
+  },
+  "scenarios": [
+    "healthy",
+    "memory_leak",
+    "cache_bloat",
+    "gpu_pressure",
+    "swap_thrashing",
+    "jetsam_cascade",
+    "startup_burst",
+    "idle_background",
+    "mixed_workload",
+    "random"
+  ],
+  "feature_dims": {
+    "process": 24,
+    "hardware": 8,
+    "swap": 6,
+    "compressor": 6
+  }
+}

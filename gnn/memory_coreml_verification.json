@@ -1,0 +1,12 @@
+{
+  "distillation_mae": 0.13265815377235413,
+  "coreml_pytorch_mae": 0.0006301986868493259,
+  "coreml_teacher_mae": 0.1302935630083084,
+  "output_shape": [
+    200,
+    11
+  ],
+  "output_desc": "action_logits(6) + risk(1) + growth(1) + pressure(3) = 11",
+  "size_bytes": 116647,
+  "size_mb": 0.11124324798583984
+}

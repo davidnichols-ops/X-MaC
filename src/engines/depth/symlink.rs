@@ -51,12 +51,17 @@ impl SymlinkScanner {
                             "Broken symlink detected",
                             format!(
                                 "Symlink points to non-existent target: {}",
-                                target.as_ref().map(|t| t.to_string_lossy().to_string()).unwrap_or_else(|| "unknown".to_string())
+                                target
+                                    .as_ref()
+                                    .map(|t| t.to_string_lossy().to_string())
+                                    .unwrap_or_else(|| "unknown".to_string())
                             ),
                         )
                         .with_metadata(
                             "target".to_string(),
-                            serde_json::json!(target.as_ref().map(|t| t.to_string_lossy().to_string())),
+                            serde_json::json!(target
+                                .as_ref()
+                                .map(|t| t.to_string_lossy().to_string())),
                         )
                         .with_hint("Consider removing this broken symlink".to_string()),
                     );

@@ -1,11 +1,11 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use walkdir::WalkDir;
 
 use crate::core::context::ScanContext;
 use crate::core::types::{Category, EngineId, Finding, Severity, Target};
-use crate::util::macos::MacosUtils;
 use crate::util::disk;
+use crate::util::macos::MacosUtils;
 
 pub struct PythonScanner {
     include_disk_usage: bool,
@@ -14,7 +14,10 @@ pub struct PythonScanner {
 
 impl PythonScanner {
     pub fn new(include_disk_usage: bool, user_paths: Vec<PathBuf>) -> Self {
-        Self { include_disk_usage, user_paths }
+        Self {
+            include_disk_usage,
+            user_paths,
+        }
     }
 
     pub async fn scan(&self, _ctx: &ScanContext) -> anyhow::Result<Vec<Finding>> {
@@ -37,7 +40,8 @@ impl PythonScanner {
                 let dir_path = entry.path().to_path_buf();
 
                 if let Some(env_type) = Self::detect_env_type(&dir_path) {
-                    let version = Self::get_python_version(&dir_path).unwrap_or_else(|| "unknown".to_string());
+                    let version = Self::get_python_version(&dir_path)
+                        .unwrap_or_else(|| "unknown".to_string());
                     let size = if self.include_disk_usage {
                         disk::dir_size(&dir_path)
                     } else {
@@ -92,7 +96,7 @@ impl PythonScanner {
         paths
     }
 
-    pub fn detect_env_type(path: &PathBuf) -> Option<&'static str> {
+    pub fn detect_env_type(path: &Path) -> Option<&'static str> {
         if path.join("pyvenv.cfg").exists() {
             Some("venv")
         } else if path.join("conda-meta").exists() {
@@ -103,21 +107,23 @@ impl PythonScanner {
             Some("pipenv")
         } else if path.join("uv.lock").exists() {
             Some("uv")
-        } else if path.join(".venv").exists() || path.file_name().map(|n| n.to_string_lossy().contains("venv")).unwrap_or(false) {
+        } else if path.join(".venv").exists()
+            || path
+                .file_name()
+                .map(|n| n.to_string_lossy().contains("venv"))
+                .unwrap_or(false)
+        {
             Some("venv")
         } else {
             None
         }
     }
 
-    pub fn get_python_version(path: &PathBuf) -> Option<String> {
+    pub fn get_python_version(path: &Path) -> Option<String> {
         let python_bin = path.join("bin/python");
 
         if python_bin.exists() {
-            let output = Command::new(&python_bin)
-                .arg("--version")
-                .output()
-                .ok()?;
+            let output = Command::new(&python_bin).arg("--version").output().ok()?;
 
             let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if version.starts_with("Python ") {
@@ -146,13 +152,7 @@ impl PythonScanner {
             PathBuf::from("/opt/homebrew/bin/python3"),
         ];
 
-        for candidate in candidates {
-            if candidate.exists() {
-                return Some(candidate);
-            }
-        }
-
-        None
+        candidates.into_iter().find(|candidate| candidate.exists())
     }
 }
 

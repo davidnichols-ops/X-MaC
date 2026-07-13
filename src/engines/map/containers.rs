@@ -28,7 +28,10 @@ impl ContainerScanner {
                     "Docker is installed on this system",
                 )
                 .with_metadata("runtime".to_string(), serde_json::json!("docker"))
-                .with_metadata("running".to_string(), serde_json::json!(docker_info.as_ref().map(|i| i.running).unwrap_or(false))),
+                .with_metadata(
+                    "running".to_string(),
+                    serde_json::json!(docker_info.as_ref().map(|i| i.running).unwrap_or(false)),
+                ),
             );
 
             if let Some(info) = docker_info {
@@ -146,12 +149,10 @@ impl ContainerScanner {
             .ok();
 
         match output {
-            Some(out) if out.status.success() => {
-                String::from_utf8_lossy(&out.stdout)
-                    .lines()
-                    .map(|s| s.to_string())
-                    .collect()
-            }
+            Some(out) if out.status.success() => String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .map(|s| s.to_string())
+                .collect(),
             _ => Vec::new(),
         }
     }
@@ -172,7 +173,11 @@ impl ContainerScanner {
     }
 
     fn parse_docker_size(size_str: &str) -> u64 {
-        let size_str = size_str.replace("GB", "").replace("MB", "").trim().to_string();
+        let size_str = size_str
+            .replace("GB", "")
+            .replace("MB", "")
+            .trim()
+            .to_string();
         size_str.parse::<f64>().unwrap_or(0.0) as u64 * 1024 * 1024 * 1024
     }
 
@@ -210,7 +215,9 @@ impl ContainerScanner {
     }
 
     fn is_podman_installed() -> bool {
-        MacosUtils::home_dir().join(".local/share/containers").exists()
+        MacosUtils::home_dir()
+            .join(".local/share/containers")
+            .exists()
     }
 }
 

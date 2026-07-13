@@ -51,7 +51,9 @@ impl FixScriptGenerator {
         s.push_str("set -euo pipefail\n\n");
         s.push_str("if [ \"${1:-}\" != \"--yes\" ]; then\n");
         s.push_str("  echo \"This script applies non-destructive fixes from an X-MaC scan.\"\n");
-        s.push_str("  echo \"Destructive fixes are commented out and must be enabled manually.\"\n");
+        s.push_str(
+            "  echo \"Destructive fixes are commented out and must be enabled manually.\"\n",
+        );
         s.push_str("  echo \"Review this file first, then re-run with: $0 --yes\"\n");
         s.push_str("  exit 1\n");
         s.push_str("fi\n\n");
@@ -85,9 +87,7 @@ impl FixScriptGenerator {
         let filtered: Vec<Finding> = findings
             .iter()
             .filter(|f| match &f.target {
-                crate::core::types::Target::Path(p) => {
-                    !crate::util::backup::is_backup_path(p)
-                }
+                crate::core::types::Target::Path(p) => !crate::util::backup::is_backup_path(p),
                 _ => true,
             })
             .cloned()
@@ -101,7 +101,8 @@ impl FixScriptGenerator {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&self.out_path, std::fs::Permissions::from_mode(0o755));
+            let _ =
+                std::fs::set_permissions(&self.out_path, std::fs::Permissions::from_mode(0o755));
         }
 
         Ok(self.out_path.clone())
@@ -171,12 +172,22 @@ impl FixScriptGenerator {
         s.push_str("# Summary\n");
         s.push_str("# ------------------------------------------------------------------\n");
         s.push_str(&format!("#   Total findings:        {}\n", all.len()));
-        s.push_str(&format!("#   Reclaimable bytes:      {} ({} bytes)\n",
-            crate::util::disk::format_bytes(reclaimable), reclaimable));
-        s.push_str(&format!("#   Critical / High / Med:  {} / {} / {}\n",
-            by_severity(Severity::Critical), by_severity(Severity::High), by_severity(Severity::Medium)));
-        s.push_str(&format!("#   Low / Info:             {} / {}\n",
-            by_severity(Severity::Low), by_severity(Severity::Info)));
+        s.push_str(&format!(
+            "#   Reclaimable bytes:      {} ({} bytes)\n",
+            crate::util::disk::format_bytes(reclaimable),
+            reclaimable
+        ));
+        s.push_str(&format!(
+            "#   Critical / High / Med:  {} / {} / {}\n",
+            by_severity(Severity::Critical),
+            by_severity(Severity::High),
+            by_severity(Severity::Medium)
+        ));
+        s.push_str(&format!(
+            "#   Low / Info:             {} / {}\n",
+            by_severity(Severity::Low),
+            by_severity(Severity::Info)
+        ));
         s.push_str(&format!("#   Active fixes:           {}\n", safe.len()));
         s.push_str(&format!("#   Review-required fixes:  {}\n", review.len()));
         s.push('\n');
@@ -220,7 +231,11 @@ impl FixScriptGenerator {
         }
 
         for (category, items) in groups {
-            s.push_str(&format!("# --- {} ({} finding(s)) ---\n", Self::category_label(category), items.len()));
+            s.push_str(&format!(
+                "# --- {} ({} finding(s)) ---\n",
+                Self::category_label(category),
+                items.len()
+            ));
             s.push_str(&format!("# {}\n", Self::category_warning(category)));
 
             for f in items {
@@ -255,10 +270,19 @@ impl FixScriptGenerator {
                     s.push_str(&format!("# rm -- {}\n", shell_quote(p)));
                 }
             }
-            Category::Cache | Category::Log | Category::XcodeArtifact | Category::OrphanFile
-            | Category::TempFile | Category::BuildArtifact | Category::PackageManagerCache
-            | Category::BrowserCache | Category::MailAttachment | Category::IosBackup
-            | Category::LanguageFile | Category::TrashBin | Category::DocumentVersion
+            Category::Cache
+            | Category::Log
+            | Category::XcodeArtifact
+            | Category::OrphanFile
+            | Category::TempFile
+            | Category::BuildArtifact
+            | Category::PackageManagerCache
+            | Category::BrowserCache
+            | Category::MailAttachment
+            | Category::IosBackup
+            | Category::LanguageFile
+            | Category::TrashBin
+            | Category::DocumentVersion
             | Category::UniversalBinary => {
                 if let Target::Path(ref p) = f.target {
                     // Use `du -sh` first so the reviewer sees the size, then rm.
@@ -277,7 +301,10 @@ impl FixScriptGenerator {
                     s.push_str("# duplicate set:\n");
                     for path in paths {
                         if let Some(ps) = path.as_str() {
-                            s.push_str(&format!("#   du -sh -- {}\n", shell_quote(&PathBuf::from(ps))));
+                            s.push_str(&format!(
+                                "#   du -sh -- {}\n",
+                                shell_quote(&PathBuf::from(ps))
+                            ));
                         }
                     }
                     s.push_str("# remove the redundant copies (keep one):\n");
@@ -296,7 +323,9 @@ impl FixScriptGenerator {
             Category::MissingDylib => {
                 if let Target::Path(ref p) = f.target {
                     s.push_str(&format!("# otool -L {}\n", shell_quote(p)));
-                    s.push_str("# # then: brew reinstall <owning formula> or rebuild the library\n");
+                    s.push_str(
+                        "# # then: brew reinstall <owning formula> or rebuild the library\n",
+                    );
                 }
             }
             Category::PermissionIssue => {
@@ -316,7 +345,9 @@ impl FixScriptGenerator {
             Category::InvalidSignature => {
                 if let Target::Path(ref p) = f.target {
                     s.push_str(&format!("# codesign -dv {}\n", shell_quote(p)));
-                    s.push_str("# # then reinstall the owning package if the signature is broken\n");
+                    s.push_str(
+                        "# # then reinstall the owning package if the signature is broken\n",
+                    );
                 }
             }
             // Discovery categories are filtered out before reaching here.
@@ -417,7 +448,12 @@ mod tests {
     use crate::core::types::{EngineId, Finding, Severity, Target};
     use std::path::PathBuf;
 
-    fn make_finding(category: Category, severity: Severity, title: &str, target: Target) -> Finding {
+    fn make_finding(
+        category: Category,
+        severity: Severity,
+        title: &str,
+        target: Target,
+    ) -> Finding {
         Finding::new(EngineId::Clean, severity, category, target, title, "desc")
     }
 

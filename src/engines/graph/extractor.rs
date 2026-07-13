@@ -115,6 +115,7 @@ impl GraphExtractor {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn walk(
         &self,
         path: &Path,
@@ -249,6 +250,7 @@ impl GraphExtractor {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_features(
     size_bytes: u64,
     depth: usize,

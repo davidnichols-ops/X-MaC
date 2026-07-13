@@ -1,0 +1,53 @@
+# X-MaC gaming profile
+# Maximizes free RAM and CPU for games. Aggressive memory cleanup.
+# Copy to ~/.config/xmac/config.toml or use: xmac config set-profile gaming
+
+profile = "gaming"
+
+[clean]
+min_age_days = 14        # younger threshold — catch more files
+min_size_mb = 1
+dedup = false
+xcode = true
+pkg_caches = true
+temp = true
+build_artifacts = true
+browser = true
+mail = false             # skip mail (not relevant during gaming)
+ios_backups = false      # skip iOS backups
+languages = false        # skip language files
+trash = true
+large_files = false      # skip large files scan (faster)
+min_large_size_mb = 500
+
+[maintain]
+dns = false              # skip DNS flush (not needed during gaming)
+spotlight = false        # skip Spotlight reindex
+launchservices = false   # skip LaunchServices rebuild
+periodic = false         # skip periodic scripts
+repair_permissions = false
+purge_ram = true         # purge RAM aggressively
+dyld = false
+quicklook = false        # skip Quick Look cache
+
+[optimize]
+pressure_threshold = 0.65  # lower threshold — act sooner on memory pressure
+
+[daemon]
+auto_purge_memory = true
+auto_clean_threshold_mb = 0   # don't auto-clean during gaming
+check_interval_secs = 60      # check more frequently
+
+[notifications]
+enabled = true
+scan_complete = false
+cleanup_recommended = true
+low_disk_space_gb = 5
+
+[history]
+max_entries = 50
+auto_export = false
+
+[logging]
+level = "warn"
+file_rotation = "daily"

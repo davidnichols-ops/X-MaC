@@ -8,9 +8,9 @@ use crate::core::engine::Engine;
 use crate::core::error::EngineError;
 use crate::core::types::{EngineId, EngineStats};
 
-use super::python::PythonScanner;
-use super::nodejs::NodejsScanner;
 use super::containers::ContainerScanner;
+use super::nodejs::NodejsScanner;
+use super::python::PythonScanner;
 
 pub struct MapEngine {
     args: MapArgs,
@@ -47,7 +47,10 @@ impl Engine for MapEngine {
 
         if self.args.python {
             let scanner = PythonScanner::new(self.args.disk_usage, self.args.paths.clone());
-            let findings = scanner.scan(&ctx).await.map_err(|e| EngineError::ScanFailed(e.to_string()))?;
+            let findings = scanner
+                .scan(&ctx)
+                .await
+                .map_err(|e| EngineError::ScanFailed(e.to_string()))?;
             items_scanned += findings.len() as u64;
             findings_count += findings.len() as u64;
             for finding in findings {
@@ -57,7 +60,10 @@ impl Engine for MapEngine {
 
         if self.args.nodejs {
             let scanner = NodejsScanner::new(self.args.disk_usage, self.args.paths.clone());
-            let findings = scanner.scan(&ctx).await.map_err(|e| EngineError::ScanFailed(e.to_string()))?;
+            let findings = scanner
+                .scan(&ctx)
+                .await
+                .map_err(|e| EngineError::ScanFailed(e.to_string()))?;
             items_scanned += findings.len() as u64;
             findings_count += findings.len() as u64;
             for finding in findings {
@@ -67,7 +73,10 @@ impl Engine for MapEngine {
 
         if self.args.containers {
             let scanner = ContainerScanner::new();
-            let findings = scanner.scan(&ctx).await.map_err(|e| EngineError::ScanFailed(e.to_string()))?;
+            let findings = scanner
+                .scan(&ctx)
+                .await
+                .map_err(|e| EngineError::ScanFailed(e.to_string()))?;
             items_scanned += findings.len() as u64;
             findings_count += findings.len() as u64;
             for finding in findings {

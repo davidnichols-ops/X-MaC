@@ -23,10 +23,12 @@ struct ProcessMemoryEntry: Codable, Hashable, Identifiable {
     var id: UInt32 { pid }
 }
 
-// MARK: - RamBoostView
+// MARK: - RamBoostView (Reworked with GNN integration)
 
 struct RamBoostView: View {
     @EnvironmentObject var runner: XMacRunner
+
+    // Boost state
     @State private var beforeStats: MemoryStatsSnapshot? = nil
     @State private var afterStats: MemoryStatsSnapshot? = nil
     @State private var freedBytes: UInt64 = 0
@@ -35,6 +37,8 @@ struct RamBoostView: View {
     @State private var isBoosting = false
     @State private var boostError: String? = nil
     @State private var hasRunBoost = false
+    @State private var purgeSuccess: Bool = false
+    @State private var purgeMessage: String = ""
 
     // Kill options
     @State private var killTopN: Int = 0
@@ -42,40 +46,51 @@ struct RamBoostView: View {
     @State private var minRssMB: Int = 500
     @State private var protectSystem: Bool = true
     @State private var forceKill: Bool = false
+    @State private var purgeEnabled: Bool = true
+
+    // GNN filter
+    @State private var showOnlyActionable: Bool = false
+    @State private var selectedActionFilter: String? = nil
+
+    // Refresh timer
+    @State private var autoRefresh: Bool = false
+    @State private var refreshTimer: Timer?
 
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
-                if isBoosting {
-                    boostProgressView
+                if runner.isOptimizing {
+                    optimizeProgressView
                 } else if let err = boostError {
                     ScanErrorView(message: err)
-                } else if let before = beforeStats {
-                    // Show purge warning if boost ran but freed nothing
-                    if let after = afterStats, freedBytes == 0, hasRunBoost {
-                        purgeWarningCard
+                } else if let snapshot = runner.optimizeResult {
+                    // GNN system pressure prediction banner
+                    if let gnn = snapshot.gnnResult {
+                        gnnPressureBanner(gnn: gnn)
                     }
 
-                    // After-boost summary if available
-                    if let after = afterStats {
+                    // Memory dashboard
+                    memoryDashboardCard(snapshot: snapshot)
+
+                    // GNN predictions (actionable items)
+                    if let gnn = snapshot.gnnResult {
+                        gnnPredictionsCard(snapshot: snapshot, gnn: gnn)
+                    }
+
+                    // Top processes detail
+                    processListCard(snapshot: snapshot)
+
+                    // Boost controls (purge + kill)
+                    boostControlsCard
+
+                    // After-boost results
+                    if hasRunBoost, let before = beforeStats, let after = afterStats {
                         boostResultCard(before: before, after: after)
                     }
 
-                    // Memory pressure gauge
-                    pressureGaugeCard(stats: afterStats ?? before)
-
-                    // Memory breakdown
-                    memoryBreakdownCard(stats: afterStats ?? before)
-
-                    // Top consumers
-                    topConsumersCard(stats: afterStats ?? before)
-
-                    // Boost controls
-                    if afterStats == nil {
-                        boostControlsCard
-                    } else {
-                        // Allow re-running
-                        boostControlsCard
+                    // Purge status
+                    if hasRunBoost {
+                        purgeStatusCard
                     }
                 } else {
                     emptyStateCard
@@ -85,8 +100,22 @@ struct RamBoostView: View {
         }
         .background(XTheme.voidGradient)
         .onAppear {
-            if beforeStats == nil && !isBoosting {
-                runReportOnly()
+            if runner.optimizeResult == nil && !runner.isOptimizing {
+                Task { await runner.runOptimize(topN: 15) }
+            }
+        }
+        .onDisappear {
+            refreshTimer?.invalidate()
+            refreshTimer = nil
+        }
+        .onChange(of: autoRefresh) { enabled in
+            if enabled {
+                refreshTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { _ in
+                    Task { await runner.runOptimize(topN: 15) }
+                }
+            } else {
+                refreshTimer?.invalidate()
+                refreshTimer = nil
             }
         }
     }
@@ -105,18 +134,18 @@ struct RamBoostView: View {
                     .font(.system(size: 20, weight: .bold, design: .rounded))
                     .foregroundStyle(XTheme.metallicGradient)
 
-                Text("Purge inactive memory, kill memory-hungry processes, and see before/after comparison.")
+                Text("AI-powered memory analysis with GNN predictions. Collects telemetry, predicts pressure, and recommends per-process actions.")
                     .font(.system(size: 13))
                     .foregroundStyle(XTheme.textSecondary)
                     .multilineTextAlignment(.center)
 
                 Button {
-                    runReportOnly()
+                    Task { await runner.runOptimize(topN: 15) }
                 } label: {
                     HStack(spacing: 6) {
-                        Image(systemName: "chart.bar.fill")
+                        Image(systemName: "brain.head.profile.fill")
                             .font(.system(size: 12))
-                        Text("Show Memory Report")
+                        Text("Analyze Memory")
                             .font(.system(size: 13, weight: .semibold))
                     }
                     .foregroundStyle(.white)
@@ -132,59 +161,20 @@ struct RamBoostView: View {
         }
     }
 
-    // MARK: - Purge Warning
+    // MARK: - Optimize Progress
 
-    private var purgeWarningCard: some View {
-        XCard {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 16))
-                        .foregroundStyle(XTheme.medium)
-                    Text("Purge Requires Elevated Permissions")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(XTheme.medium)
-                }
-
-                Text("The `purge` command needs sudo to free inactive memory on modern macOS. The memory report ran successfully, but no RAM was freed.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(XTheme.textSecondary)
-
-                HStack(spacing: 8) {
-                    Image(systemName: "terminal")
-                        .font(.system(size: 12))
-                        .foregroundStyle(XTheme.accent)
-                    Text("sudo purge")
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(XTheme.textPrimary)
-                        .textSelection(.enabled)
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(XTheme.bgTertiary)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-
-                Text("Run this in Terminal to purge inactive memory. You can also try killing memory-hungry processes below — that works without sudo.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(XTheme.textTertiary)
-            }
-        }
-    }
-
-    // MARK: - Boost Progress
-
-    private var boostProgressView: some View {
+    private var optimizeProgressView: some View {
         XCard {
             VStack(spacing: 16) {
                 ProgressView()
                     .scaleEffect(1.2)
                     .tint(XTheme.accent)
 
-                Text("Optimizing Memory...")
+                Text("Analyzing Memory...")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(XTheme.textPrimary)
 
-                Text("Purging inactive memory and reclaiming RAM")
+                Text("Collecting telemetry, building graph, running GNN inference")
                     .font(.system(size: 12))
                     .foregroundStyle(XTheme.textSecondary)
             }
@@ -193,132 +183,123 @@ struct RamBoostView: View {
         }
     }
 
-    // MARK: - Boost Result Card
+    // MARK: - GNN Pressure Banner
 
-    private func boostResultCard(before: MemoryStatsSnapshot, after: MemoryStatsSnapshot) -> some View {
-        XCard {
-            VStack(alignment: .leading, spacing: 14) {
-                XSectionHeader(title: "Boost Results", icon: "checkmark.seal.fill", count: nil)
+    private func gnnPressureBanner(gnn: MemoryGNNManager.OptimizationResult) -> some View {
+        let pressure = gnn.systemPressure
+        let color = pressureColor(pressure.level)
+        let icon = pressureIcon(pressure.level)
 
-                HStack(spacing: 20) {
-                    resultBadge(
-                        icon: "arrow.down.circle.fill",
-                        label: "RAM Freed",
-                        value: formatBytes(freedBytes),
-                        color: freedBytes > 0 ? XTheme.safe : XTheme.textSecondary
-                    )
-                    resultBadge(
-                        icon: "arrow.down.circle.fill",
-                        label: "Swap Freed",
-                        value: formatBytes(freedSwapBytes),
-                        color: freedSwapBytes > 0 ? XTheme.safe : XTheme.textSecondary
-                    )
-                    resultBadge(
-                        icon: "xmark.circle.fill",
-                        label: "Killed",
-                        value: "\(processesKilled)",
-                        color: processesKilled > 0 ? XTheme.medium : XTheme.textSecondary
-                    )
-                }
-
-                Divider().background(XTheme.cardBorder)
-
-                // Before / After comparison bar
-                HStack(spacing: 16) {
-                    usageComparisonBar(label: "Before", used: before.used_bytes, total: before.total_bytes, color: XTheme.medium)
-                    usageComparisonBar(label: "After", used: after.used_bytes, total: after.total_bytes, color: XTheme.safe)
-                }
-            }
-        }
-    }
-
-    private func resultBadge(icon: String, label: String, value: String, color: Color) -> some View {
-        VStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.system(size: 20))
-                .foregroundStyle(color)
-            Text(value)
-                .font(.system(size: 16, weight: .bold, design: .rounded))
-                .foregroundStyle(color)
-            Text(label)
-                .font(.system(size: 10))
-                .foregroundStyle(XTheme.textTertiary)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private func usageComparisonBar(label: String, used: UInt64, total: UInt64, color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text(label)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(XTheme.textSecondary)
-                Spacer()
-                Text("\(percentage(used, total))%")
-                    .font(.system(size: 11, weight: .semibold))
+        return XCard {
+            HStack(spacing: 14) {
+                Image(systemName: icon)
+                    .font(.system(size: 28))
                     .foregroundStyle(color)
-            }
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(XTheme.bgTertiary)
-                        .frame(height: 8)
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(color)
-                        .frame(width: geo.size.width * ratio(used, total), height: 8)
+                    .xGlow(color, radius: 6)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text("GNN Prediction")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(XTheme.textTertiary)
+                        if gnn.usingFallback {
+                            Text("HEURISTIC")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(XTheme.medium)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(XTheme.medium.opacity(0.2))
+                                .clipShape(Capsule())
+                        } else {
+                            Text("NEURAL")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(XTheme.accent)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(XTheme.accent.opacity(0.2))
+                                .clipShape(Capsule())
+                        }
+                    }
+                    Text("System pressure in 60s: \(pressure.level.capitalized)")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(color)
+                    Text("Confidence: \(Int(pressure.confidence * 100))% • \(gnn.predictions.count) processes analyzed")
+                        .font(.system(size: 11))
+                        .foregroundStyle(XTheme.textSecondary)
                 }
+
+                Spacer()
+
+                Button {
+                    Task { await runner.runOptimize(topN: 15) }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 14))
+                        .foregroundStyle(XTheme.textSecondary)
+                }
+                .buttonStyle(.plain)
             }
-            .frame(height: 8)
-            Text("\(formatBytes(used)) / \(formatBytes(total))")
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(XTheme.textTertiary)
         }
     }
 
-    // MARK: - Pressure Gauge
+    // MARK: - Memory Dashboard
 
-    private func pressureGaugeCard(stats: MemoryStatsSnapshot) -> some View {
-        let pressure = pressureLevel(stats.memory_pressure)
+    private func memoryDashboardCard(snapshot: OptimizeSnapshot) -> some View {
+        let pressureColor = pressureColor(snapshot.pressureLabel)
+        let utilPct = snapshot.utilizationPct
+
         return XCard {
             VStack(alignment: .leading, spacing: 14) {
-                XSectionHeader(title: "Memory Pressure", icon: "gauge.with.dots.needle.67percent")
+                // Header with auto-refresh toggle
+                HStack {
+                    XSectionHeader(title: "Memory Dashboard", icon: "gauge.with.dots.needle.67percent", count: nil)
+                    Spacer()
+                    Toggle(isOn: $autoRefresh) {
+                        Text("Auto")
+                            .font(.system(size: 10))
+                            .foregroundStyle(XTheme.textSecondary)
+                    }
+                    .tint(XTheme.accent)
+                    .labelsHidden()
+                    .scaleEffect(0.8)
+                }
 
-                HStack(spacing: 16) {
+                HStack(spacing: 20) {
                     // Circular gauge
                     ZStack {
                         Circle()
                             .stroke(XTheme.bgTertiary, lineWidth: 10)
-                            .frame(width: 80, height: 80)
+                            .frame(width: 90, height: 90)
                         Circle()
-                            .trim(from: 0, to: ratio(stats.used_bytes, stats.total_bytes))
-                            .stroke(pressure.color, style: StrokeStyle(lineWidth: 10, lineCap: .round))
+                            .trim(from: 0, to: utilPct / 100.0)
+                            .stroke(pressureColor, style: StrokeStyle(lineWidth: 10, lineCap: .round))
                             .rotationEffect(.degrees(-90))
-                            .frame(width: 80, height: 80)
-                            .xGlow(pressure.color, radius: 4)
+                            .frame(width: 90, height: 90)
+                            .xGlow(pressureColor, radius: 4)
                         VStack(spacing: 2) {
-                            Text("\(Int(ratio(stats.used_bytes, stats.total_bytes) * 100))%")
-                                .font(.system(size: 18, weight: .bold, design: .rounded))
-                                .foregroundStyle(pressure.color)
+                            Text(String(format: "%.0f%%", utilPct))
+                                .font(.system(size: 20, weight: .bold, design: .rounded))
+                                .foregroundStyle(pressureColor)
                             Text("Used")
                                 .font(.system(size: 9))
                                 .foregroundStyle(XTheme.textTertiary)
                         }
                     }
 
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 6) {
                         HStack(spacing: 6) {
                             Circle()
-                                .fill(pressure.color)
+                                .fill(pressureColor)
                                 .frame(width: 8, height: 8)
-                                .xGlow(pressure.color, radius: 3)
-                            Text(pressure.label)
+                                .xGlow(pressureColor, radius: 3)
+                            Text(snapshot.pressureLabel.capitalized)
                                 .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(pressure.color)
+                                .foregroundStyle(pressureColor)
                         }
-
-                        statRow(label: "Total", value: formatBytes(stats.total_bytes))
-                        statRow(label: "Used", value: formatBytes(stats.used_bytes))
-                        statRow(label: "Available", value: formatBytes(stats.available_bytes))
+                        statRow(label: "Free", value: formatMB(snapshot.freeMB))
+                        statRow(label: "Compressed", value: formatMB(snapshot.compressedMB))
+                        statRow(label: "Swap", value: formatMB(snapshot.swapMB))
+                        statRow(label: "Graph", value: "\(snapshot.nodeCount) nodes, \(snapshot.edgeCount) edges")
                     }
                     Spacer()
                 }
@@ -326,89 +307,267 @@ struct RamBoostView: View {
         }
     }
 
-    // MARK: - Memory Breakdown
+    // MARK: - GNN Predictions Card (Actionable Items)
 
-    private func memoryBreakdownCard(stats: MemoryStatsSnapshot) -> some View {
-        XCard {
+    private func gnnPredictionsCard(snapshot: OptimizeSnapshot, gnn: MemoryGNNManager.OptimizationResult) -> some View {
+        let predictions = gnn.predictions
+        let actionable = predictions.filter { $0.action != "no_action" }
+        let filtered = showOnlyActionable ? actionable : predictions
+
+        return XCard {
             VStack(alignment: .leading, spacing: 12) {
-                XSectionHeader(title: "Memory Breakdown", icon: "chart.bar.fill")
-
-                if stats.wired_bytes > 0 {
-                    breakdownBar(label: "App Memory", bytes: stats.app_memory_bytes, total: stats.total_bytes, color: XTheme.accent)
-                    breakdownBar(label: "Wired", bytes: stats.wired_bytes, total: stats.total_bytes, color: XTheme.teal)
-                    breakdownBar(label: "Compressed", bytes: stats.compressed_bytes, total: stats.total_bytes, color: XTheme.anomaly)
-                }
-
-                if stats.swap_total_bytes > 0 {
-                    Divider().background(XTheme.cardBorder)
-                    HStack {
-                        Text("Swap")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(XTheme.textSecondary)
-                        Spacer()
-                        Text("\(formatBytes(stats.swap_used_bytes)) / \(formatBytes(stats.swap_total_bytes))")
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(stats.swap_used_bytes > 0 ? XTheme.medium : XTheme.textTertiary)
-                    }
-                    if stats.swap_total_bytes > 0 {
-                        GeometryReader { geo in
-                            ZStack(alignment: .leading) {
-                                RoundedRectangle(cornerRadius: 3)
-                                    .fill(XTheme.bgTertiary)
-                                    .frame(height: 6)
-                                RoundedRectangle(cornerRadius: 3)
-                                    .fill(XTheme.medium)
-                                    .frame(width: geo.size.width * ratio(stats.swap_used_bytes, stats.swap_total_bytes), height: 6)
-                            }
+                // Header
+                HStack {
+                    XSectionHeader(title: "AI Recommendations", icon: "brain.head.profile.fill", count: actionable.count > 0 ? actionable.count : nil)
+                    Spacer()
+                    if !actionable.isEmpty {
+                        Toggle(isOn: $showOnlyActionable) {
+                            Text("Actionable only")
+                                .font(.system(size: 10))
+                                .foregroundStyle(XTheme.textSecondary)
                         }
-                        .frame(height: 6)
+                        .tint(XTheme.accent)
+                        .scaleEffect(0.85)
+                    }
+                }
+
+                if predictions.isEmpty {
+                    Text("No GNN predictions available")
+                        .font(.system(size: 12))
+                        .foregroundStyle(XTheme.textTertiary)
+                        .padding(.vertical, 8)
+                } else if filtered.isEmpty {
+                    Text("No actions needed — all processes are healthy")
+                        .font(.system(size: 12))
+                        .foregroundStyle(XTheme.safe)
+                        .padding(.vertical, 8)
+                } else {
+                    // Summary bar
+                    if !actionable.isEmpty {
+                        actionSummaryBar(actionable: actionable)
+                    }
+
+                    // Per-process predictions
+                    LazyVStack(spacing: 8) {
+                        ForEach(Array(filtered.enumerated()), id: \.element.pid) { _, pred in
+                            gnnProcessRow(pred: pred, snapshot: snapshot)
+                        }
                     }
                 }
             }
         }
     }
 
-    private func breakdownBar(label: String, bytes: UInt64, total: UInt64, color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(label)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(XTheme.textSecondary)
-                Spacer()
-                Text(formatBytes(bytes))
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(XTheme.textPrimary)
-            }
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(XTheme.bgTertiary)
-                        .frame(height: 6)
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(color)
-                        .frame(width: geo.size.width * ratio(bytes, total), height: 6)
+    private func actionSummaryBar(actionable: [MemoryGNNManager.MemoryPrediction]) -> some View {
+        let counts = Dictionary(grouping: actionable, by: { $0.action })
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(counts.keys.sorted(), id: \.self) { action in
+                    let count = counts[action]?.count ?? 0
+                    let color = actionColor(action)
+                    HStack(spacing: 4) {
+                        Image(systemName: actionIcon(action))
+                            .font(.system(size: 10))
+                        Text("\(count) \(action.replacingOccurrences(of: "_", with: " "))")
+                            .font(.system(size: 10, weight: .medium))
+                    }
+                    .foregroundStyle(color)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(color.opacity(0.15))
+                    .clipShape(Capsule())
                 }
             }
-            .frame(height: 6)
         }
     }
 
-    // MARK: - Top Consumers
+    private func gnnProcessRow(pred: MemoryGNNManager.MemoryPrediction, snapshot: OptimizeSnapshot) -> some View {
+        // Match by name since graph nodes use labels, not real PIDs
+        let proc = snapshot.processes.first { $0.name == pred.processName } ?? snapshot.processes.first { $0.name.lowercased() == pred.processName.lowercased() }
+        let color = actionColor(pred.action)
+        let icon = actionIcon(pred.action)
 
-    private func topConsumersCard(stats: MemoryStatsSnapshot) -> some View {
-        XCard {
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                // Action icon
+                Image(systemName: icon)
+                    .font(.system(size: 16))
+                    .foregroundStyle(color)
+                    .frame(width: 28)
+
+                // Process info
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(pred.processName)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(XTheme.textPrimary)
+                            .lineLimit(1)
+                        Text("PID \(pred.pid)")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(XTheme.textTertiary)
+                    }
+
+                    // Action label
+                    HStack(spacing: 6) {
+                        Text(pred.action.replacingOccurrences(of: "_", with: " ").capitalized)
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(color)
+                        Text("(\(Int(pred.actionConfidence * 100))% confidence)")
+                            .font(.system(size: 10))
+                            .foregroundStyle(XTheme.textTertiary)
+                    }
+                }
+
+                Spacer()
+
+                // Risk + RSS
+                VStack(alignment: .trailing, spacing: 2) {
+                    if let proc = proc {
+                        Text(formatBytes(proc.rssBytes))
+                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(XTheme.textPrimary)
+                    }
+                    // Risk bar
+                    HStack(spacing: 4) {
+                        Text("risk")
+                            .font(.system(size: 9))
+                            .foregroundStyle(XTheme.textTertiary)
+                        riskBar(risk: pred.risk)
+                    }
+                }
+            }
+
+            // Action explanation
+            Text(actionExplanation(pred: pred, proc: proc))
+                .font(.system(size: 10))
+                .foregroundStyle(XTheme.textSecondary)
+                .padding(.leading, 38)
+
+            // Action buttons
+            if pred.action != "no_action" {
+                HStack(spacing: 8) {
+                    actionButton(pred: pred)
+                    if proc != nil && (pred.action == "terminate" || pred.action == "suspend") {
+                        Button {
+                            killProcess(pid: pred.pid, name: pred.processName, force: pred.action == "terminate")
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: pred.action == "terminate" ? "xmark.octagon.fill" : "pause.circle.fill")
+                                    .font(.system(size: 10))
+                                Text(pred.action == "terminate" ? "Kill" : "Suspend")
+                                    .font(.system(size: 10, weight: .semibold))
+                            }
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(pred.action == "terminate" ? XTheme.danger : XTheme.medium)
+                            .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.leading, 38)
+            }
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 10)
+        .background(color.opacity(0.05))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(color.opacity(0.15), lineWidth: 1)
+        )
+    }
+
+    private func actionButton(pred: MemoryGNNManager.MemoryPrediction) -> some View {
+        let color = actionColor(pred.action)
+        return Button {
+            // Copy recommendation to clipboard
+            #if os(macOS)
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString("xmac ram-boost --kill-name \"\(pred.processName)\"", forType: .string)
+            #endif
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "doc.on.doc")
+                    .font(.system(size: 10))
+                Text("Copy kill cmd")
+                    .font(.system(size: 10, weight: .medium))
+            }
+            .foregroundStyle(color)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(color.opacity(0.1))
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func riskBar(risk: Double) -> some View {
+        let color = risk > 0.7 ? XTheme.danger : risk > 0.4 ? XTheme.medium : XTheme.safe
+        return GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(XTheme.bgTertiary)
+                    .frame(width: 50, height: 4)
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(color)
+                    .frame(width: 50 * min(max(risk, 0), 1), height: 4)
+            }
+        }
+        .frame(width: 50, height: 4)
+    }
+
+    private func actionExplanation(pred: MemoryGNNManager.MemoryPrediction, proc: OptimizeProcess?) -> String {
+        switch pred.action {
+        case "no_action":
+            if let p = proc {
+                return "Healthy. RSS \(formatMB(p.rssMB)), \(p.threadCount) threads. No intervention needed."
+            }
+            return "No intervention needed."
+        case "pressure_relief":
+            if let p = proc {
+                let purgeable = formatMB(Double(p.purgeableBytes) / 1_048_576)
+                return "Has \(purgeable) purgeable memory. Reclaiming inactive pages will reduce pressure."
+            }
+            return "Reclaiming inactive pages from this process will reduce memory pressure."
+        case "suggest_purge":
+            if let p = proc {
+                return "Growing process (\(formatMB(p.rssMB)) RSS). Consider purging its inactive memory or restarting."
+            }
+            return "Consider purging this process's inactive memory."
+        case "deprioritize":
+            return "Low priority. Can be deprioritized to give CPU/memory to more important work."
+        case "suspend":
+            return "Memory-heavy and inactive. Suspending will free RAM for active workloads."
+        case "terminate":
+            if let p = proc {
+                return "High memory usage (\(formatMB(p.rssMB))) with elevated risk. Terminating will reclaim significant RAM."
+            }
+            return "Terminating this process will reclaim significant memory."
+        default:
+            return pred.action
+        }
+    }
+
+    // MARK: - Process List Card
+
+    private func processListCard(snapshot: OptimizeSnapshot) -> some View {
+        let sorted = snapshot.processes.sorted { $0.rssBytes > $1.rssBytes }
+
+        return XCard {
             VStack(alignment: .leading, spacing: 10) {
-                XSectionHeader(title: "Top Memory Consumers", icon: "flame.fill", count: stats.top_consumers.count)
+                XSectionHeader(title: "Top Memory Consumers", icon: "flame.fill", count: sorted.count)
 
-                if stats.top_consumers.isEmpty {
+                if sorted.isEmpty {
                     Text("No process data available")
                         .font(.system(size: 12))
                         .foregroundStyle(XTheme.textTertiary)
                         .padding(.vertical, 8)
                 } else {
-                    LazyVStack(spacing: 6) {
-                        ForEach(Array(stats.top_consumers.enumerated()), id: \.element.id) { idx, proc in
-                            processRow(rank: idx + 1, proc: proc, total: stats.total_bytes)
+                    LazyVStack(spacing: 4) {
+                        ForEach(Array(sorted.prefix(10).enumerated()), id: \.element.id) { idx, proc in
+                            processDetailRow(rank: idx + 1, proc: proc, snapshot: snapshot)
                         }
                     }
                 }
@@ -416,16 +575,19 @@ struct RamBoostView: View {
         }
     }
 
-    private func processRow(rank: Int, proc: ProcessMemoryEntry, total: UInt64) -> some View {
-        HStack(spacing: 10) {
+    private func processDetailRow(rank: Int, proc: OptimizeProcess, snapshot: OptimizeSnapshot) -> some View {
+        let pred = proc.gnnPrediction(from: snapshot.gnnResult)
+        let actionColor = pred != nil ? actionColor(pred!.action) : XTheme.textTertiary
+
+        return HStack(spacing: 10) {
             Text("#\(rank)")
                 .font(.system(size: 11, weight: .bold, design: .monospaced))
                 .foregroundStyle(XTheme.textTertiary)
                 .frame(width: 24)
 
-            Image(systemName: proc.icon)
+            Image(systemName: procIcon(proc.name))
                 .font(.system(size: 14))
-                .foregroundStyle(XTheme.accent.opacity(0.7))
+                .foregroundStyle(actionColor.opacity(0.7))
                 .frame(width: 20)
 
             VStack(alignment: .leading, spacing: 2) {
@@ -433,20 +595,40 @@ struct RamBoostView: View {
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(XTheme.textPrimary)
                     .lineLimit(1)
-                Text("PID \(proc.pid)")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(XTheme.textTertiary)
+                HStack(spacing: 6) {
+                    Text("PID \(proc.pid)")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(XTheme.textTertiary)
+                    if proc.isSystem {
+                        Text("SYS")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(XTheme.textTertiary)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(XTheme.bgTertiary)
+                            .clipShape(Capsule())
+                    }
+                    if let pred = pred, pred.action != "no_action" {
+                        Text(pred.action.replacingOccurrences(of: "_", with: " "))
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(actionColor)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(actionColor.opacity(0.15))
+                            .clipShape(Capsule())
+                    }
+                }
             }
 
             Spacer()
 
             VStack(alignment: .trailing, spacing: 2) {
-                Text(formatBytes(proc.rss_bytes))
+                Text(formatBytes(proc.rssBytes))
                     .font(.system(size: 12, weight: .semibold, design: .monospaced))
                     .foregroundStyle(XTheme.textPrimary)
-                Text(String(format: "%.1f%%", proc.percent))
-                    .font(.system(size: 10))
-                    .foregroundStyle(XTheme.textSecondary)
+                Text("\(proc.threadCount) threads")
+                    .font(.system(size: 9))
+                    .foregroundStyle(XTheme.textTertiary)
             }
         }
         .padding(.vertical, 4)
@@ -464,7 +646,7 @@ struct RamBoostView: View {
     private var boostControlsCard: some View {
         XCard {
             VStack(alignment: .leading, spacing: 14) {
-                XSectionHeader(title: "Boost Controls", icon: "bolt.fill")
+                XSectionHeader(title: "Manual Controls", icon: "bolt.fill", count: nil)
 
                 // Purge toggle
                 Toggle(isOn: $purgeEnabled) {
@@ -472,6 +654,18 @@ struct RamBoostView: View {
                         .font(.system(size: 13))
                 }
                 .tint(XTheme.accent)
+
+                if purgeEnabled {
+                    HStack(spacing: 6) {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(XTheme.accent)
+                        Text("Admin privileges required — macOS will prompt for your password")
+                            .font(.system(size: 10))
+                            .foregroundStyle(XTheme.textTertiary)
+                    }
+                    .padding(.leading, 4)
+                }
 
                 Divider().background(XTheme.cardBorder)
 
@@ -532,6 +726,11 @@ struct RamBoostView: View {
                             .font(.system(size: 14))
                         Text(hasRunBoost ? "Boost Again" : "Boost RAM")
                             .font(.system(size: 15, weight: .bold))
+                        if purgeEnabled {
+                            Image(systemName: "lock.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.white.opacity(0.7))
+                        }
                     }
                     .foregroundStyle(.white)
                     .padding(.horizontal, 24)
@@ -547,15 +746,161 @@ struct RamBoostView: View {
         }
     }
 
+    // MARK: - Purge Status Card
+
+    private var purgeStatusCard: some View {
+        XCard {
+            VStack(alignment: .leading, spacing: 10) {
+                if purgeSuccess {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 16))
+                            .foregroundStyle(XTheme.safe)
+                        Text("Memory Purged with Admin Privileges")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(XTheme.safe)
+                    }
+                    Text(purgeMessage.isEmpty ? "Inactive memory has been purged." : purgeMessage)
+                        .font(.system(size: 12))
+                        .foregroundStyle(XTheme.textSecondary)
+                } else {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 16))
+                            .foregroundStyle(XTheme.medium)
+                        Text("Purge Was Not Completed")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(XTheme.medium)
+                    }
+                    Text(purgeMessage.isEmpty ? "The purge command was not completed." : purgeMessage)
+                        .font(.system(size: 12))
+                        .foregroundStyle(XTheme.textSecondary)
+
+                    if !purgeMessage.contains("cancelled") {
+                        HStack(spacing: 8) {
+                            Image(systemName: "terminal")
+                                .font(.system(size: 12))
+                                .foregroundStyle(XTheme.accent)
+                            Text("sudo purge")
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundStyle(XTheme.textPrimary)
+                                .textSelection(.enabled)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(XTheme.bgTertiary)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Boost Result Card
+
+    private func boostResultCard(before: MemoryStatsSnapshot, after: MemoryStatsSnapshot) -> some View {
+        XCard {
+            VStack(alignment: .leading, spacing: 14) {
+                XSectionHeader(title: "Boost Results", icon: "checkmark.seal.fill", count: nil)
+
+                HStack(spacing: 20) {
+                    resultBadge(icon: "arrow.down.circle.fill", label: "RAM Freed", value: formatBytes(freedBytes), color: freedBytes > 0 ? XTheme.safe : XTheme.textSecondary)
+                    resultBadge(icon: "arrow.down.circle.fill", label: "Swap Freed", value: formatBytes(freedSwapBytes), color: freedSwapBytes > 0 ? XTheme.safe : XTheme.textSecondary)
+                    resultBadge(icon: "xmark.circle.fill", label: "Killed", value: "\(processesKilled)", color: processesKilled > 0 ? XTheme.medium : XTheme.textSecondary)
+                }
+
+                Divider().background(XTheme.cardBorder)
+
+                HStack(spacing: 16) {
+                    usageComparisonBar(label: "Before", used: before.used_bytes, total: before.total_bytes, color: XTheme.medium)
+                    usageComparisonBar(label: "After", used: after.used_bytes, total: after.total_bytes, color: XTheme.safe)
+                }
+            }
+        }
+    }
+
+    private func resultBadge(icon: String, label: String, value: String, color: Color) -> some View {
+        VStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 20))
+                .foregroundStyle(color)
+            Text(value)
+                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .foregroundStyle(color)
+            Text(label)
+                .font(.system(size: 10))
+                .foregroundStyle(XTheme.textTertiary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func usageComparisonBar(label: String, used: UInt64, total: UInt64, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(label)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(XTheme.textSecondary)
+                Spacer()
+                Text("\(percentage(used, total))%")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(color)
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(XTheme.bgTertiary)
+                        .frame(height: 8)
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(color)
+                        .frame(width: geo.size.width * ratio(used, total), height: 8)
+                }
+            }
+            .frame(height: 8)
+            Text("\(formatBytes(used)) / \(formatBytes(total))")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(XTheme.textTertiary)
+        }
+    }
+
     // MARK: - Helpers
 
-    @State private var purgeEnabled: Bool = true
+    private func pressureColor(_ level: String) -> Color {
+        switch level.lowercased() {
+        case let x where x.contains("critical"): return XTheme.danger
+        case let x where x.contains("warning") || x.contains("warn"): return XTheme.medium
+        default: return XTheme.safe
+        }
+    }
 
-    private func pressureLevel(_ s: String) -> (label: String, color: Color) {
-        switch s.lowercased() {
-        case let x where x.contains("critical"): return ("Critical", XTheme.danger)
-        case let x where x.contains("warning"): return ("Warning", XTheme.medium)
-        default: return ("Nominal", XTheme.safe)
+    private func pressureIcon(_ level: String) -> String {
+        switch level.lowercased() {
+        case let x where x.contains("critical"): return "exclamationmark.octagon.fill"
+        case let x where x.contains("warning") || x.contains("warn"): return "exclamationmark.triangle.fill"
+        default: return "checkmark.circle.fill"
+        }
+    }
+
+    private func actionColor(_ action: String) -> Color {
+        switch action {
+        case "no_action": return XTheme.safe
+        case "pressure_relief": return XTheme.accent
+        case "suggest_purge": return XTheme.medium
+        case "deprioritize": return XTheme.teal
+        case "suspend": return XTheme.medium
+        case "terminate": return XTheme.danger
+        default: return XTheme.textSecondary
+        }
+    }
+
+    private func actionIcon(_ action: String) -> String {
+        switch action {
+        case "no_action": return "checkmark.circle"
+        case "pressure_relief": return "arrow.triangle.2.circlepath"
+        case "suggest_purge": return "sparkles"
+        case "deprioritize": return "arrow.down.right.circle"
+        case "suspend": return "pause.circle"
+        case "terminate": return "xmark.octagon"
+        default: return "questionmark.circle"
         }
     }
 
@@ -581,24 +926,61 @@ struct RamBoostView: View {
         return min(Double(used) / Double(total), 1.0)
     }
 
+    private func formatBytes(_ bytes: UInt64) -> String {
+        let mb = Double(bytes) / 1_048_576
+        if mb >= 1024 {
+            return String(format: "%.1f GB", mb / 1024)
+        }
+        if mb >= 1 {
+            return String(format: "%.1f MB", mb)
+        }
+        return String(format: "%.0f KB", Double(bytes) / 1024)
+    }
+
+    private func formatMB(_ mb: Double) -> String {
+        if mb >= 1024 {
+            return String(format: "%.1f GB", mb / 1024)
+        }
+        return String(format: "%.1f MB", mb)
+    }
+
+    private func procIcon(_ name: String) -> String {
+        let lower = name.lowercased()
+        if lower.contains("chrome") { return "globe" }
+        if lower.contains("safari") { return "safari" }
+        if lower.contains("firefox") { return "flame" }
+        if lower.contains("spotify") { return "music.note" }
+        if lower.contains("slack") { return "message" }
+        if lower.contains("xcode") { return "hammer" }
+        if lower.contains("finder") { return "folder" }
+        if lower.contains("terminal") || lower.contains("iterm") { return "terminal" }
+        if lower.contains("docker") { return "shippingbox" }
+        if lower.contains("node") { return "node" }
+        if lower.contains("python") { return "python" }
+        if lower.contains("rust") || lower.contains("cargo") { return "rust" }
+        if lower.contains("kernel") { return "gearshape.2" }
+        if lower.contains("windowserver") { return "rectangle.on.rectangle" }
+        if lower.contains("devin") { return "cpu" }
+        if lower.contains("chatgpt") { return "bubble.left" }
+        if lower.contains("raycast") { return "magnifyingglass.circle" }
+        if lower.contains("mail") { return "envelope" }
+        if lower.contains("music") { return "music.note" }
+        if lower.contains("photos") { return "photo" }
+        if lower.contains("code") { return "chevron.left.forwardslash.chevron.right" }
+        return "app"
+    }
+
     // MARK: - Actions
 
-    private func runReportOnly() {
-        isBoosting = true
-        boostError = nil
-        Task {
-            let result = await runner.runRamBoost(purge: false, killTop: 0, killName: nil, force: false, minRssMB: 500, protectSystem: true)
-            await MainActor.run {
-                isBoosting = false
-                switch result {
-                case .success(let (before, _, _, _, _)):
-                    beforeStats = before
-                    afterStats = nil
-                    hasRunBoost = false
-                case .failure(let err):
-                    boostError = err.localizedDescription
-                }
-            }
+    private func killProcess(pid: Int, name: String, force: Bool) {
+        let signal = force ? "SIGKILL" : "SIGTERM"
+        let task = Process()
+        task.launchPath = "/bin/kill"
+        task.arguments = [force ? "-9" : "-15", "\(pid)"]
+        try? task.run()
+        // Refresh after a short delay
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            Task { await runner.runOptimize(topN: 15) }
         }
     }
 
@@ -619,12 +1001,16 @@ struct RamBoostView: View {
             await MainActor.run {
                 isBoosting = false
                 switch result {
-                case .success(let (before, after, freed, freedSwap, killed)):
+                case .success(let (before, after, freed, freedSwap, killed, pSuccess, pMessage)):
                     beforeStats = before
                     afterStats = after
                     freedBytes = freed
                     freedSwapBytes = freedSwap
                     processesKilled = killed
+                    purgeSuccess = pSuccess
+                    purgeMessage = pMessage
+                    // Refresh the GNN view
+                    Task { await runner.runOptimize(topN: 15) }
                 case .failure(let err):
                     boostError = err.localizedDescription
                 }
@@ -662,5 +1048,3 @@ extension ProcessMemoryEntry {
         return "app"
     }
 }
-
-// MARK: - ScanErrorView is defined in FullScanView.swift

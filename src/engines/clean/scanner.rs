@@ -8,7 +8,10 @@ use crate::util::disk::dir_size;
 pub struct CleanScanner;
 
 impl CleanScanner {
-    pub fn scan_directory<'a>(path: &'a Path, config: &'a ScanConfig) -> impl Iterator<Item = walkdir::DirEntry> + 'a {
+    pub fn scan_directory<'a>(
+        path: &'a Path,
+        config: &'a ScanConfig,
+    ) -> impl Iterator<Item = walkdir::DirEntry> + 'a {
         WalkDir::new(path)
             .follow_links(config.follow_symlinks)
             .into_iter()

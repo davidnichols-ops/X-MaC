@@ -82,10 +82,16 @@ impl IntegrityScanner {
                     Category::PermissionIssue,
                     Target::Path(path.clone()),
                     "SUID binary detected",
-                    format!("{} has SUID bit set (permissions: {:o})", path.display(), mode),
+                    format!(
+                        "{} has SUID bit set (permissions: {:o})",
+                        path.display(),
+                        mode
+                    ),
                 )
                 .with_metadata("suid".to_string(), serde_json::json!(true))
-                .with_hint("SUID binaries can be a security risk if not properly maintained.".to_string()),
+                .with_hint(
+                    "SUID binaries can be a security risk if not properly maintained.".to_string(),
+                ),
             );
         }
 
@@ -97,10 +103,16 @@ impl IntegrityScanner {
                     Category::PermissionIssue,
                     Target::Path(path.clone()),
                     "SGID binary detected",
-                    format!("{} has SGID bit set (permissions: {:o})", path.display(), mode),
+                    format!(
+                        "{} has SGID bit set (permissions: {:o})",
+                        path.display(),
+                        mode
+                    ),
                 )
                 .with_metadata("sgid".to_string(), serde_json::json!(true))
-                .with_hint("SGID binaries can be a security risk if not properly maintained.".to_string()),
+                .with_hint(
+                    "SGID binaries can be a security risk if not properly maintained.".to_string(),
+                ),
             );
         }
 

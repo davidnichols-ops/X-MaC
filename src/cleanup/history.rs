@@ -19,6 +19,7 @@ pub struct ScanSnapshot {
     pub category_counts: HashMap<String, u64>,
 }
 
+#[allow(dead_code)]
 impl ScanSnapshot {
     pub fn new(total_bytes: u64, reclaimable_bytes: u64, finding_count: usize) -> Self {
         Self {
@@ -59,6 +60,7 @@ impl Default for CleanupHistory {
     }
 }
 
+#[allow(dead_code)]
 impl CleanupHistory {
     pub fn new() -> Self {
         Self::default()
@@ -88,7 +90,9 @@ impl CleanupHistory {
 
 #[allow(dead_code)]
 pub fn default_history_path() -> PathBuf {
-    let home = std::env::var("HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/tmp"));
+    let home = std::env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("/tmp"));
     home.join("Library/Caches/com.xmac.gui/history.json")
 }
 

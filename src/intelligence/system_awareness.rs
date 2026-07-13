@@ -184,7 +184,10 @@ fn load_average() -> (f64, f64, f64) {
     #[cfg(not(target_os = "macos"))]
     {
         if let Ok(content) = std::fs::read_to_string("/proc/loadavg") {
-            let parts: Vec<f64> = content.split_whitespace().filter_map(|s| s.parse().ok()).collect();
+            let parts: Vec<f64> = content
+                .split_whitespace()
+                .filter_map(|s| s.parse().ok())
+                .collect();
             if parts.len() >= 3 {
                 return (parts[0], parts[1], parts[2]);
             }
@@ -195,9 +198,7 @@ fn load_average() -> (f64, f64, f64) {
 
 fn top_cpu_processes(n: usize) -> Vec<CpuProcessInfo> {
     use std::process::Command;
-    let output = Command::new("ps")
-        .args(["-eo", "pid,%cpu,comm"])
-        .output();
+    let output = Command::new("ps").args(["-eo", "pid,%cpu,comm"]).output();
     let s = match output {
         Ok(o) => String::from_utf8_lossy(&o.stdout).to_string(),
         Err(_) => return Vec::new(),
@@ -218,7 +219,11 @@ fn top_cpu_processes(n: usize) -> Vec<CpuProcessInfo> {
         let name = name.rsplit('/').next().unwrap_or(&name).to_string();
         procs.push(CpuProcessInfo { pid, name, cpu_pct });
     }
-    procs.sort_by(|a, b| b.cpu_pct.partial_cmp(&a.cpu_pct).unwrap_or(std::cmp::Ordering::Equal));
+    procs.sort_by(|a, b| {
+        b.cpu_pct
+            .partial_cmp(&a.cpu_pct)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     procs.truncate(n);
     procs
 }
@@ -291,7 +296,10 @@ fn read_gpu_temp() -> Option<f64> {
     {
         use std::process::Command;
         if let Ok(out) = Command::new("nvidia-smi")
-            .args(["--query-gpu=temperature.gpu", "--format=csv,noheader,nounits"])
+            .args([
+                "--query-gpu=temperature.gpu",
+                "--format=csv,noheader,nounits",
+            ])
             .output()
         {
             if let Ok(s) = String::from_utf8_lossy(&out.stdout).trim().parse::<f64>() {
@@ -380,9 +388,8 @@ impl BatteryDimension {
             .unwrap_or_default();
 
         let is_plugged = pmset.contains("AC Power") || pmset.contains("AC attached");
-        let is_charging = pmset.contains("Battery Warning") == false
-            && is_plugged
-            && !pmset.contains("charged");
+        let is_charging =
+            !pmset.contains("Battery Warning") && is_plugged && !pmset.contains("charged");
 
         // Parse "X%; charging" or "X%; discharging" or "X%; charged"
         let charge_pct = pmset
@@ -398,20 +405,18 @@ impl BatteryDimension {
             })
             .unwrap_or(100.0);
 
-        let time_remaining = pmset
-            .lines()
-            .find_map(|l| {
-                if l.contains("remaining") || l.contains(" (") {
-                    let s = l.split('(').nth(1)?;
-                    let hours_str = s.split(':').next()?;
-                    let mins_str = s.split(':').nth(1)?;
-                    let h: u64 = hours_str.trim().parse().ok()?;
-                    let m: u64 = mins_str.split(')').next()?.trim().parse().ok()?;
-                    Some(h * 60 + m)
-                } else {
-                    None
-                }
-            });
+        let time_remaining = pmset.lines().find_map(|l| {
+            if l.contains("remaining") || l.contains(" (") {
+                let s = l.split('(').nth(1)?;
+                let hours_str = s.split(':').next()?;
+                let mins_str = s.split(':').nth(1)?;
+                let h: u64 = hours_str.trim().parse().ok()?;
+                let m: u64 = mins_str.split(')').next()?.trim().parse().ok()?;
+                Some(h * 60 + m)
+            } else {
+                None
+            }
+        });
 
         // Get cycle count from system_profiler (slower, but accurate)
         let cycle_count = {
@@ -479,7 +484,9 @@ impl BatteryDimension {
 
 #[cfg(not(target_os = "macos"))]
 fn read_int_file(path: &std::path::Path) -> Option<u64> {
-    std::fs::read_to_string(path).ok().and_then(|s| s.trim().parse().ok())
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -737,8 +744,14 @@ mod tests {
 
     #[test]
     fn test_thermal_pressure_takes_max() {
-        assert_eq!(determine_thermal_pressure(Some(50.0), Some(96.0)), "Critical");
-        assert_eq!(determine_thermal_pressure(Some(96.0), Some(50.0)), "Critical");
+        assert_eq!(
+            determine_thermal_pressure(Some(50.0), Some(96.0)),
+            "Critical"
+        );
+        assert_eq!(
+            determine_thermal_pressure(Some(96.0), Some(50.0)),
+            "Critical"
+        );
     }
 
     #[test]

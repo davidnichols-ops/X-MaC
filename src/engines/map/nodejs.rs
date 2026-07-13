@@ -1,10 +1,10 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
 use crate::core::context::ScanContext;
 use crate::core::types::{Category, EngineId, Finding, Severity, Target};
-use crate::util::macos::MacosUtils;
 use crate::util::disk;
+use crate::util::macos::MacosUtils;
 
 pub struct NodejsScanner {
     include_disk_usage: bool,
@@ -13,7 +13,10 @@ pub struct NodejsScanner {
 
 impl NodejsScanner {
     pub fn new(include_disk_usage: bool, user_paths: Vec<PathBuf>) -> Self {
-        Self { include_disk_usage, user_paths }
+        Self {
+            include_disk_usage,
+            user_paths,
+        }
     }
 
     pub async fn scan(&self, _ctx: &ScanContext) -> anyhow::Result<Vec<Finding>> {
@@ -37,14 +40,16 @@ impl NodejsScanner {
 
                 if dir_path.join("package.json").exists() {
                     let package_manager = Self::detect_package_manager(&dir_path);
-                    let node_version = Self::get_node_version(&dir_path).unwrap_or_else(|| "unknown".to_string());
+                    let node_version =
+                        Self::get_node_version(&dir_path).unwrap_or_else(|| "unknown".to_string());
                     let size = if self.include_disk_usage {
                         disk::dir_size(&dir_path.join("node_modules"))
                     } else {
                         0
                     };
 
-                    let package_name = Self::get_package_name(&dir_path).unwrap_or_else(|| "unknown".to_string());
+                    let package_name =
+                        Self::get_package_name(&dir_path).unwrap_or_else(|| "unknown".to_string());
 
                     findings.push(
                         Finding::new(
@@ -52,11 +57,21 @@ impl NodejsScanner {
                             Severity::Info,
                             Category::NodeEnv,
                             Target::Path(dir_path.clone()),
-                            format!("Node.js project: {} ({})", package_name, package_manager.unwrap_or("npm")),
-                            format!("Found Node.js project using {}", package_manager.unwrap_or("npm")),
+                            format!(
+                                "Node.js project: {} ({})",
+                                package_name,
+                                package_manager.unwrap_or("npm")
+                            ),
+                            format!(
+                                "Found Node.js project using {}",
+                                package_manager.unwrap_or("npm")
+                            ),
                         )
                         .with_size(size)
-                        .with_metadata("package_manager".to_string(), serde_json::json!(package_manager))
+                        .with_metadata(
+                            "package_manager".to_string(),
+                            serde_json::json!(package_manager),
+                        )
                         .with_metadata("node_version".to_string(), serde_json::json!(node_version))
                         .with_metadata("package_name".to_string(), serde_json::json!(package_name)),
                     );
@@ -109,7 +124,7 @@ impl NodejsScanner {
         paths
     }
 
-    pub fn detect_package_manager(path: &PathBuf) -> Option<&'static str> {
+    pub fn detect_package_manager(path: &Path) -> Option<&'static str> {
         if path.join("pnpm-lock.yaml").exists() {
             Some("pnpm")
         } else if path.join("yarn.lock").exists() {
@@ -121,7 +136,7 @@ impl NodejsScanner {
         }
     }
 
-    fn get_node_version(path: &PathBuf) -> Option<String> {
+    fn get_node_version(path: &Path) -> Option<String> {
         let nvmrc = path.join(".nvmrc");
         if nvmrc.exists() {
             if let Ok(version) = std::fs::read_to_string(&nvmrc) {
@@ -139,7 +154,7 @@ impl NodejsScanner {
         None
     }
 
-    fn get_package_name(path: &PathBuf) -> Option<String> {
+    fn get_package_name(path: &Path) -> Option<String> {
         let package_json = path.join("package.json");
         if package_json.exists() {
             if let Ok(content) = std::fs::read_to_string(&package_json) {
@@ -190,13 +205,7 @@ impl NodejsScanner {
             PathBuf::from("/opt/homebrew/bin/node"),
         ];
 
-        for candidate in candidates {
-            if candidate.exists() {
-                return Some(candidate);
-            }
-        }
-
-        None
+        candidates.into_iter().find(|candidate| candidate.exists())
     }
 }
 

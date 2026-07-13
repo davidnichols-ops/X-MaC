@@ -3,8 +3,8 @@ use tokio::sync::mpsc;
 
 use crate::cli::args::Cli;
 use crate::core::types::{Finding, ScanConfig};
-use crate::util::progress::ProgressReporter;
 use crate::util::macos::MacosUtils;
+use crate::util::progress::ProgressReporter;
 
 pub struct ScanContext {
     pub config: ScanConfig,

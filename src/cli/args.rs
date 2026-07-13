@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand, Args, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
@@ -359,7 +359,11 @@ pub struct ConflictArgs {
     #[arg(long, default_value = "true")]
     pub ports: bool,
 
-    #[arg(long, value_delimiter = ',', default_value = "3000,5000,8000,8080,9000")]
+    #[arg(
+        long,
+        value_delimiter = ',',
+        default_value = "3000,5000,8000,8080,9000"
+    )]
     pub port_list: Vec<u16>,
 }
 
@@ -811,4 +815,3 @@ pub struct HistoryArgs {
     #[arg(long)]
     pub clear: bool,
 }
-

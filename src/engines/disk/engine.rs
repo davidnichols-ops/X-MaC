@@ -67,7 +67,7 @@ fn apfs_stats() -> Option<ApfsStats> {
 
     // "CapacityInUse" is the actual bytes used by this APFS volume.
     let system_used = parse_bytes(&root_str, "CapacityInUse").unwrap_or(0);
-    let data_used   = parse_bytes(&data_str, "CapacityInUse").unwrap_or(0);
+    let data_used = parse_bytes(&data_str, "CapacityInUse").unwrap_or(0);
 
     // Best-effort: sum physical sizes of /Applications and /System/Applications.
     let applications_used = dir_size_fast(std::path::Path::new("/Applications"))
@@ -96,7 +96,7 @@ fn linux_stats() -> Option<ApfsStats> {
         }
         let buf = buf.assume_init();
 
-        let block_size = buf.f_frsize as u64;
+        let block_size = buf.f_frsize;
         let total = buf.f_blocks as u64 * block_size;
         let free = buf.f_bavail as u64 * block_size;
         let used = (buf.f_blocks as u64 - buf.f_bfree as u64) * block_size;
@@ -215,22 +215,30 @@ impl Engine for DiskEngine {
         // without needing a separate API call.
         if let Some(stats) = volume_stats() {
             let total_known_used = stats.system_used + stats.data_used;
-            let vol_label = if cfg!(target_os = "macos") { "Macintosh HD" } else { "Root filesystem (/)" };
+            let vol_label = if cfg!(target_os = "macos") {
+                "Macintosh HD"
+            } else {
+                "Root filesystem (/)"
+            };
             let vol_finding = Finding::new(
                 EngineId::All,
                 Severity::Info,
                 Category::SystemInfo,
                 Target::Path(std::path::PathBuf::from("/")),
-                format!("Volume: {} total, {} used, {} free",
+                format!(
+                    "Volume: {} total, {} used, {} free",
                     crate::util::disk::format_bytes(stats.total),
                     crate::util::disk::format_bytes(total_known_used),
-                    crate::util::disk::format_bytes(stats.free)),
-                format!("{} — {} total capacity, {} data + {} system used, {} available",
+                    crate::util::disk::format_bytes(stats.free)
+                ),
+                format!(
+                    "{} — {} total capacity, {} data + {} system used, {} available",
                     vol_label,
                     crate::util::disk::format_bytes(stats.total),
                     crate::util::disk::format_bytes(stats.data_used),
                     crate::util::disk::format_bytes(stats.system_used),
-                    crate::util::disk::format_bytes(stats.free)),
+                    crate::util::disk::format_bytes(stats.free)
+                ),
             )
             .with_size(total_known_used)
             // Rich JSON so Swift can build accurate donut segments:
@@ -290,14 +298,23 @@ impl Engine for DiskEngine {
             entries.truncate(self.args.top);
 
             for (path, size, is_dir) in entries {
-                let name = path.file_name()
+                let name = path
+                    .file_name()
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_else(|| path.to_string_lossy().to_string());
 
                 let title = if is_dir {
-                    format!("Disk usage: {} ({} dir)", name, crate::util::disk::format_bytes(size))
+                    format!(
+                        "Disk usage: {} ({} dir)",
+                        name,
+                        crate::util::disk::format_bytes(size)
+                    )
                 } else {
-                    format!("Disk usage: {} ({} file)", name, crate::util::disk::format_bytes(size))
+                    format!(
+                        "Disk usage: {} ({} file)",
+                        name,
+                        crate::util::disk::format_bytes(size)
+                    )
                 };
 
                 // SystemInfo category → not counted in reclaimable totals.
@@ -307,7 +324,13 @@ impl Engine for DiskEngine {
                     Category::SystemInfo,
                     Target::Path(path.clone()),
                     title,
-                    format!("{} '{}' in {} — {} (physical disk usage)", if is_dir { "Directory" } else { "File" }, name, search_path.display(), crate::util::disk::format_bytes(size)),
+                    format!(
+                        "{} '{}' in {} — {} (physical disk usage)",
+                        if is_dir { "Directory" } else { "File" },
+                        name,
+                        search_path.display(),
+                        crate::util::disk::format_bytes(size)
+                    ),
                 )
                 .with_size(size)
                 .with_hint(if is_dir {
@@ -343,7 +366,8 @@ impl Engine for DiskEngine {
             large_files.truncate(self.args.top);
 
             for (path, size) in large_files {
-                let name = path.file_name()
+                let name = path
+                    .file_name()
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_else(|| path.to_string_lossy().to_string());
 
@@ -352,8 +376,16 @@ impl Engine for DiskEngine {
                     Severity::Info,
                     Category::LargeFile,
                     Target::Path(path.clone()),
-                    format!("Large file: {} ({})", name, crate::util::disk::format_bytes(size)),
-                    format!("File '{}' — {} (physical disk usage)", path.display(), crate::util::disk::format_bytes(size)),
+                    format!(
+                        "Large file: {} ({})",
+                        name,
+                        crate::util::disk::format_bytes(size)
+                    ),
+                    format!(
+                        "File '{}' — {} (physical disk usage)",
+                        path.display(),
+                        crate::util::disk::format_bytes(size)
+                    ),
                 )
                 .with_size(size)
                 .with_hint("Review and delete if no longer needed".to_string());

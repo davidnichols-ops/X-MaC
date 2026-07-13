@@ -1,5 +1,5 @@
 pub mod engine;
-pub mod scanner;
 pub mod rules;
+pub mod scanner;
 
 pub use engine::CleanEngine;

@@ -4,8 +4,10 @@ use serde::{Deserialize, Serialize};
 /// behavior for different usage scenarios.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum OptimizationProfile {
     /// Balanced everyday use — safe defaults.
+    #[default]
     Balanced,
     /// Maximize free RAM and CPU for games.
     Gaming,
@@ -21,12 +23,7 @@ pub enum OptimizationProfile {
     Custom,
 }
 
-impl Default for OptimizationProfile {
-    fn default() -> Self {
-        Self::Balanced
-    }
-}
-
+#[allow(dead_code)]
 impl OptimizationProfile {
     pub fn label(&self) -> &'static str {
         match self {

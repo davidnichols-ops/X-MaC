@@ -1,0 +1,55 @@
+# X-MaC default configuration
+# Copy to ~/.config/xmac/config.toml (or ~/Library/Application Support/xmac/config.toml on macOS)
+# Generate with: xmac config init
+
+# Active optimization profile — tunes all engine thresholds
+# Options: balanced, gaming, development, video_editing, conservative, aggressive, custom
+profile = "balanced"
+
+[clean]
+min_age_days = 30        # only flag files older than this
+min_size_mb = 1          # minimum file size to flag
+dedup = false            # find duplicate files via BLAKE3 hashing (slower)
+xcode = true             # detect Xcode artifacts (DerivedData, Archives)
+pkg_caches = true        # detect package-manager caches (npm, pip, cargo, brew)
+temp = true              # detect temp files (.DS_Store, swap, /tmp)
+build_artifacts = true   # detect build artifacts (node_modules, target, __pycache__)
+browser = true           # detect browser caches (Safari, Chrome, Firefox, etc.)
+mail = true              # detect mail attachments and downloads
+ios_backups = true       # detect old iOS device backups
+languages = true         # detect removable language files (.lproj)
+trash = true             # detect trash bins on all volumes
+large_files = true       # detect large files (>= min_large_size_mb)
+min_large_size_mb = 100  # minimum size for large file detection
+
+[maintain]
+dns = true               # flush DNS cache
+spotlight = true         # reindex Spotlight search
+launchservices = true    # rebuild LaunchServices database
+periodic = true          # run periodic maintenance scripts
+repair_permissions = false  # repair disk permissions (requires sudo)
+purge_ram = true         # purge inactive RAM
+dyld = false             # rebuild dyld shared cache
+quicklook = true         # clear Quick Look thumbnail cache
+
+[optimize]
+pressure_threshold = 0.8  # memory utilization threshold for proactive action
+
+[daemon]
+auto_purge_memory = true       # auto-purge when memory pressure exceeds threshold
+auto_clean_threshold_mb = 500  # auto-clean when reclaimable space exceeds this (0 = disabled)
+check_interval_secs = 300      # how often the daemon checks the system
+
+[notifications]
+enabled = true
+scan_complete = true
+cleanup_recommended = true
+low_disk_space_gb = 10
+
+[history]
+max_entries = 100
+auto_export = false
+
+[logging]
+level = "info"            # trace, debug, info, warn, error
+file_rotation = "daily"   # daily, hourly, never

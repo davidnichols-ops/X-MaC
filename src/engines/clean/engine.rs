@@ -6,14 +6,17 @@ use std::time::Instant;
 use walkdir::WalkDir;
 
 use crate::cli::args::CleanArgs;
-use crate::util::disk::physical_size;
 use crate::core::context::ScanContext;
 use crate::core::engine::Engine;
 use crate::core::error::EngineError;
 use crate::core::types::{Category, EngineId, EngineStats, Finding, Severity, Target};
+use crate::util::disk::physical_size;
 
+use super::rules::{
+    CleanRules, BUILD_ARTIFACT_DIRS, BUILD_ARTIFACT_FILE_PATTERNS, ROTATED_LOG_EXTENSIONS,
+    SWAP_FILE_PATTERNS, TEMP_FILE_NAMES,
+};
 use super::scanner::CleanScanner;
-use super::rules::{CleanRules, BUILD_ARTIFACT_DIRS, BUILD_ARTIFACT_FILE_PATTERNS, ROTATED_LOG_EXTENSIONS, TEMP_FILE_NAMES, SWAP_FILE_PATTERNS};
 
 pub struct CleanEngine {
     args: CleanArgs,
@@ -55,20 +58,47 @@ impl CleanEngine {
         }
 
         // Category toggles from config
-        if self.args.xcode && !cc.xcode { self.args.xcode = false; }
-        if self.args.pkg_caches && !cc.pkg_caches { self.args.pkg_caches = false; }
-        if self.args.temp && !cc.temp { self.args.temp = false; }
-        if self.args.build_artifacts && !cc.build_artifacts { self.args.build_artifacts = false; }
-        if self.args.browser && !cc.browser { self.args.browser = false; }
-        if self.args.mail && !cc.mail { self.args.mail = false; }
-        if self.args.ios_backups && !cc.ios_backups { self.args.ios_backups = false; }
-        if self.args.languages && !cc.languages { self.args.languages = false; }
-        if self.args.trash && !cc.trash { self.args.trash = false; }
-        if self.args.large_files && !cc.large_files { self.args.large_files = false; }
-        if !cc.dedup { self.args.dedup = false; } else { self.args.dedup = self.args.dedup || cc.dedup; }
+        if self.args.xcode && !cc.xcode {
+            self.args.xcode = false;
+        }
+        if self.args.pkg_caches && !cc.pkg_caches {
+            self.args.pkg_caches = false;
+        }
+        if self.args.temp && !cc.temp {
+            self.args.temp = false;
+        }
+        if self.args.build_artifacts && !cc.build_artifacts {
+            self.args.build_artifacts = false;
+        }
+        if self.args.browser && !cc.browser {
+            self.args.browser = false;
+        }
+        if self.args.mail && !cc.mail {
+            self.args.mail = false;
+        }
+        if self.args.ios_backups && !cc.ios_backups {
+            self.args.ios_backups = false;
+        }
+        if self.args.languages && !cc.languages {
+            self.args.languages = false;
+        }
+        if self.args.trash && !cc.trash {
+            self.args.trash = false;
+        }
+        if self.args.large_files && !cc.large_files {
+            self.args.large_files = false;
+        }
+        if !cc.dedup {
+            self.args.dedup = false;
+        } else {
+            self.args.dedup = self.args.dedup || cc.dedup;
+        }
 
         // Conservative profile: disable aggressive categories
-        if matches!(profile, crate::config::profiles::OptimizationProfile::Conservative) {
+        if matches!(
+            profile,
+            crate::config::profiles::OptimizationProfile::Conservative
+        ) {
             self.args.dedup = false;
             self.args.large_files = false;
             self.args.languages = false;
@@ -80,8 +110,11 @@ impl CleanEngine {
     async fn scan_caches(&self, ctx: &ScanContext) -> (Vec<Finding>, u64) {
         let mut findings = Vec::new();
         let mut items = 0u64;
-        let min_age = humantime::parse_duration(&self.args.min_age).unwrap_or_else(|_| std::time::Duration::from_secs(30 * 24 * 60 * 60));
-        let min_size = byte_unit::Byte::from_str(&self.args.min_size).map(|b| b.get_bytes() as u64).unwrap_or(1024 * 1024);
+        let min_age = humantime::parse_duration(&self.args.min_age)
+            .unwrap_or_else(|_| std::time::Duration::from_secs(30 * 24 * 60 * 60));
+        let min_size = byte_unit::Byte::from_str(&self.args.min_size)
+            .map(|b| b.get_bytes() as u64)
+            .unwrap_or(1024 * 1024);
 
         let mut all_paths = self.rules.cache_paths();
         for user_path in &self.args.paths {
@@ -119,7 +152,11 @@ impl CleanEngine {
                         Category::Cache,
                         Target::Path(entry_path.to_path_buf()),
                         "Cache file detected",
-                        format!("Found cache file older than {} with size {}", self.args.min_age, crate::util::disk::format_bytes(size)),
+                        format!(
+                            "Found cache file older than {} with size {}",
+                            self.args.min_age,
+                            crate::util::disk::format_bytes(size)
+                        ),
                     )
                     .with_size(size)
                     .with_hint("Consider clearing this cache to free disk space".to_string()),
@@ -143,7 +180,9 @@ impl CleanEngine {
             if let Ok(dir_size) = tokio::task::spawn_blocking({
                 let path = path.clone();
                 move || CleanScanner::dir_size(&path)
-            }).await {
+            })
+            .await
+            {
                 if dir_size > 0 {
                     findings.push(
                         Finding::new(
@@ -152,10 +191,19 @@ impl CleanEngine {
                             Category::XcodeArtifact,
                             Target::Path(path.clone()),
                             "Xcode artifact directory",
-                            format!("Found Xcode {} with size {}", path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(), crate::util::disk::format_bytes(dir_size)),
+                            format!(
+                                "Found Xcode {} with size {}",
+                                path.file_name()
+                                    .map(|n| n.to_string_lossy().to_string())
+                                    .unwrap_or_default(),
+                                crate::util::disk::format_bytes(dir_size)
+                            ),
                         )
                         .with_size(dir_size)
-                        .with_hint("Run 'xcodebuild clean' or delete DerivedData to free space".to_string()),
+                        .with_hint(
+                            "Run 'xcodebuild clean' or delete DerivedData to free space"
+                                .to_string(),
+                        ),
                     );
                 }
             }
@@ -184,7 +232,8 @@ impl CleanEngine {
                 }
                 items += 1;
 
-                let dir_name = dir_path.file_name()
+                let dir_name = dir_path
+                    .file_name()
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_default();
 
@@ -248,7 +297,9 @@ impl CleanEngine {
                             .output()
                         {
                             if output.status.success() {
-                                let bundle_id = String::from_utf8_lossy(&output.stdout).trim().to_lowercase();
+                                let bundle_id = String::from_utf8_lossy(&output.stdout)
+                                    .trim()
+                                    .to_lowercase();
                                 if !bundle_id.is_empty() {
                                     set.insert(bundle_id);
                                 }
@@ -311,7 +362,8 @@ impl CleanEngine {
 
         for (hash, paths) in hash_map {
             if paths.len() > 1 {
-                let total_size: u64 = paths.iter()
+                let total_size: u64 = paths
+                    .iter()
                     .filter_map(|p| std::fs::metadata(p).ok())
                     .map(physical_size)
                     .sum();
@@ -323,10 +375,21 @@ impl CleanEngine {
                         Category::DuplicateFile,
                         Target::Path(paths[0].clone()),
                         "Duplicate files detected",
-                        format!("Found {} duplicate files with hash {}. Total size: {}", paths.len(), hash.chars().take(8).collect::<String>(), crate::util::disk::format_bytes(total_size)),
+                        format!(
+                            "Found {} duplicate files with hash {}. Total size: {}",
+                            paths.len(),
+                            hash.chars().take(8).collect::<String>(),
+                            crate::util::disk::format_bytes(total_size)
+                        ),
                     )
                     .with_size(total_size)
-                    .with_metadata("duplicate_paths".to_string(), serde_json::json!(paths.iter().map(|p| p.to_string_lossy().to_string()).collect::<Vec<_>>()))
+                    .with_metadata(
+                        "duplicate_paths".to_string(),
+                        serde_json::json!(paths
+                            .iter()
+                            .map(|p| p.to_string_lossy().to_string())
+                            .collect::<Vec<_>>()),
+                    )
                     .with_hint("Review and remove duplicate files to save space".to_string()),
                 );
             }
@@ -377,7 +440,8 @@ impl CleanEngine {
                 continue;
             }
 
-            let name = path.file_name()
+            let name = path
+                .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_else(|| path.to_string_lossy().to_string());
 
@@ -388,7 +452,11 @@ impl CleanEngine {
                     Category::PackageManagerCache,
                     Target::Path(path.clone()),
                     "Package-manager cache detected",
-                    format!("Found package-manager cache '{}' with size {}", name, crate::util::disk::format_bytes(size)),
+                    format!(
+                        "Found package-manager cache '{}' with size {}",
+                        name,
+                        crate::util::disk::format_bytes(size)
+                    ),
                 )
                 .with_size(size)
                 .with_hint("Safe to clear — regenerated on next install/build".to_string()),
@@ -421,10 +489,17 @@ impl CleanEngine {
                         Category::TempFile,
                         Target::Path(temp_path.clone()),
                         "System temp directory",
-                        format!("Temp directory '{}' contains {} of data", temp_path.to_string_lossy(), crate::util::disk::format_bytes(size)),
+                        format!(
+                            "Temp directory '{}' contains {} of data",
+                            temp_path.to_string_lossy(),
+                            crate::util::disk::format_bytes(size)
+                        ),
                     )
                     .with_size(size)
-                    .with_hint("Clear with: rm -rf /tmp/* /var/tmp/* (macOS recreates these on reboot)".to_string()),
+                    .with_hint(
+                        "Clear with: rm -rf /tmp/* /var/tmp/* (macOS recreates these on reboot)"
+                            .to_string(),
+                    ),
                 );
             }
         }
@@ -452,7 +527,11 @@ impl CleanEngine {
                     Category::TempFile,
                     Target::Path(home.join(".DS_Store")),
                     "DS_Store files detected",
-                    format!("Found {} .DS_Store files under home (total {})", ds_store_findings.len(), crate::util::disk::format_bytes(ds_size)),
+                    format!(
+                        "Found {} .DS_Store files under home (total {})",
+                        ds_store_findings.len(),
+                        crate::util::disk::format_bytes(ds_size)
+                    ),
                 )
                 .with_size(ds_size)
                 .with_metadata("file_count", serde_json::json!(ds_store_findings.len()))
@@ -479,7 +558,11 @@ impl CleanEngine {
                     Category::TempFile,
                     Target::Path(home.join("*.swp")),
                     "Editor swap files detected",
-                    format!("Found {} swap files (.swp/.swo) under home (total {})", swap_findings.len(), crate::util::disk::format_bytes(swap_size)),
+                    format!(
+                        "Found {} swap files (.swp/.swo) under home (total {})",
+                        swap_findings.len(),
+                        crate::util::disk::format_bytes(swap_size)
+                    ),
                 )
                 .with_size(swap_size)
                 .with_metadata("file_count", serde_json::json!(swap_findings.len()))
@@ -556,7 +639,8 @@ impl CleanEngine {
             for entry in entries {
                 items += 1;
                 let path = entry.path();
-                let name = path.file_name()
+                let name = path
+                    .file_name()
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_default();
 
@@ -588,7 +672,11 @@ impl CleanEngine {
                         Category::Log,
                         Target::Path(path.to_path_buf()),
                         "Rotated log file detected",
-                        format!("Found rotated log '{}' with size {}", name, crate::util::disk::format_bytes(size)),
+                        format!(
+                            "Found rotated log '{}' with size {}",
+                            name,
+                            crate::util::disk::format_bytes(size)
+                        ),
                     )
                     .with_size(size)
                     .with_hint("Safe to delete — these are archived logs, not active".to_string()),
@@ -643,7 +731,10 @@ impl CleanEngine {
     /// (node_modules, target, __pycache__, etc.). When a match is found the
     /// directory is pruned (we don't descend into it) to avoid wasted work.
     /// Returns (items_scanned, findings).
-    fn sweep_build_artifact_dirs(root: &std::path::Path, skip_dirs: &[PathBuf]) -> (u64, Vec<Finding>) {
+    fn sweep_build_artifact_dirs(
+        root: &std::path::Path,
+        skip_dirs: &[PathBuf],
+    ) -> (u64, Vec<Finding>) {
         let mut items = 0u64;
         let mut findings = Vec::new();
 
@@ -681,10 +772,17 @@ impl CleanEngine {
                             Category::BuildArtifact,
                             Target::Path(path.to_path_buf()),
                             format!("Build artifact directory: {}", name),
-                            format!("Found '{}' directory with size {} — regenerated on next build", name, crate::util::disk::format_bytes(size)),
+                            format!(
+                                "Found '{}' directory with size {} — regenerated on next build",
+                                name,
+                                crate::util::disk::format_bytes(size)
+                            ),
                         )
                         .with_size(size)
-                        .with_hint(format!("Safe to delete: rm -rf '{}'", path.to_string_lossy())),
+                        .with_hint(format!(
+                            "Safe to delete: rm -rf '{}'",
+                            path.to_string_lossy()
+                        )),
                     );
                 }
             }
@@ -696,7 +794,10 @@ impl CleanEngine {
     /// Walk `root` (pruning `skip_dirs` and build-artifact dirs) and find
     /// compiled artifact files (.pyc, .o, .so, .class, etc.). Returns
     /// (items_scanned, findings).
-    fn sweep_build_artifact_files(root: &std::path::Path, skip_dirs: &[PathBuf]) -> (u64, Vec<Finding>) {
+    fn sweep_build_artifact_files(
+        root: &std::path::Path,
+        skip_dirs: &[PathBuf],
+    ) -> (u64, Vec<Finding>) {
         let mut items = 0u64;
         let mut findings = Vec::new();
 
@@ -719,7 +820,10 @@ impl CleanEngine {
             .filter(|e| e.file_type().is_file())
         {
             let name = entry.file_name().to_string_lossy();
-            if BUILD_ARTIFACT_FILE_PATTERNS.iter().any(|p| name.ends_with(p)) {
+            if BUILD_ARTIFACT_FILE_PATTERNS
+                .iter()
+                .any(|p| name.ends_with(p))
+            {
                 items += 1;
                 let size = entry.metadata().map(physical_size).unwrap_or(0);
                 findings.push(
@@ -729,10 +833,16 @@ impl CleanEngine {
                         Category::BuildArtifact,
                         Target::Path(entry.path().to_path_buf()),
                         format!("Build artifact file: {}", name),
-                        format!("Found compiled artifact '{}' ({}). Regenerated on next build.", entry.path().to_string_lossy(), crate::util::disk::format_bytes(size)),
+                        format!(
+                            "Found compiled artifact '{}' ({}). Regenerated on next build.",
+                            entry.path().to_string_lossy(),
+                            crate::util::disk::format_bytes(size)
+                        ),
                     )
                     .with_size(size)
-                    .with_hint("Safe to delete — regenerated by the compiler/build tool".to_string()),
+                    .with_hint(
+                        "Safe to delete — regenerated by the compiler/build tool".to_string(),
+                    ),
                 );
             }
         }
@@ -772,10 +882,16 @@ impl CleanEngine {
                         Category::BrowserCache,
                         Target::Path(path.clone()),
                         format!("{} browser cache", name),
-                        format!("Browser cache for {} occupies {}", name, crate::util::disk::format_bytes(size)),
+                        format!(
+                            "Browser cache for {} occupies {}",
+                            name,
+                            crate::util::disk::format_bytes(size)
+                        ),
                     )
                     .with_size(size)
-                    .with_hint("Safe to clear — browser will rebuild cache on next use".to_string()),
+                    .with_hint(
+                        "Safe to clear — browser will rebuild cache on next use".to_string(),
+                    ),
                 );
             }
         }
@@ -796,7 +912,8 @@ impl CleanEngine {
             items += 1;
             let size = CleanScanner::dir_size(&path);
             if size > 0 {
-                let name = path.file_name()
+                let name = path
+                    .file_name()
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_else(|| path.to_string_lossy().to_string());
                 findings.push(
@@ -806,10 +923,17 @@ impl CleanEngine {
                         Category::MailAttachment,
                         Target::Path(path.clone()),
                         "Mail attachments/downloads detected",
-                        format!("Mail data directory '{}' occupies {}", name, crate::util::disk::format_bytes(size)),
+                        format!(
+                            "Mail data directory '{}' occupies {}",
+                            name,
+                            crate::util::disk::format_bytes(size)
+                        ),
                     )
                     .with_size(size)
-                    .with_hint("Attachments may be re-downloaded from server. Review before deleting.".to_string()),
+                    .with_hint(
+                        "Attachments may be re-downloaded from server. Review before deleting."
+                            .to_string(),
+                    ),
                 );
             }
         }
@@ -841,7 +965,8 @@ impl CleanEngine {
                     let size = CleanScanner::dir_size(&dir);
                     if size > 0 {
                         // Try to read the backup status from Status.plist
-                        let backup_name = dir.file_name()
+                        let backup_name = dir
+                            .file_name()
                             .map(|n| n.to_string_lossy().to_string())
                             .unwrap_or_default();
                         findings.push(
@@ -898,7 +1023,8 @@ impl CleanEngine {
                             if !lproj_path.is_dir() {
                                 continue;
                             }
-                            let name = lproj_path.file_name()
+                            let name = lproj_path
+                                .file_name()
                                 .map(|n| n.to_string_lossy().to_string())
                                 .unwrap_or_default();
                             if !name.ends_with(".lproj") {
@@ -915,7 +1041,8 @@ impl CleanEngine {
                     }
 
                     if app_lproj_count > 0 && app_lproj_size > 0 {
-                        let app_name = app_path.file_stem()
+                        let app_name = app_path
+                            .file_stem()
                             .map(|n| n.to_string_lossy().to_string())
                             .unwrap_or_default();
                         findings.push(
@@ -963,10 +1090,16 @@ impl CleanEngine {
                         Category::TrashBin,
                         Target::Path(trash_path.clone()),
                         "Trash bin with content",
-                        format!("Trash at '{}' contains {} of data", trash_path.to_string_lossy(), crate::util::disk::format_bytes(size)),
+                        format!(
+                            "Trash at '{}' contains {} of data",
+                            trash_path.to_string_lossy(),
+                            crate::util::disk::format_bytes(size)
+                        ),
                     )
                     .with_size(size)
-                    .with_hint("Empty trash to reclaim space. Use 'rm -rf' for locked files.".to_string()),
+                    .with_hint(
+                        "Empty trash to reclaim space. Use 'rm -rf' for locked files.".to_string(),
+                    ),
                 );
             }
         }
@@ -1016,8 +1149,17 @@ impl CleanEngine {
                             Severity::Low,
                             Category::LargeFile,
                             Target::Path(path.to_path_buf()),
-                            format!("Large file: {} ({})", name, crate::util::disk::format_bytes(size)),
-                            format!("File '{}' is {} — exceeds threshold of {}", path.to_string_lossy(), crate::util::disk::format_bytes(size), crate::util::disk::format_bytes(min_large)),
+                            format!(
+                                "Large file: {} ({})",
+                                name,
+                                crate::util::disk::format_bytes(size)
+                            ),
+                            format!(
+                                "File '{}' is {} — exceeds threshold of {}",
+                                path.to_string_lossy(),
+                                crate::util::disk::format_bytes(size),
+                                crate::util::disk::format_bytes(min_large)
+                            ),
                         )
                         .with_size(size)
                         .with_hint("Review and delete if no longer needed".to_string()),
@@ -1158,49 +1300,63 @@ impl Engine for CleanEngine {
             let (f, i) = self.scan_browser_caches(&ctx).await;
             items_scanned += i;
             findings_count += f.len() as u64;
-            for finding in f { ctx.emit(finding).await; }
+            for finding in f {
+                ctx.emit(finding).await;
+            }
         }
 
         if self.args.mail {
             let (f, i) = self.scan_mail(&ctx).await;
             items_scanned += i;
             findings_count += f.len() as u64;
-            for finding in f { ctx.emit(finding).await; }
+            for finding in f {
+                ctx.emit(finding).await;
+            }
         }
 
         if self.args.ios_backups {
             let (f, i) = self.scan_ios_backups(&ctx).await;
             items_scanned += i;
             findings_count += f.len() as u64;
-            for finding in f { ctx.emit(finding).await; }
+            for finding in f {
+                ctx.emit(finding).await;
+            }
         }
 
         if self.args.languages {
             let (f, i) = self.scan_language_files(&ctx).await;
             items_scanned += i;
             findings_count += f.len() as u64;
-            for finding in f { ctx.emit(finding).await; }
+            for finding in f {
+                ctx.emit(finding).await;
+            }
         }
 
         if self.args.trash {
             let (f, i) = self.scan_trash(&ctx).await;
             items_scanned += i;
             findings_count += f.len() as u64;
-            for finding in f { ctx.emit(finding).await; }
+            for finding in f {
+                ctx.emit(finding).await;
+            }
         }
 
         if self.args.large_files {
             let (f, i) = self.scan_large_files(&ctx).await;
             items_scanned += i;
             findings_count += f.len() as u64;
-            for finding in f { ctx.emit(finding).await; }
+            for finding in f {
+                ctx.emit(finding).await;
+            }
         }
 
         // Document versions — always scanned (low cost, few paths)
         let (dv_findings, dv_items) = self.scan_document_versions(&ctx).await;
         items_scanned += dv_items;
         findings_count += dv_findings.len() as u64;
-        for finding in dv_findings { ctx.emit(finding).await; }
+        for finding in dv_findings {
+            ctx.emit(finding).await;
+        }
 
         Ok(EngineStats {
             engine: self.id(),

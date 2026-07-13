@@ -39,7 +39,7 @@ impl Daemon {
         let shutdown = async {
             #[cfg(unix)]
             {
-                use signal::unix::{SignalKind, signal};
+                use signal::unix::{signal, SignalKind};
                 let mut term = signal(SignalKind::terminate()).expect("install TERM handler");
                 let mut int = signal(SignalKind::interrupt()).expect("install INT handler");
                 tokio::select! {
@@ -79,7 +79,10 @@ impl Daemon {
     /// and proactive actions.
     async fn run_cycle(&self) {
         if self.verbose {
-            eprintln!("xmac daemon: cycle at {}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"));
+            eprintln!(
+                "xmac daemon: cycle at {}",
+                chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
+            );
         }
 
         // 1. Collect system snapshot
@@ -116,8 +119,11 @@ impl Daemon {
             let threshold = self.config.config().optimize.pressure_threshold;
             if snapshot.memory.utilization > threshold {
                 if self.verbose {
-                    eprintln!("  auto-purging memory (utilization {:.0}% > threshold {:.0}%)",
-                        snapshot.memory.utilization * 100.0, threshold * 100.0);
+                    eprintln!(
+                        "  auto-purging memory (utilization {:.0}% > threshold {:.0}%)",
+                        snapshot.memory.utilization * 100.0,
+                        threshold * 100.0
+                    );
                 }
                 self.purge_memory().await;
             }
@@ -127,7 +133,10 @@ impl Daemon {
         let auto_clean_mb = self.config.config().daemon.auto_clean_threshold_mb;
         if auto_clean_mb > 0 && snapshot.disk.overall_utilization > 0.85 {
             if self.verbose {
-                eprintln!("  auto-clean: disk utilization {:.0}% — running clean scan", snapshot.disk.overall_utilization * 100.0);
+                eprintln!(
+                    "  auto-clean: disk utilization {:.0}% — running clean scan",
+                    snapshot.disk.overall_utilization * 100.0
+                );
             }
             use std::process::Command;
             let _ = Command::new("xmac")
@@ -163,11 +172,16 @@ impl Daemon {
                 // Would need a scan to determine — skip for now
                 false
             }
-            AutomationCondition::ProcessMemory { process_name, threshold_mb } => {
+            AutomationCondition::ProcessMemory {
+                process_name,
+                threshold_mb,
+            } => {
                 // Check if any process exceeds the threshold
-                let threshold_bytes = *threshold_mb as u64 * 1024 * 1024;
+                let threshold_bytes = *threshold_mb * 1024 * 1024;
                 let procs = crate::engines::optimize::telemetry::ProcessTelemetry::collect_all();
-                procs.iter().any(|p| p.name.contains(process_name) && p.resident_size > threshold_bytes)
+                procs
+                    .iter()
+                    .any(|p| p.name.contains(process_name) && p.resident_size > threshold_bytes)
             }
             AutomationCondition::Scheduled { interval_hours: _ } => {
                 // Time-based — would need last_fired tracking
@@ -208,9 +222,7 @@ impl Daemon {
                     eprintln!("  action: running maintenance...");
                 }
                 use std::process::Command;
-                let _ = Command::new("xmac")
-                    .args(["maintain"])
-                    .output();
+                let _ = Command::new("xmac").args(["maintain"]).output();
                 if self.verbose {
                     eprintln!("  action: maintenance complete");
                 }
@@ -253,9 +265,7 @@ impl Daemon {
                 message.replace('"', "\\\""),
                 title.replace('"', "\\\"")
             );
-            let _ = Command::new("osascript")
-                .args(["-e", &script])
-                .output();
+            let _ = Command::new("osascript").args(["-e", &script]).output();
         }
         let _ = (title, message);
     }
@@ -273,7 +283,7 @@ impl Daemon {
                     // Check if process exists
                     #[cfg(unix)]
                     {
-        use libc::kill;
+                        use libc::kill;
                         if unsafe { kill(pid, 0) } == 0 {
                             anyhow::bail!(
                                 "xmac daemon is already running (pid {}). Use --stop to stop it first.",
@@ -323,8 +333,9 @@ impl Daemon {
 
     /// Stop a running daemon by sending SIGTERM.
     pub fn stop(pid_file: &PathBuf) -> anyhow::Result<()> {
-        let pid = Self::is_running(pid_file)
-            .ok_or_else(|| anyhow::anyhow!("No running daemon found (PID file: {})", pid_file.display()))?;
+        let pid = Self::is_running(pid_file).ok_or_else(|| {
+            anyhow::anyhow!("No running daemon found (PID file: {})", pid_file.display())
+        })?;
 
         #[cfg(unix)]
         {

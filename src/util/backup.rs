@@ -49,8 +49,7 @@ fn extract_volume_root(path: &Path) -> Option<PathBuf> {
 
     if cfg!(target_os = "macos") {
         // /Volumes/<name>/... → /Volumes/<name>
-        if path_str.starts_with("/Volumes/") {
-            let rest = &path_str["/Volumes/".len()..];
+        if let Some(rest) = path_str.strip_prefix("/Volumes/") {
             let vol_name = rest.split('/').next()?;
             if !vol_name.is_empty() {
                 return Some(PathBuf::from(format!("/Volumes/{}", vol_name)));
@@ -65,7 +64,10 @@ fn extract_volume_root(path: &Path) -> Option<PathBuf> {
             if let Some(rest) = path_str.strip_prefix(prefix) {
                 let parts: Vec<&str> = rest.splitn(3, '/').collect();
                 if parts.len() >= 2 {
-                    return Some(PathBuf::from(format!("{}{}/{}", prefix, parts[0], parts[1])));
+                    return Some(PathBuf::from(format!(
+                        "{}{}/{}",
+                        prefix, parts[0], parts[1]
+                    )));
                 } else if !parts[0].is_empty() {
                     return Some(PathBuf::from(format!("{}{}", prefix, parts[0])));
                 }
@@ -117,7 +119,11 @@ fn is_backup_by_markers(path: &Path) -> bool {
         }
         // Check if any parent directory is Backups.backupdb
         for ancestor in path.ancestors() {
-            if ancestor.file_name().map(|n| n == "Backups.backupdb").unwrap_or(false) {
+            if ancestor
+                .file_name()
+                .map(|n| n == "Backups.backupdb")
+                .unwrap_or(false)
+            {
                 return true;
             }
         }
@@ -129,7 +135,10 @@ fn is_backup_by_markers(path: &Path) -> bool {
             return true;
         }
         // Borg: .borg.repo or config
-        if path.join("config").exists() && path.join("data").is_dir() && path.join("README").exists() {
+        if path.join("config").exists()
+            && path.join("data").is_dir()
+            && path.join("README").exists()
+        {
             // Borg repos have config, data/, README
             return true;
         }
@@ -161,9 +170,7 @@ fn get_tm_destinations() -> Vec<PathBuf> {
     //   Mount Point: /Volumes/Time Machine Backups
     //   ...
     // We extract the "Mount Point:" values.
-    let output = Command::new("tmutil")
-        .arg("destinationinfo")
-        .output();
+    let output = Command::new("tmutil").arg("destinationinfo").output();
 
     match output {
         Ok(out) => {
@@ -203,10 +210,8 @@ pub fn backup_volumes() -> Vec<PathBuf> {
         if let Ok(entries) = std::fs::read_dir("/Volumes") {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if is_backup_by_markers(&path) {
-                    if !volumes.iter().any(|v| same_path(v, &path)) {
-                        volumes.push(path);
-                    }
+                if is_backup_by_markers(&path) && !volumes.iter().any(|v| same_path(v, &path)) {
+                    volumes.push(path);
                 }
             }
         }

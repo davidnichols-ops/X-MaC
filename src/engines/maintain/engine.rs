@@ -32,15 +32,31 @@ impl MaintainEngine {
     /// Apply config overrides. Config disables tasks that CLI left at default-true.
     pub fn with_config(mut self, config: &crate::config::Config) -> Self {
         let mc = &config.maintain;
-        if self.args.dns && !mc.dns { self.args.dns = false; }
-        if self.args.spotlight && !mc.spotlight { self.args.spotlight = false; }
-        if self.args.launchservices && !mc.launchservices { self.args.launchservices = false; }
-        if self.args.periodic && !mc.periodic { self.args.periodic = false; }
-        if self.args.purge_ram && !mc.purge_ram { self.args.purge_ram = false; }
-        if self.args.quicklook && !mc.quicklook { self.args.quicklook = false; }
+        if self.args.dns && !mc.dns {
+            self.args.dns = false;
+        }
+        if self.args.spotlight && !mc.spotlight {
+            self.args.spotlight = false;
+        }
+        if self.args.launchservices && !mc.launchservices {
+            self.args.launchservices = false;
+        }
+        if self.args.periodic && !mc.periodic {
+            self.args.periodic = false;
+        }
+        if self.args.purge_ram && !mc.purge_ram {
+            self.args.purge_ram = false;
+        }
+        if self.args.quicklook && !mc.quicklook {
+            self.args.quicklook = false;
+        }
         // Enable tasks that config turns on (only if CLI left them at default-false)
-        if !self.args.repair_permissions && mc.repair_permissions { self.args.repair_permissions = true; }
-        if !self.args.dyld && mc.dyld { self.args.dyld = true; }
+        if !self.args.repair_permissions && mc.repair_permissions {
+            self.args.repair_permissions = true;
+        }
+        if !self.args.dyld && mc.dyld {
+            self.args.dyld = true;
+        }
         self
     }
 
@@ -81,7 +97,11 @@ impl MaintainEngine {
                     Category::SystemMaintenance,
                     Target::Path(std::path::PathBuf::from("/")),
                     "DNS cache flush",
-                    if ok { "DNS cache flushed successfully".to_string() } else { format!("DNS cache flush failed: {}", msg) },
+                    if ok {
+                        "DNS cache flushed successfully".to_string()
+                    } else {
+                        format!("DNS cache flush failed: {}", msg)
+                    },
                 )
                 .with_hint("dscacheutil -flushcache; killall -HUP mDNSResponder".to_string()),
             );
@@ -96,7 +116,11 @@ impl MaintainEngine {
                         Category::SystemMaintenance,
                         Target::Path(std::path::PathBuf::from("/")),
                         "DNS cache flush (systemd-resolved)",
-                        if ok { "systemd-resolved DNS cache flushed".to_string() } else { format!("DNS flush failed: {}", msg) },
+                        if ok {
+                            "systemd-resolved DNS cache flushed".to_string()
+                        } else {
+                            format!("DNS flush failed: {}", msg)
+                        },
                     )
                     .with_hint("sudo resolvectl flush-caches".to_string()),
                 );
@@ -109,7 +133,11 @@ impl MaintainEngine {
                         Category::SystemMaintenance,
                         Target::Path(std::path::PathBuf::from("/")),
                         "DNS cache flush (nscd)",
-                        if ok { "nscd DNS cache invalidated".to_string() } else { format!("nscd flush failed: {}", msg) },
+                        if ok {
+                            "nscd DNS cache invalidated".to_string()
+                        } else {
+                            format!("nscd flush failed: {}", msg)
+                        },
                     )
                     .with_hint("sudo nscd -i hosts".to_string()),
                 );
@@ -141,49 +169,66 @@ impl MaintainEngine {
 
     async fn task_reindex_spotlight(&self, ctx: &ScanContext) -> (Vec<Finding>, u64) {
         let (ok, msg) = Self::run_command("mdutil", &["-E", "/"]);
-        let needs_sudo = !ok && (msg.contains("Try as root") || msg.contains("Operation not permitted"));
+        let needs_sudo =
+            !ok && (msg.contains("Try as root") || msg.contains("Operation not permitted"));
 
-        let findings = vec![
-            Finding::new(
-                EngineId::All,
-                if ok { Severity::Info } else if needs_sudo { Severity::Low } else { Severity::Medium },
-                Category::SystemMaintenance,
-                Target::Path(std::path::PathBuf::from("/")),
-                "Spotlight reindex",
-                if ok {
-                    "Spotlight reindex initiated for /".to_string()
-                } else if needs_sudo {
-                    "Spotlight reindex requires sudo — skipped (run manually if needed)".to_string()
-                } else {
-                    format!("Spotlight reindex failed: {}", msg)
-                },
-            )
-            .with_hint("sudo mdutil -E /  # requires root".to_string()),
-        ];
+        let findings = vec![Finding::new(
+            EngineId::All,
+            if ok {
+                Severity::Info
+            } else if needs_sudo {
+                Severity::Low
+            } else {
+                Severity::Medium
+            },
+            Category::SystemMaintenance,
+            Target::Path(std::path::PathBuf::from("/")),
+            "Spotlight reindex",
+            if ok {
+                "Spotlight reindex initiated for /".to_string()
+            } else if needs_sudo {
+                "Spotlight reindex requires sudo — skipped (run manually if needed)".to_string()
+            } else {
+                format!("Spotlight reindex failed: {}", msg)
+            },
+        )
+        .with_hint("sudo mdutil -E /  # requires root".to_string())];
         ctx.emit(findings[0].clone()).await;
         (findings, 1)
     }
 
     async fn task_rebuild_launchservices(&self, ctx: &ScanContext) -> (Vec<Finding>, u64) {
         let lsregister = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
-        let (ok, msg) = Self::run_command(lsregister, &["-r", "-domain", "local", "-domain", "system", "-domain", "user"]);
+        let (ok, msg) = Self::run_command(
+            lsregister,
+            &[
+                "-r", "-domain", "local", "-domain", "system", "-domain", "user",
+            ],
+        );
         let (ok, msg) = if ok {
             (true, msg)
         } else {
-            Self::run_command(lsregister, &["-kill", "-r", "-domain", "local", "-domain", "system", "-domain", "user"])
+            Self::run_command(
+                lsregister,
+                &[
+                    "-kill", "-r", "-domain", "local", "-domain", "system", "-domain", "user",
+                ],
+            )
         };
 
-        let findings = vec![
-            Finding::new(
-                EngineId::All,
-                if ok { Severity::Info } else { Severity::Medium },
-                Category::SystemMaintenance,
-                Target::Path(std::path::PathBuf::from("/")),
-                "LaunchServices database rebuild",
-                if ok { "LaunchServices database rebuilt".to_string() } else { format!("LaunchServices rebuild failed: {}", msg) },
-            )
-            .with_hint("lsregister -r -domain local -domain system -domain user".to_string()),
-        ];
+        let findings = vec![Finding::new(
+            EngineId::All,
+            if ok { Severity::Info } else { Severity::Medium },
+            Category::SystemMaintenance,
+            Target::Path(std::path::PathBuf::from("/")),
+            "LaunchServices database rebuild",
+            if ok {
+                "LaunchServices database rebuilt".to_string()
+            } else {
+                format!("LaunchServices rebuild failed: {}", msg)
+            },
+        )
+        .with_hint("lsregister -r -domain local -domain system -domain user".to_string())];
         ctx.emit(findings[0].clone()).await;
         (findings, 1)
     }
@@ -217,9 +262,16 @@ impl MaintainEngine {
                     EngineId::All,
                     if ok { Severity::Info } else { Severity::Medium },
                     Category::SystemMaintenance,
-                    Target::Path(std::path::PathBuf::from(format!("/etc/periodic/{}", script))),
+                    Target::Path(std::path::PathBuf::from(format!(
+                        "/etc/periodic/{}",
+                        script
+                    ))),
                     format!("Periodic script: {}", script),
-                    if ok { format!("Periodic {} script completed", script) } else { format!("Periodic {} failed: {}", script, msg) },
+                    if ok {
+                        format!("Periodic {} script completed", script)
+                    } else {
+                        format!("Periodic {} failed: {}", script, msg)
+                    },
                 )
                 .with_hint(format!("periodic {}", script)),
             );
@@ -248,17 +300,19 @@ impl MaintainEngine {
     async fn task_purge_ram(&self, ctx: &ScanContext) -> (Vec<Finding>, u64) {
         let (ok, msg) = Self::run_command("purge", &[]);
 
-        let findings = vec![
-            Finding::new(
-                EngineId::All,
-                if ok { Severity::Info } else { Severity::Medium },
-                Category::SystemMaintenance,
-                Target::Path(std::path::PathBuf::from("/")),
-                "Purge inactive RAM",
-                if ok { "Inactive memory purged".to_string() } else { format!("RAM purge failed (may need sudo): {}", msg) },
-            )
-            .with_hint("purge  # may require sudo".to_string()),
-        ];
+        let findings = vec![Finding::new(
+            EngineId::All,
+            if ok { Severity::Info } else { Severity::Medium },
+            Category::SystemMaintenance,
+            Target::Path(std::path::PathBuf::from("/")),
+            "Purge inactive RAM",
+            if ok {
+                "Inactive memory purged".to_string()
+            } else {
+                format!("RAM purge failed (may need sudo): {}", msg)
+            },
+        )
+        .with_hint("purge  # may require sudo".to_string())];
         ctx.emit(findings[0].clone()).await;
         (findings, 1)
     }
@@ -282,17 +336,19 @@ impl MaintainEngine {
     async fn task_clear_quicklook(&self, ctx: &ScanContext) -> (Vec<Finding>, u64) {
         let (ok, msg) = Self::run_command("qlmanage", &["-r", "cache"]);
 
-        let findings = vec![
-            Finding::new(
-                EngineId::All,
-                if ok { Severity::Info } else { Severity::Medium },
-                Category::SystemMaintenance,
-                Target::Path(std::path::PathBuf::from("/")),
-                "Clear Quick Look cache",
-                if ok { "Quick Look thumbnail cache cleared".to_string() } else { format!("Quick Look cache clear failed: {}", msg) },
-            )
-            .with_hint("qlmanage -r cache".to_string()),
-        ];
+        let findings = vec![Finding::new(
+            EngineId::All,
+            if ok { Severity::Info } else { Severity::Medium },
+            Category::SystemMaintenance,
+            Target::Path(std::path::PathBuf::from("/")),
+            "Clear Quick Look cache",
+            if ok {
+                "Quick Look thumbnail cache cleared".to_string()
+            } else {
+                format!("Quick Look cache clear failed: {}", msg)
+            },
+        )
+        .with_hint("qlmanage -r cache".to_string())];
         ctx.emit(findings[0].clone()).await;
         (findings, 1)
     }
@@ -333,12 +389,19 @@ impl MaintainEngine {
                 Target::Path(std::path::PathBuf::from("/var/log/journal")),
                 "Systemd journal vacuum",
                 if ok {
-                    if size_msg.is_empty() { "Journal vacuumed to 7 days".to_string() } else { format!("Journal vacuumed: {}", size_msg) }
+                    if size_msg.is_empty() {
+                        "Journal vacuumed to 7 days".to_string()
+                    } else {
+                        format!("Journal vacuumed: {}", size_msg)
+                    }
                 } else {
                     format!("Journal vacuum requires sudo: {}", msg)
                 },
             )
-            .with_hint("sudo journalctl --vacuum-time=7d  # removes journal entries older than 7 days".to_string()),
+            .with_hint(
+                "sudo journalctl --vacuum-time=7d  # removes journal entries older than 7 days"
+                    .to_string(),
+            ),
         );
         ctx.emit(findings[0].clone()).await;
         (findings, 1)
@@ -360,7 +423,11 @@ impl MaintainEngine {
                     Category::SystemMaintenance,
                     Target::Path(std::path::PathBuf::from("/var/cache/apt")),
                     "APT cache clean",
-                    if ok { "APT package cache cleared (/var/cache/apt/archives/)".to_string() } else { format!("apt clean requires sudo: {}", msg) },
+                    if ok {
+                        "APT package cache cleared (/var/cache/apt/archives/)".to_string()
+                    } else {
+                        format!("apt clean requires sudo: {}", msg)
+                    },
                 )
                 .with_hint("sudo apt-get clean && sudo apt-get autoremove --yes".to_string()),
             );
@@ -378,7 +445,11 @@ impl MaintainEngine {
                     Category::SystemMaintenance,
                     Target::Path(std::path::PathBuf::from("/var/cache/dnf")),
                     "DNF cache clean",
-                    if ok { "DNF package cache cleared".to_string() } else { format!("dnf clean requires sudo: {}", msg) },
+                    if ok {
+                        "DNF package cache cleared".to_string()
+                    } else {
+                        format!("dnf clean requires sudo: {}", msg)
+                    },
                 )
                 .with_hint("sudo dnf clean all".to_string()),
             );
@@ -396,9 +467,15 @@ impl MaintainEngine {
                     Category::SystemMaintenance,
                     Target::Path(std::path::PathBuf::from("/var/cache/pacman/pkg")),
                     "Pacman cache clean",
-                    if ok { "Pacman package cache cleaned (uninstalled packages removed)".to_string() } else { format!("pacman -Sc requires sudo: {}", msg) },
+                    if ok {
+                        "Pacman package cache cleaned (uninstalled packages removed)".to_string()
+                    } else {
+                        format!("pacman -Sc requires sudo: {}", msg)
+                    },
                 )
-                .with_hint("sudo pacman -Sc --noconfirm  # clears uninstalled package cache".to_string()),
+                .with_hint(
+                    "sudo pacman -Sc --noconfirm  # clears uninstalled package cache".to_string(),
+                ),
             );
             ctx.emit(findings.last().unwrap().clone()).await;
         }
@@ -414,7 +491,11 @@ impl MaintainEngine {
                     Category::SystemMaintenance,
                     Target::Path(std::path::PathBuf::from("/var/cache/zypp")),
                     "Zypper cache clean",
-                    if ok { "Zypper package cache cleared".to_string() } else { format!("zypper clean requires sudo: {}", msg) },
+                    if ok {
+                        "Zypper package cache cleared".to_string()
+                    } else {
+                        format!("zypper clean requires sudo: {}", msg)
+                    },
                 )
                 .with_hint("sudo zypper clean -a".to_string()),
             );
@@ -460,9 +541,15 @@ impl MaintainEngine {
                     Category::SystemMaintenance,
                     Target::Path(thumb_cache.clone()),
                     "Thumbnail cache",
-                    format!("Thumbnail cache: {} — safe to clear", crate::util::disk::format_bytes(cache_size)),
+                    format!(
+                        "Thumbnail cache: {} — safe to clear",
+                        crate::util::disk::format_bytes(cache_size)
+                    ),
                 )
-                .with_hint(format!("rm -rf {}  # frees thumbnail cache", thumb_cache.display())),
+                .with_hint(format!(
+                    "rm -rf {}  # frees thumbnail cache",
+                    thumb_cache.display()
+                )),
             );
             ctx.emit(findings.last().unwrap().clone()).await;
         }
@@ -478,7 +565,11 @@ impl MaintainEngine {
                     Category::SystemMaintenance,
                     Target::Path(font_cache.clone()),
                     "Font cache rebuild",
-                    if ok { "Font cache rebuilt (fc-cache -f)".to_string() } else { format!("Font cache rebuild failed: {}", msg) },
+                    if ok {
+                        "Font cache rebuilt (fc-cache -f)".to_string()
+                    } else {
+                        format!("Font cache rebuild failed: {}", msg)
+                    },
                 )
                 .with_hint("fc-cache -f  # rebuilds fontconfig cache".to_string()),
             );
@@ -524,33 +615,37 @@ impl MaintainEngine {
     /// Run systemd-tmpfiles --clean to remove stale temp files.
     async fn task_tmpfiles_clean(&self, ctx: &ScanContext) -> (Vec<Finding>, u64) {
         if !Self::command_exists("systemd-tmpfiles") {
-            let findings = vec![
-                Finding::new(
-                    EngineId::All,
-                    Severity::Low,
-                    Category::SystemMaintenance,
-                    Target::Path(std::path::PathBuf::from("/tmp")),
-                    "Tmpfiles clean",
-                    "systemd-tmpfiles not found — stale temp files not cleaned automatically".to_string(),
-                )
-                .with_hint("sudo systemd-tmpfiles --clean  # if systemd is active".to_string()),
-            ];
+            let findings = vec![Finding::new(
+                EngineId::All,
+                Severity::Low,
+                Category::SystemMaintenance,
+                Target::Path(std::path::PathBuf::from("/tmp")),
+                "Tmpfiles clean",
+                "systemd-tmpfiles not found — stale temp files not cleaned automatically"
+                    .to_string(),
+            )
+            .with_hint("sudo systemd-tmpfiles --clean  # if systemd is active".to_string())];
             ctx.emit(findings[0].clone()).await;
             return (findings, 1);
         }
 
         let (ok, msg) = Self::run_command("systemd-tmpfiles", &["--clean"]);
-        let findings = vec![
-            Finding::new(
-                EngineId::All,
-                if ok { Severity::Info } else { Severity::Low },
-                Category::SystemMaintenance,
-                Target::Path(std::path::PathBuf::from("/tmp")),
-                "Systemd tmpfiles clean",
-                if ok { "Stale temp files cleaned via systemd-tmpfiles".to_string() } else { format!("systemd-tmpfiles --clean requires sudo: {}", msg) },
-            )
-            .with_hint("sudo systemd-tmpfiles --clean  # removes stale files per tmpfiles.d config".to_string()),
-        ];
+        let findings = vec![Finding::new(
+            EngineId::All,
+            if ok { Severity::Info } else { Severity::Low },
+            Category::SystemMaintenance,
+            Target::Path(std::path::PathBuf::from("/tmp")),
+            "Systemd tmpfiles clean",
+            if ok {
+                "Stale temp files cleaned via systemd-tmpfiles".to_string()
+            } else {
+                format!("systemd-tmpfiles --clean requires sudo: {}", msg)
+            },
+        )
+        .with_hint(
+            "sudo systemd-tmpfiles --clean  # removes stale files per tmpfiles.d config"
+                .to_string(),
+        )];
         ctx.emit(findings[0].clone()).await;
         (findings, 1)
     }
@@ -558,17 +653,16 @@ impl MaintainEngine {
     /// Refresh the locate database (updatedb).
     async fn task_updatedb(&self, ctx: &ScanContext) -> (Vec<Finding>, u64) {
         if !Self::command_exists("updatedb") {
-            let findings = vec![
-                Finding::new(
-                    EngineId::All,
-                    Severity::Low,
-                    Category::SystemMaintenance,
-                    Target::Path(std::path::PathBuf::from("/var/lib/mlocate")),
-                    "Locate database refresh",
-                    "updatedb not found — install mlocate or plocate to enable fast file search".to_string(),
-                )
-                .with_hint("sudo updatedb  # if mlocate/plocate is installed".to_string()),
-            ];
+            let findings = vec![Finding::new(
+                EngineId::All,
+                Severity::Low,
+                Category::SystemMaintenance,
+                Target::Path(std::path::PathBuf::from("/var/lib/mlocate")),
+                "Locate database refresh",
+                "updatedb not found — install mlocate or plocate to enable fast file search"
+                    .to_string(),
+            )
+            .with_hint("sudo updatedb  # if mlocate/plocate is installed".to_string())];
             ctx.emit(findings[0].clone()).await;
             return (findings, 1);
         }
@@ -617,11 +711,20 @@ impl MaintainEngine {
         .with_metadata("total_bytes", serde_json::json!(before.total_bytes))
         .with_metadata("used_bytes", serde_json::json!(before.used_bytes))
         .with_metadata("available_bytes", serde_json::json!(before.available_bytes))
-        .with_metadata("app_memory_bytes", serde_json::json!(before.app_memory_bytes))
+        .with_metadata(
+            "app_memory_bytes",
+            serde_json::json!(before.app_memory_bytes),
+        )
         .with_metadata("wired_bytes", serde_json::json!(before.wired_bytes))
-        .with_metadata("compressed_bytes", serde_json::json!(before.compressed_bytes))
+        .with_metadata(
+            "compressed_bytes",
+            serde_json::json!(before.compressed_bytes),
+        )
         .with_metadata("swap_used_bytes", serde_json::json!(before.swap_used_bytes))
-        .with_metadata("swap_total_bytes", serde_json::json!(before.swap_total_bytes))
+        .with_metadata(
+            "swap_total_bytes",
+            serde_json::json!(before.swap_total_bytes),
+        )
         .with_metadata(
             "memory_pressure",
             serde_json::json!(format!("{:?}", before.memory_pressure)),
@@ -650,7 +753,10 @@ impl MaintainEngine {
                     // Use osascript to prompt for admin privileges
                     let (ok_os, msg_os) = Self::run_command(
                         "osascript",
-                        &["-e", "do shell script \"purge\" with administrator privileges"],
+                        &[
+                            "-e",
+                            "do shell script \"purge\" with administrator privileges",
+                        ],
                     );
                     if ok_os {
                         (true, msg_os)
@@ -673,10 +779,8 @@ impl MaintainEngine {
                 }
             } else {
                 // Linux: try drop_caches (needs root)
-                let (ok1, msg1) = Self::run_command(
-                    "sh",
-                    &["-c", "echo 3 > /proc/sys/vm/drop_caches"],
-                );
+                let (ok1, msg1) =
+                    Self::run_command("sh", &["-c", "echo 3 > /proc/sys/vm/drop_caches"]);
                 if ok1 {
                     (true, msg1)
                 } else {
@@ -700,9 +804,8 @@ impl MaintainEngine {
                     crate::util::disk::format_bytes(reclaimable)
                 )
             } else {
-                format!(
-                    "Memory purge requires elevated permissions. Run in Terminal: sudo purge"
-                )
+                "Memory purge requires elevated permissions. Run in Terminal: sudo purge"
+                    .to_string()
             };
 
             let purge_finding = Finding::new(
@@ -735,7 +838,11 @@ impl MaintainEngine {
 
                 let kill_finding = Finding::new(
                     EngineId::All,
-                    if success { Severity::Info } else { Severity::Medium },
+                    if success {
+                        Severity::Info
+                    } else {
+                        Severity::Medium
+                    },
                     Category::RamOptimization,
                     Target::Process(proc.pid),
                     format!("Kill process: {} (PID {})", proc.name, proc.pid),
@@ -780,7 +887,11 @@ impl MaintainEngine {
 
                     let kill_finding = Finding::new(
                         EngineId::All,
-                        if success { Severity::Info } else { Severity::Medium },
+                        if success {
+                            Severity::Info
+                        } else {
+                            Severity::Medium
+                        },
                         Category::RamOptimization,
                         Target::Process(pid),
                         format!("Kill process by name: {} (PID {})", name, pid),
@@ -816,7 +927,11 @@ impl MaintainEngine {
 
         let after_finding = Finding::new(
             EngineId::All,
-            if freed > 0 { Severity::Info } else { Severity::Low },
+            if freed > 0 {
+                Severity::Info
+            } else {
+                Severity::Low
+            },
             Category::RamOptimization,
             Target::Path(std::path::PathBuf::from("/")),
             "Memory report (after)",
@@ -826,11 +941,20 @@ impl MaintainEngine {
         .with_metadata("total_bytes", serde_json::json!(after.total_bytes))
         .with_metadata("used_bytes", serde_json::json!(after.used_bytes))
         .with_metadata("available_bytes", serde_json::json!(after.available_bytes))
-        .with_metadata("app_memory_bytes", serde_json::json!(after.app_memory_bytes))
+        .with_metadata(
+            "app_memory_bytes",
+            serde_json::json!(after.app_memory_bytes),
+        )
         .with_metadata("wired_bytes", serde_json::json!(after.wired_bytes))
-        .with_metadata("compressed_bytes", serde_json::json!(after.compressed_bytes))
+        .with_metadata(
+            "compressed_bytes",
+            serde_json::json!(after.compressed_bytes),
+        )
         .with_metadata("swap_used_bytes", serde_json::json!(after.swap_used_bytes))
-        .with_metadata("swap_total_bytes", serde_json::json!(after.swap_total_bytes))
+        .with_metadata(
+            "swap_total_bytes",
+            serde_json::json!(after.swap_total_bytes),
+        )
         .with_metadata("freed_bytes", serde_json::json!(freed))
         .with_metadata("freed_swap_bytes", serde_json::json!(freed_swap))
         .with_metadata("processes_killed", serde_json::json!(killed))
@@ -892,7 +1016,15 @@ impl MaintainEngine {
     /// Send a signal to a process. Returns true if the signal was sent.
     fn kill_process(pid: u32, force: bool) -> bool {
         let signal = if force { "9" } else { "15" };
-        Self::run_command("kill", &["-".to_string() + signal, pid.to_string()].iter().map(String::as_str).collect::<Vec<_>>().as_slice()).0
+        Self::run_command(
+            "kill",
+            ["-".to_string() + signal, pid.to_string()]
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+                .as_slice(),
+        )
+        .0
     }
 
     /// Find PIDs by process name using pgrep.
@@ -902,12 +1034,10 @@ impl MaintainEngine {
             .arg(name)
             .output();
         match output {
-            Ok(o) if o.status.success() => {
-                String::from_utf8_lossy(&o.stdout)
-                    .lines()
-                    .filter_map(|l| l.trim().parse::<u32>().ok())
-                    .collect()
-            }
+            Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .filter_map(|l| l.trim().parse::<u32>().ok())
+                .collect(),
             _ => Vec::new(),
         }
     }

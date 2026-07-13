@@ -139,10 +139,18 @@ pub struct CleanConfig {
     pub min_large_size_mb: u64,
 }
 
-fn default_min_age() -> u64 { 30 }
-fn default_min_size_mb() -> u64 { 1 }
-fn default_large_file_mb() -> u64 { 100 }
-fn default_true() -> bool { true }
+fn default_min_age() -> u64 {
+    30
+}
+fn default_min_size_mb() -> u64 {
+    1
+}
+fn default_large_file_mb() -> u64 {
+    100
+}
+fn default_true() -> bool {
+    true
+}
 
 impl Default for CleanConfig {
     fn default() -> Self {
@@ -233,10 +241,18 @@ pub struct OptimizeConfig {
     pub ai_advisor: bool,
 }
 
-fn default_max_processes() -> usize { 50 }
-fn default_buffer_size() -> usize { 288 }
-fn default_top_n() -> usize { 10 }
-fn default_pressure_threshold() -> f64 { 0.80 }
+fn default_max_processes() -> usize {
+    50
+}
+fn default_buffer_size() -> usize {
+    288
+}
+fn default_top_n() -> usize {
+    10
+}
+fn default_pressure_threshold() -> f64 {
+    0.80
+}
 
 impl Default for OptimizeConfig {
     fn default() -> Self {
@@ -289,10 +305,18 @@ pub struct DaemonConfig {
     pub pid_file: PathBuf,
 }
 
-fn default_daemon_interval() -> u64 { 300 }
-fn default_auto_clean_mb() -> u64 { 0 }
-fn default_maintenance_interval() -> u64 { 86400 }
-fn default_telemetry_interval() -> u64 { 60 }
+fn default_daemon_interval() -> u64 {
+    300
+}
+fn default_auto_clean_mb() -> u64 {
+    0
+}
+fn default_maintenance_interval() -> u64 {
+    86400
+}
+fn default_telemetry_interval() -> u64 {
+    60
+}
 fn default_pid_file() -> PathBuf {
     dirs::cache_dir()
         .unwrap_or_else(|| PathBuf::from("/tmp"))
@@ -339,7 +363,9 @@ pub struct NotificationConfig {
     pub proactive_warnings: bool,
 }
 
-fn default_notify_space_mb() -> u64 { 500 }
+fn default_notify_space_mb() -> u64 {
+    500
+}
 
 impl Default for NotificationConfig {
     fn default() -> Self {
@@ -374,7 +400,9 @@ pub struct AutomationRule {
     pub last_fired: u64,
 }
 
-fn default_cooldown() -> u64 { 3600 }
+fn default_cooldown() -> u64 {
+    3600
+}
 
 /// Conditions that can trigger automation rules.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -387,7 +415,10 @@ pub enum AutomationCondition {
     /// Reclaimable space exceeds threshold (in MB).
     ReclaimableSpace { threshold_mb: u64 },
     /// A specific process is consuming more than X MB of RAM.
-    ProcessMemory { process_name: String, threshold_mb: u64 },
+    ProcessMemory {
+        process_name: String,
+        threshold_mb: u64,
+    },
     /// Time-based trigger (cron-like: every N hours).
     Scheduled { interval_hours: u64 },
 }
@@ -441,6 +472,7 @@ pub struct FeedbackEntry {
     pub severity: String,
 }
 
+#[allow(dead_code)]
 impl AdaptiveState {
     pub fn record_feedback(&mut self, category: &str, severity: &str, accepted: bool) {
         let now = SystemTime::now()
@@ -478,8 +510,7 @@ impl AdaptiveState {
             let _rate = accepted_n as f64 / total as f64;
             // Smooth with a prior of 0.5 (5 pseudo-observations).
             let smoothed = (accepted_n as f64 + 2.5) / (total as f64 + 5.0);
-            self.category_weights
-                .insert(category.to_string(), smoothed);
+            self.category_weights.insert(category.to_string(), smoothed);
         }
 
         self.last_updated = now;
@@ -487,10 +518,7 @@ impl AdaptiveState {
 
     /// Get the adjusted weight for a category (default 0.5 if unknown).
     pub fn weight_for(&self, category: &str) -> f64 {
-        self.category_weights
-            .get(category)
-            .copied()
-            .unwrap_or(0.5)
+        self.category_weights.get(category).copied().unwrap_or(0.5)
     }
 
     /// Whether the user tends to accept this category (weight > 0.5).
@@ -515,7 +543,9 @@ pub struct HistoryConfig {
     pub path: PathBuf,
 }
 
-fn default_history_limit() -> usize { 100 }
+fn default_history_limit() -> usize {
+    100
+}
 fn default_history_path() -> PathBuf {
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("/tmp"))
@@ -557,15 +587,21 @@ pub struct LoggingConfig {
     pub keep_files: usize,
 }
 
-fn default_log_level() -> String { "warn".to_string() }
+fn default_log_level() -> String {
+    "warn".to_string()
+}
 fn default_log_dir() -> PathBuf {
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("/tmp"))
         .join("xmac")
         .join("logs")
 }
-fn default_log_max_mb() -> u64 { 10 }
-fn default_log_keep() -> usize { 5 }
+fn default_log_max_mb() -> u64 {
+    10
+}
+fn default_log_keep() -> usize {
+    5
+}
 
 impl Default for LoggingConfig {
     fn default() -> Self {
@@ -589,6 +625,7 @@ pub struct ConfigManager {
     path: PathBuf,
 }
 
+#[allow(dead_code)]
 impl ConfigManager {
     /// Default config path: ~/.config/xmac/config.toml
     pub fn default_config_path() -> PathBuf {
@@ -636,8 +673,8 @@ impl ConfigManager {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| format!("create config dir: {e}"))?;
         }
-        let toml_str = toml::to_string_pretty(&self.config)
-            .map_err(|e| format!("serialize config: {e}"))?;
+        let toml_str =
+            toml::to_string_pretty(&self.config).map_err(|e| format!("serialize config: {e}"))?;
         std::fs::write(path, toml_str).map_err(|e| format!("write config: {e}"))
     }
 
@@ -670,7 +707,9 @@ impl ConfigManager {
 
     /// Record user feedback for adaptive learning.
     pub fn record_feedback(&mut self, category: &str, severity: &str, accepted: bool) {
-        self.config.adaptive.record_feedback(category, severity, accepted);
+        self.config
+            .adaptive
+            .record_feedback(category, severity, accepted);
     }
 
     /// Generate a default config TOML string (for `xmac config init`).
@@ -728,8 +767,14 @@ min_age_days = 7
 
     #[test]
     fn test_profile_thresholds() {
-        assert!(OptimizationProfile::Gaming.pressure_threshold() < OptimizationProfile::Balanced.pressure_threshold());
-        assert!(OptimizationProfile::Conservative.pressure_threshold() > OptimizationProfile::Aggressive.pressure_threshold());
+        assert!(
+            OptimizationProfile::Gaming.pressure_threshold()
+                < OptimizationProfile::Balanced.pressure_threshold()
+        );
+        assert!(
+            OptimizationProfile::Conservative.pressure_threshold()
+                > OptimizationProfile::Aggressive.pressure_threshold()
+        );
     }
 
     #[test]

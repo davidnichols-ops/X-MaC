@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust-checks:
+    name: Rust ${{ matrix.check }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+        check: [fmt, clippy, test, build]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libplist-dev
+
+      - name: Cargo cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ matrix.check }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Format check
+        if: matrix.check == 'fmt'
+        run: cargo fmt --check
+
+      - name: Clippy
+        if: matrix.check == 'clippy'
+        run: cargo clippy -- -D warnings
+
+      - name: Test
+        if: matrix.check == 'test'
+        run: cargo test --verbose
+
+      - name: Build
+        if: matrix.check == 'build'
+        run: cargo build --release --verbose
+
+  linux-cross-compile:
+    name: Linux cross-compile check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu
+
+      - name: Check x86_64
+        run: cargo check --target x86_64-unknown-linux-gnu
+
+      - name: Check aarch64
+        run: cargo check --target aarch64-unknown-linux-gnu
+
+  swift-build:
+    name: Swift build (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Rust binary
+        run: cargo build --release
+
+      - name: Install binary
+        run: |
+          mkdir -p ~/.local/bin
+          cp target/release/x-mac ~/.local/bin/xmac
+
+      - name: Build Swift app
+        run: |
+          cd gui/XMacApp
+          swift build

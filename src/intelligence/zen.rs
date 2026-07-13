@@ -6,7 +6,7 @@ use tokio::sync::mpsc;
 use crate::cli::args::ZenArgs;
 use crate::core::context::ScanContext;
 use crate::core::engine::Engine;
-use crate::core::types::{Finding, Category, Severity};
+use crate::core::types::{Category, Finding, Severity};
 use crate::util::disk::format_bytes;
 
 /// Result of a Zen Mode run — comprehensive summary for display.
@@ -50,10 +50,7 @@ pub struct ZenStep {
 /// 5. Run safe maintenance tasks
 /// 6. Collect system snapshot (health after)
 /// 7. Produce summary
-pub async fn run_zen(
-    cli: &crate::cli::args::Cli,
-    args: &ZenArgs,
-) -> anyhow::Result<ZenResult> {
+pub async fn run_zen(cli: &crate::cli::args::Cli, args: &ZenArgs) -> anyhow::Result<ZenResult> {
     let start = Instant::now();
     let mut steps = Vec::new();
 
@@ -70,7 +67,10 @@ pub async fn run_zen(
     steps.push(ZenStep {
         name: "System snapshot".to_string(),
         status: "done".to_string(),
-        detail: format!("Health: {:.0}/100 ({})", health_before, snapshot_before.status),
+        detail: format!(
+            "Health: {:.0}/100 ({})",
+            health_before, snapshot_before.status
+        ),
     });
 
     let mut reclaimable_bytes = 0u64;
@@ -84,8 +84,8 @@ pub async fn run_zen(
         let ctx = Arc::new(ScanContext::new(cli, tx).await?);
         let config = crate::config::ConfigManager::load();
         let clean_args = crate::engines::clean::CleanEngine::default_args();
-        let clean_engine = crate::engines::clean::CleanEngine::new(clean_args)
-            .with_config(config.config());
+        let clean_engine =
+            crate::engines::clean::CleanEngine::new(clean_args).with_config(config.config());
         let _ = clean_engine.run(ctx.clone()).await;
         drop(ctx);
 
@@ -111,7 +111,7 @@ pub async fn run_zen(
             }
         }
         top_categories = cat_map.into_iter().collect();
-        top_categories.sort_by(|a, b| b.1.cmp(&a.1));
+        top_categories.sort_by_key(|b| std::cmp::Reverse(b.1));
         top_categories.truncate(5);
 
         // 3. Execute cleanup if requested
@@ -142,7 +142,13 @@ pub async fn run_zen(
                     "Found {} reclaimable across {} findings{}",
                     format_bytes(reclaimable_bytes),
                     findings_count,
-                    if args.dry_run { " (dry run)" } else if !args.execute { " (use --execute to clean)" } else { "" },
+                    if args.dry_run {
+                        " (dry run)"
+                    } else if !args.execute {
+                        " (use --execute to clean)"
+                    } else {
+                        ""
+                    },
                 ),
             });
         }
@@ -169,8 +175,8 @@ pub async fn run_zen(
         let (tx, mut rx) = mpsc::channel::<Finding>(1000);
         let ctx = Arc::new(ScanContext::new(cli, tx).await?);
         let config = crate::config::ConfigManager::load();
-        let maintain_engine = crate::engines::maintain::MaintainEngine::default()
-            .with_config(config.config());
+        let maintain_engine =
+            crate::engines::maintain::MaintainEngine::default().with_config(config.config());
         let _ = maintain_engine.run(ctx.clone()).await;
         drop(ctx);
 
@@ -201,7 +207,10 @@ pub async fn run_zen(
     steps.push(ZenStep {
         name: "Post-optimization snapshot".to_string(),
         status: "done".to_string(),
-        detail: format!("Health: {:.0}/100 ({})", health_after, snapshot_after.status),
+        detail: format!(
+            "Health: {:.0}/100 ({})",
+            health_after, snapshot_after.status
+        ),
     });
 
     Ok(ZenResult {
@@ -226,7 +235,11 @@ pub fn format_zen_result_text(result: &ZenResult, dry_run: bool) -> String {
     let mode = if dry_run { "PREVIEW" } else { "COMPLETE" };
 
     out.push_str("╔══════════════════════════════════════════════╗\n");
-    out.push_str(&format!("║  X-MaC Zen Mode — {}{}\n", mode, " ".repeat(30 - mode.len())));
+    out.push_str(&format!(
+        "║  X-MaC Zen Mode — {}{}\n",
+        mode,
+        " ".repeat(30 - mode.len())
+    ));
     out.push_str("╚══════════════════════════════════════════════╝\n\n");
 
     // Health score delta
@@ -236,25 +249,52 @@ pub fn format_zen_result_text(result: &ZenResult, dry_run: bool) -> String {
     } else {
         format!("{:.0}", delta)
     };
-    out.push_str(&format!("System Health:  {:.0} → {:.0}  ({})\n", result.health_before, result.health_after, delta_str));
-    out.push_str(&format!("Duration:        {:.1}s\n\n", result.duration_secs));
+    out.push_str(&format!(
+        "System Health:  {:.0} → {:.0}  ({})\n",
+        result.health_before, result.health_after, delta_str
+    ));
+    out.push_str(&format!(
+        "Duration:        {:.1}s\n\n",
+        result.duration_secs
+    ));
 
     // Memory
-    let mem_freed = result.memory_before.used_bytes.saturating_sub(result.memory_after.used_bytes);
+    let mem_freed = result
+        .memory_before
+        .used_bytes
+        .saturating_sub(result.memory_after.used_bytes);
     out.push_str("Memory:\n");
-    out.push_str(&format!("  Usage:  {:.1} GB → {:.1} GB", gb(result.memory_before.used_bytes), gb(result.memory_after.used_bytes)));
+    out.push_str(&format!(
+        "  Usage:  {:.1} GB → {:.1} GB",
+        gb(result.memory_before.used_bytes),
+        gb(result.memory_after.used_bytes)
+    ));
     if mem_freed > 0 {
         out.push_str(&format!("  (freed {})", format_bytes(mem_freed)));
     }
-    out.push_str(&format!("\n  Free:   {:.1} GB → {:.1} GB\n\n", gb(result.memory_before.free_bytes), gb(result.memory_after.free_bytes)));
+    out.push_str(&format!(
+        "\n  Free:   {:.1} GB → {:.1} GB\n\n",
+        gb(result.memory_before.free_bytes),
+        gb(result.memory_after.free_bytes)
+    ));
 
     // Disk
     out.push_str("Disk:\n");
     if result.reclaimed_bytes > 0 {
-        out.push_str(&format!("  Reclaimed:      {} \n", format_bytes(result.reclaimed_bytes)));
-        out.push_str(&format!("  Reclaimable:    {} (total found)\n", format_bytes(result.reclaimable_bytes)));
+        out.push_str(&format!(
+            "  Reclaimed:      {} \n",
+            format_bytes(result.reclaimed_bytes)
+        ));
+        out.push_str(&format!(
+            "  Reclaimable:    {} (total found)\n",
+            format_bytes(result.reclaimable_bytes)
+        ));
     } else {
-        out.push_str(&format!("  Reclaimable:    {} across {} findings\n", format_bytes(result.reclaimable_bytes), result.findings_count));
+        out.push_str(&format!(
+            "  Reclaimable:    {} across {} findings\n",
+            format_bytes(result.reclaimable_bytes),
+            result.findings_count
+        ));
     }
     if !result.top_categories.is_empty() {
         out.push_str("  Top categories:\n");
@@ -266,7 +306,10 @@ pub fn format_zen_result_text(result: &ZenResult, dry_run: bool) -> String {
 
     // Maintenance
     if result.maintenance_tasks_run > 0 {
-        out.push_str(&format!("Maintenance: {} tasks completed\n\n", result.maintenance_tasks_run));
+        out.push_str(&format!(
+            "Maintenance: {} tasks completed\n\n",
+            result.maintenance_tasks_run
+        ));
     }
 
     // Steps
@@ -320,9 +363,11 @@ mod tests {
             findings_count: 10,
             maintenance_tasks_run: 0,
             top_categories: vec![("Caches".to_string(), 200_000_000)],
-            steps: vec![
-                ZenStep { name: "Snapshot".to_string(), status: "done".to_string(), detail: "OK".to_string() },
-            ],
+            steps: vec![ZenStep {
+                name: "Snapshot".to_string(),
+                status: "done".to_string(),
+                detail: "OK".to_string(),
+            }],
         };
         let text = format_zen_result_text(&result, true);
         assert!(text.contains("PREVIEW"));
@@ -358,8 +403,16 @@ mod tests {
                 ("Build Artifacts".to_string(), 500_000_000),
             ],
             steps: vec![
-                ZenStep { name: "Clean".to_string(), status: "done".to_string(), detail: "Removed 1.5GB".to_string() },
-                ZenStep { name: "Memory".to_string(), status: "done".to_string(), detail: "Freed 3GB".to_string() },
+                ZenStep {
+                    name: "Clean".to_string(),
+                    status: "done".to_string(),
+                    detail: "Removed 1.5GB".to_string(),
+                },
+                ZenStep {
+                    name: "Memory".to_string(),
+                    status: "done".to_string(),
+                    detail: "Freed 3GB".to_string(),
+                },
             ],
         };
         let text = format_zen_result_text(&result, false);

@@ -1,4 +1,4 @@
-use indicatif::{ProgressBar, ProgressStyle, MultiProgress};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
 #[allow(dead_code)]
 pub struct ProgressReporter {
@@ -11,7 +11,11 @@ impl ProgressReporter {
     pub fn new(quiet: bool) -> Self {
         Self {
             quiet,
-            multi_progress: if quiet { None } else { Some(MultiProgress::new()) },
+            multi_progress: if quiet {
+                None
+            } else {
+                Some(MultiProgress::new())
+            },
         }
     }
 
@@ -23,7 +27,9 @@ impl ProgressReporter {
         let pb = ProgressBar::new(len);
         pb.set_style(
             ProgressStyle::default_bar()
-                .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}")
+                .template(
+                    "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}",
+                )
                 .unwrap()
                 .progress_chars("#>-"),
         );

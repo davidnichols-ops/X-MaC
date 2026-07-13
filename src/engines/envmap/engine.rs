@@ -169,7 +169,10 @@ impl EnvmapEngine {
         let arch = std::env::consts::ARCH.to_string();
 
         let title = format!("System: {} ({})", os_platform, arch);
-        let description = format!("Operating system {} on {}, kernel {}", os_platform, arch, kernel);
+        let description = format!(
+            "Operating system {} on {}, kernel {}",
+            os_platform, arch, kernel
+        );
 
         Finding::new(
             EngineId::Envmap,
@@ -180,10 +183,16 @@ impl EnvmapEngine {
             redactor.redact(&description),
         )
         .with_metadata("os_platform", serde_json::json!(os_platform))
-        .with_metadata("kernel_version", serde_json::json!(redactor.redact(&kernel)))
+        .with_metadata(
+            "kernel_version",
+            serde_json::json!(redactor.redact(&kernel)),
+        )
         .with_metadata("hostname", serde_json::json!(redactor.redact(&host)))
         .with_metadata("architecture", serde_json::json!(arch))
-        .with_metadata("apple_silicon", serde_json::json!(cfg!(target_arch = "aarch64")))
+        .with_metadata(
+            "apple_silicon",
+            serde_json::json!(cfg!(target_arch = "aarch64")),
+        )
     }
 
     fn build_package_source_finding(
@@ -202,17 +211,11 @@ impl EnvmapEngine {
             Category::PackageManager,
             Target::Package(source.to_string()),
             redactor.redact(&title),
-            redactor.redact(&format!(
-                "Discovered {} package(s) from {}",
-                count, source
-            )),
+            redactor.redact(&format!("Discovered {} package(s) from {}", count, source)),
         )
         .with_metadata("source", serde_json::json!(source))
         .with_metadata("count", serde_json::json!(count))
-        .with_metadata(
-            "sample",
-            redactor.redact_value(serde_json::json!(sample)),
-        )
+        .with_metadata("sample", redactor.redact_value(serde_json::json!(sample)))
         .with_metadata(
             "packages",
             redactor.redact_value(serde_json::json!(packages)),
@@ -236,7 +239,10 @@ impl EnvmapEngine {
             redactor.redact(&title),
             redactor.redact(&description),
         )
-        .with_metadata("bundle_name", serde_json::json!(redactor.redact(&app.bundle_name)))
+        .with_metadata(
+            "bundle_name",
+            serde_json::json!(redactor.redact(&app.bundle_name)),
+        )
         .with_metadata(
             "bundle_id",
             serde_json::json!(app.bundle_id.as_ref().map(|s| redactor.redact(s))),

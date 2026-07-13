@@ -1,6 +1,6 @@
+use clap::Parser;
 use std::path::PathBuf;
 use tempfile::TempDir;
-use clap::Parser;
 use x_mac::core::engine::Engine;
 
 #[cfg(test)]
@@ -21,7 +21,8 @@ mod tests {
         let json = serde_json::to_string(&finding).expect("Failed to serialize finding");
         assert!(json.contains("Test finding"));
 
-        let deserialized: x_mac::core::types::Finding = serde_json::from_str(&json).expect("Failed to deserialize");
+        let deserialized: x_mac::core::types::Finding =
+            serde_json::from_str(&json).expect("Failed to deserialize");
         assert_eq!(deserialized.title, "Test finding");
     }
 
@@ -52,7 +53,10 @@ mod tests {
         )
         .with_hint("Run this command to fix");
 
-        assert_eq!(finding.remediation_hint, Some("Run this command to fix".to_string()));
+        assert_eq!(
+            finding.remediation_hint,
+            Some("Run this command to fix".to_string())
+        );
     }
 
     #[test]
@@ -67,7 +71,10 @@ mod tests {
         )
         .with_metadata("key", serde_json::json!("value"));
 
-        assert_eq!(finding.metadata.get("key").unwrap(), &serde_json::json!("value"));
+        assert_eq!(
+            finding.metadata.get("key").unwrap(),
+            &serde_json::json!("value")
+        );
     }
 
     #[test]
@@ -155,7 +162,9 @@ mod tests {
             "Test description",
         );
 
-        writer.write_finding(&finding).expect("Failed to write finding");
+        writer
+            .write_finding(&finding)
+            .expect("Failed to write finding");
         writer.flush().expect("Failed to flush");
 
         let content = std::fs::read_to_string(&output_path).expect("Failed to read output");
@@ -247,7 +256,7 @@ mod tests {
 
     #[test]
     fn test_scan_report_serialization() {
-        use x_mac::core::types::{ScanReport, EngineStats, EngineId};
+        use x_mac::core::types::{EngineId, EngineStats, ScanReport};
 
         let findings = vec![
             x_mac::core::types::Finding::new(
@@ -257,7 +266,8 @@ mod tests {
                 x_mac::core::types::Target::Path(PathBuf::from("/test/cache")),
                 "Cache finding",
                 "Test cache",
-            ).with_size(1024 * 1024),
+            )
+            .with_size(1024 * 1024),
             x_mac::core::types::Finding::new(
                 EngineId::Conflict,
                 x_mac::core::types::Severity::Low,
@@ -324,8 +334,12 @@ mod tests {
         match cli.command {
             x_mac::cli::args::Commands::All(all_args) => {
                 assert_eq!(all_args.skip.len(), 2);
-                assert!(all_args.skip.contains(&x_mac::cli::args::EngineIdArg::Clean));
-                assert!(all_args.skip.contains(&x_mac::cli::args::EngineIdArg::Depth));
+                assert!(all_args
+                    .skip
+                    .contains(&x_mac::cli::args::EngineIdArg::Clean));
+                assert!(all_args
+                    .skip
+                    .contains(&x_mac::cli::args::EngineIdArg::Depth));
             }
             _ => panic!("Expected All command"),
         }
@@ -435,9 +449,7 @@ mod tests {
 
         let cli = x_mac::cli::args::Cli::parse_from(vec!["x-mac", "envmap"]);
         let (tx, mut rx) = tokio::sync::mpsc::channel::<x_mac::core::types::Finding>(1000);
-        let ctx = std::sync::Arc::new(
-            x_mac::core::ScanContext::new(&cli, tx).await.unwrap(),
-        );
+        let ctx = std::sync::Arc::new(x_mac::core::ScanContext::new(&cli, tx).await.unwrap());
 
         let stats = engine.scan(ctx).await.expect("scan should succeed");
         assert!(stats.findings_count >= 1);
@@ -465,7 +477,10 @@ mod tests {
     #[test]
     fn test_envmap_redactor_disabled_is_noop() {
         let r = x_mac::engines::envmap::redaction::Redactor::disabled();
-        assert_eq!(r.redact("/Users/alice/secret=hunter2"), "/Users/alice/secret=hunter2");
+        assert_eq!(
+            r.redact("/Users/alice/secret=hunter2"),
+            "/Users/alice/secret=hunter2"
+        );
     }
 
     #[test]
@@ -503,10 +518,9 @@ mod tests {
         // Ensure the new field serializes.
         let json = serde_json::to_string(&report).expect("serialize");
         assert!(json.contains("envmap"));
-        let _bd: EngineBreakdown = serde_json::from_str(
-            &serde_json::to_string(&report.findings_by_engine).unwrap(),
-        )
-        .expect("deserialize breakdown");
+        let _bd: EngineBreakdown =
+            serde_json::from_str(&serde_json::to_string(&report.findings_by_engine).unwrap())
+                .expect("deserialize breakdown");
     }
 
     #[test]
@@ -858,7 +872,14 @@ mod tests {
 
     #[test]
     fn test_cli_maintain_selective() {
-        let args = vec!["x-mac", "maintain", "--spotlight", "false", "--periodic", "false"];
+        let args = vec![
+            "x-mac",
+            "maintain",
+            "--spotlight",
+            "false",
+            "--periodic",
+            "false",
+        ];
         let cli = x_mac::cli::args::Cli::parse_from(args);
         match cli.command {
             x_mac::cli::args::Commands::Maintain(m) => {
@@ -977,7 +998,9 @@ mod tests {
             x_mac::core::types::EngineId::Clean,
             x_mac::core::types::Severity::Medium,
             x_mac::core::types::Category::IosBackup,
-            x_mac::core::types::Target::Path(PathBuf::from("/home/Library/Application Support/MobileSync/Backup/abc123")),
+            x_mac::core::types::Target::Path(PathBuf::from(
+                "/home/Library/Application Support/MobileSync/Backup/abc123",
+            )),
             "iOS device backup detected",
             "desc",
         );

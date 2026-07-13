@@ -6,5 +6,5 @@ pub mod engines;
 pub mod intelligence;
 pub mod util;
 
-pub use core::types::{Finding, EngineId, Severity, ScanReport};
 pub use core::context::ScanContext;
+pub use core::types::{EngineId, Finding, ScanReport, Severity};

@@ -119,8 +119,16 @@ impl CleanupExecutor {
         let trash_path = match macos_trash_path(path) {
             Ok(p) => p,
             Err(e) => {
-                return CleanupActionRecord::new(path, None, "trash", false, candidate.size_bytes, &category, &reason)
-                    .with_error(e);
+                return CleanupActionRecord::new(
+                    path,
+                    None,
+                    "trash",
+                    false,
+                    candidate.size_bytes,
+                    &category,
+                    &reason,
+                )
+                .with_error(e);
             }
         };
 
@@ -189,11 +197,17 @@ impl CleanupPlan {
     }
 
     pub fn executable(&self) -> Vec<&CleanupCandidate> {
-        self.candidates.iter().filter(|c| c.is_executable()).collect()
+        self.candidates
+            .iter()
+            .filter(|c| c.is_executable())
+            .collect()
     }
 
     pub fn blocked(&self) -> Vec<&CleanupCandidate> {
-        self.candidates.iter().filter(|c| !c.is_executable()).collect()
+        self.candidates
+            .iter()
+            .filter(|c| !c.is_executable())
+            .collect()
     }
 
     pub fn total_reclaimable_bytes(&self) -> u64 {
@@ -202,7 +216,9 @@ impl CleanupPlan {
 }
 
 fn macos_trash_path(path: &Path) -> Result<PathBuf, String> {
-    let home = MacosUtils::home_dir().canonicalize().unwrap_or_else(|_| MacosUtils::home_dir());
+    let home = MacosUtils::home_dir()
+        .canonicalize()
+        .unwrap_or_else(|_| MacosUtils::home_dir());
     // Only allow trashing items that are inside the user's home directory.
     // System paths and external volumes are rejected here.
     let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());

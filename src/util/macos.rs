@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub struct MacosUtils;
@@ -9,14 +9,14 @@ impl MacosUtils {
         Self
     }
 
-    pub fn resolve_firmlink(path: &PathBuf) -> PathBuf {
+    pub fn resolve_firmlink(path: &Path) -> PathBuf {
         let path_str = path.to_string_lossy();
         if path_str.starts_with("/var") {
             PathBuf::from(path_str.replace("/var", "/private/var"))
         } else if path_str.starts_with("/tmp") {
             PathBuf::from(path_str.replace("/tmp", "/private/tmp"))
         } else {
-            path.clone()
+            path.to_path_buf()
         }
     }
 
@@ -27,9 +27,7 @@ impl MacosUtils {
 
     pub fn get_macos_version() -> String {
         if cfg!(target_os = "macos") {
-            let output = Command::new("sw_vers")
-                .arg("-productVersion")
-                .output();
+            let output = Command::new("sw_vers").arg("-productVersion").output();
 
             match output {
                 Ok(out) => {

@@ -87,24 +87,11 @@ pub const BUILD_ARTIFACT_DIRS: &[&str] = &[
 
 /// File extensions / names that are build artifacts.
 pub const BUILD_ARTIFACT_FILE_PATTERNS: &[&str] = &[
-    ".pyc",
-    ".pyo",
-    ".o",
-    ".obj",
-    ".a",
-    ".so",
-    ".class",
-    ".swp",
-    ".swo",
+    ".pyc", ".pyo", ".o", ".obj", ".a", ".so", ".class", ".swp", ".swo",
 ];
 
 /// Rotated / archived log file extensions.
-pub const ROTATED_LOG_EXTENSIONS: &[&str] = &[
-    ".gz",
-    ".bz2",
-    ".xz",
-    ".zst",
-];
+pub const ROTATED_LOG_EXTENSIONS: &[&str] = &[".gz", ".bz2", ".xz", ".zst"];
 
 /// Editor / system temp file patterns.
 pub const TEMP_FILE_NAMES: &[&str] = &[".DS_Store"];
@@ -116,16 +103,16 @@ impl CleanRules {
     pub fn cache_paths(&self) -> Vec<PathBuf> {
         let home = MacosUtils::home_dir();
         if cfg!(target_os = "macos") {
-            vec![home.join("Library/Caches"), PathBuf::from("/Library/Caches")]
+            vec![
+                home.join("Library/Caches"),
+                PathBuf::from("/Library/Caches"),
+            ]
         } else {
             // Linux: XDG cache + system caches
             let xdg_cache = std::env::var("XDG_CACHE_HOME")
                 .map(PathBuf::from)
                 .unwrap_or_else(|_| home.join(".cache"));
-            vec![
-                xdg_cache,
-                PathBuf::from("/var/cache"),
-            ]
+            vec![xdg_cache, PathBuf::from("/var/cache")]
         }
     }
 
@@ -187,10 +174,7 @@ impl CleanRules {
                 MacosUtils::resolve_firmlink(&PathBuf::from("/var/tmp")),
             ]
         } else {
-            vec![
-                PathBuf::from("/tmp"),
-                PathBuf::from("/var/tmp"),
-            ]
+            vec![PathBuf::from("/tmp"), PathBuf::from("/var/tmp")]
         }
     }
 
@@ -245,7 +229,12 @@ impl CleanRules {
         if cfg!(target_os = "macos") {
             vec![
                 ("Safari", home.join("Library/Caches/com.apple.Safari")),
-                ("Safari Containers", home.join("Library/Containers/com.apple.Safari/Data/Library/Caches/com.apple.Safari")),
+                (
+                    "Safari Containers",
+                    home.join(
+                        "Library/Containers/com.apple.Safari/Data/Library/Caches/com.apple.Safari",
+                    ),
+                ),
                 ("Chrome", home.join("Library/Caches/Google/Chrome")),
                 ("Firefox", home.join("Library/Caches/Firefox")),
                 ("Edge", home.join("Library/Caches/Microsoft Edge")),
@@ -328,7 +317,11 @@ impl CleanRules {
         for root in volume_roots {
             if let Ok(entries) = std::fs::read_dir(root) {
                 for entry in entries.flatten() {
-                    let trash_name = if cfg!(target_os = "macos") { ".Trashes" } else { ".Trash-1000" };
+                    let trash_name = if cfg!(target_os = "macos") {
+                        ".Trashes"
+                    } else {
+                        ".Trash-1000"
+                    };
                     let trash = entry.path().join(trash_name);
                     if trash.exists() {
                         paths.push(trash);
@@ -366,10 +359,7 @@ impl CleanRules {
     pub fn app_dirs(&self) -> Vec<PathBuf> {
         if cfg!(target_os = "macos") {
             let home = MacosUtils::home_dir();
-            vec![
-                PathBuf::from("/Applications"),
-                home.join("Applications"),
-            ]
+            vec![PathBuf::from("/Applications"), home.join("Applications")]
         } else {
             vec![]
         }

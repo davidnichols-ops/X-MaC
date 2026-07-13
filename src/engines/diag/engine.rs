@@ -143,10 +143,7 @@ impl DiagEngine {
 
     /// Run a single diagnostic command and produce a finding with the output.
     fn run_diagnostic(pm: &PackageManager, diag: &Diagnostic) -> Option<Finding> {
-        let output = Command::new(pm.binary)
-            .args(&diag.args)
-            .output()
-            .ok()?;
+        let output = Command::new(pm.binary).args(&diag.args).output().ok()?;
 
         let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -174,7 +171,11 @@ impl DiagEngine {
         };
 
         let description = if combined.is_empty() {
-            format!("{} {} completed with no output", pm.binary, diag.args.join(" "))
+            format!(
+                "{} {} completed with no output",
+                pm.binary,
+                diag.args.join(" ")
+            )
         } else {
             // Truncate very long output to keep findings manageable.
             let truncated = if combined.chars().count() > 2000 {
@@ -183,7 +184,12 @@ impl DiagEngine {
             } else {
                 combined
             };
-            format!("{} {} output:\n{}", pm.binary, diag.args.join(" "), truncated)
+            format!(
+                "{} {} output:\n{}",
+                pm.binary,
+                diag.args.join(" "),
+                truncated
+            )
         };
 
         let finding = Finding::new(
@@ -195,8 +201,14 @@ impl DiagEngine {
             description,
         )
         .with_metadata("package_manager", serde_json::json!(pm.name))
-        .with_metadata("command", serde_json::json!(format!("{} {}", pm.binary, diag.args.join(" "))))
-        .with_metadata("exit_code", serde_json::json!(output.status.code().unwrap_or(-1)))
+        .with_metadata(
+            "command",
+            serde_json::json!(format!("{} {}", pm.binary, diag.args.join(" "))),
+        )
+        .with_metadata(
+            "exit_code",
+            serde_json::json!(output.status.code().unwrap_or(-1)),
+        )
         .with_metadata("has_issues", serde_json::json!(has_issues));
 
         let finding = if has_issues && !diag.remediation_hint.is_empty() {
@@ -262,42 +274,34 @@ impl PackageManager {
                     requires_network: false,
                 },
             ],
-            "port" => vec![
-                Diagnostic {
-                    label: "port version",
-                    args: vec!["version"],
-                    severity_on_issue: Severity::Info,
-                    remediation_hint: "",
-                    requires_network: false,
-                },
-            ],
-            "nix" => vec![
-                Diagnostic {
-                    label: "nix --version",
-                    args: vec!["--version"],
-                    severity_on_issue: Severity::Info,
-                    remediation_hint: "",
-                    requires_network: false,
-                },
-            ],
-            "cargo" => vec![
-                Diagnostic {
-                    label: "cargo --version",
-                    args: vec!["--version"],
-                    severity_on_issue: Severity::Info,
-                    remediation_hint: "",
-                    requires_network: false,
-                },
-            ],
-            "pip3" => vec![
-                Diagnostic {
-                    label: "pip3 --version",
-                    args: vec!["--version"],
-                    severity_on_issue: Severity::Info,
-                    remediation_hint: "",
-                    requires_network: false,
-                },
-            ],
+            "port" => vec![Diagnostic {
+                label: "port version",
+                args: vec!["version"],
+                severity_on_issue: Severity::Info,
+                remediation_hint: "",
+                requires_network: false,
+            }],
+            "nix" => vec![Diagnostic {
+                label: "nix --version",
+                args: vec!["--version"],
+                severity_on_issue: Severity::Info,
+                remediation_hint: "",
+                requires_network: false,
+            }],
+            "cargo" => vec![Diagnostic {
+                label: "cargo --version",
+                args: vec!["--version"],
+                severity_on_issue: Severity::Info,
+                remediation_hint: "",
+                requires_network: false,
+            }],
+            "pip3" => vec![Diagnostic {
+                label: "pip3 --version",
+                args: vec!["--version"],
+                severity_on_issue: Severity::Info,
+                remediation_hint: "",
+                requires_network: false,
+            }],
             "npm" => vec![
                 Diagnostic {
                     label: "npm --version",

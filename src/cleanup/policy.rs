@@ -241,13 +241,18 @@ mod tests {
     #[test]
     fn large_files_default_to_review() {
         let policy = CleanupPolicy::safe();
-        assert_eq!(policy.action_for(&Category::LargeFile), CleanupAction::Review);
+        assert_eq!(
+            policy.action_for(&Category::LargeFile),
+            CleanupAction::Review
+        );
     }
 
     #[test]
     fn system_info_is_blocked() {
         let policy = CleanupPolicy::safe();
-        assert_eq!(policy.action_for(&Category::SystemInfo), CleanupAction::Blocked);
+        assert_eq!(
+            policy.action_for(&Category::SystemInfo),
+            CleanupAction::Blocked
+        );
     }
 }
-

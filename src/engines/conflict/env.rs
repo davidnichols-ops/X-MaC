@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::fs;
+use std::path::PathBuf;
 
 use crate::core::context::ScanContext;
 use crate::core::types::{Category, EngineId, Finding, Severity, Target};
@@ -23,23 +23,28 @@ impl EnvConflictScanner {
             if config_path.exists() {
                 let vars = Self::parse_shell_config(config_path, shell_type);
                 for (var_name, var_value) in vars {
-                    var_map.entry(var_name).or_default().push((config_path.to_string_lossy().to_string(), var_value));
+                    var_map
+                        .entry(var_name)
+                        .or_default()
+                        .push((config_path.to_string_lossy().to_string(), var_value));
                 }
             }
         }
 
         for (var_name, occurrences) in var_map {
             if occurrences.len() > 1 {
-                let unique_values: Vec<String> = occurrences.iter()
-                    .map(|(_, v)| v.clone())
-                    .collect();
+                let unique_values: Vec<String> =
+                    occurrences.iter().map(|(_, v)| v.clone()).collect();
 
                 if unique_values.iter().all(|v| v == &unique_values[0]) {
                     continue;
                 }
 
-                let descriptions: Vec<String> = occurrences.iter()
-                    .map(|(path, value)| format!("{}={}", path.split('/').next_back().unwrap_or(""), value))
+                let descriptions: Vec<String> = occurrences
+                    .iter()
+                    .map(|(path, value)| {
+                        format!("{}={}", path.split('/').next_back().unwrap_or(""), value)
+                    })
                     .collect();
 
                 findings.push(
@@ -49,10 +54,21 @@ impl EnvConflictScanner {
                         Category::EnvVarConflict,
                         Target::EnvironmentVariable(var_name.clone()),
                         format!("Environment variable conflict: {}", var_name),
-                        format!("Variable set to different values: {}", descriptions.join("; ")),
+                        format!(
+                            "Variable set to different values: {}",
+                            descriptions.join("; ")
+                        ),
                     )
-                    .with_metadata("conflicting_values".to_string(), serde_json::json!(occurrences.iter().map(|(p, v)| format!("{}: {}", p, v)).collect::<Vec<_>>()))
-                    .with_hint("Check your shell configuration files to resolve conflicts".to_string()),
+                    .with_metadata(
+                        "conflicting_values".to_string(),
+                        serde_json::json!(occurrences
+                            .iter()
+                            .map(|(p, v)| format!("{}: {}", p, v))
+                            .collect::<Vec<_>>()),
+                    )
+                    .with_hint(
+                        "Check your shell configuration files to resolve conflicts".to_string(),
+                    ),
                 );
             }
         }
@@ -98,7 +114,8 @@ impl EnvConflictScanner {
                     for line in content.lines() {
                         let line = line.trim();
                         if line.starts_with("set -x ") || line.starts_with("set -gx ") {
-                            let line = line.trim_start_matches("set -x ")
+                            let line = line
+                                .trim_start_matches("set -x ")
                                 .trim_start_matches("set -gx ");
                             if let Some((key, value)) = line.split_once(' ') {
                                 vars.insert(key.trim().to_string(), value.trim().to_string());
@@ -112,7 +129,6 @@ impl EnvConflictScanner {
 
         vars
     }
-
 }
 
 impl Default for EnvConflictScanner {

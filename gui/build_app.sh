@@ -54,6 +54,12 @@ elif [ -d "/Applications/X-MaC.app/Contents/Resources/XMacGNN.mlpackage" ]; then
     echo "  Copied XMacGNN.mlpackage from existing install"
 fi
 
+# Copy Memory Optimizer CoreML model
+if [ -d "$PROJECT_ROOT/gnn/XMacMemoryGNN.mlpackage" ]; then
+    cp -r "$PROJECT_ROOT/gnn/XMacMemoryGNN.mlpackage" "$APP_BUNDLE/Contents/Resources/"
+    echo "  Copied XMacMemoryGNN.mlpackage"
+fi
+
 # Copy label map
 if [ -f "$PROJECT_ROOT/gnn/label_map.json" ]; then
     cp "$PROJECT_ROOT/gnn/label_map.json" "$APP_BUNDLE/Contents/Resources/"
@@ -89,9 +95,9 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << 'PLIST'
     <key>CFBundleIdentifier</key>
     <string>com.xmac.gui</string>
     <key>CFBundleVersion</key>
-    <string>2</string>
+    <string>4</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.0.0</string>
+    <string>2.1.0</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleExecutable</key>

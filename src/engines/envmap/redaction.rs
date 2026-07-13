@@ -69,7 +69,10 @@ impl Redactor {
     pub fn redact(&self, text: &str) -> String {
         let mut clean = text.to_string();
         for rule in &self.rules {
-            clean = rule.regex.replace_all(&clean, &rule.replacement).to_string();
+            clean = rule
+                .regex
+                .replace_all(&clean, &rule.replacement)
+                .to_string();
         }
         if let Some(host) = &self.hostname {
             if !host.is_empty() && clean.contains(host) {
@@ -116,7 +119,10 @@ fn default_rules() -> Vec<RedactionRule> {
         // Linux user home directories.
         (r"/home/[a-zA-Z0-9_\-.]+", "/home/[REDACTED_USER]"),
         // SSH / GnuPG key paths.
-        (r#"/\.(ssh|gnupg)/[^\s"']+"#, "/.[REDACTED_KEY_PATH]/[REDACTED]"),
+        (
+            r#"/\.(ssh|gnupg)/[^\s"']+"#,
+            "/.[REDACTED_KEY_PATH]/[REDACTED]",
+        ),
         // IPv4 addresses.
         (r"\b(?:\d{1,3}\.){3}\d{1,3}\b", "[REDACTED_IP]"),
         // Email addresses.
@@ -163,10 +169,7 @@ mod tests {
     #[test]
     fn redacts_linux_home_path() {
         let r = Redactor::new();
-        assert_eq!(
-            r.redact("/home/bob/code"),
-            "/home/[REDACTED_USER]/code"
-        );
+        assert_eq!(r.redact("/home/bob/code"), "/home/[REDACTED_USER]/code");
     }
 
     #[test]
@@ -197,7 +200,10 @@ mod tests {
     #[test]
     fn redacts_ipv4() {
         let r = Redactor::new();
-        assert_eq!(r.redact("connect to 10.0.0.1 now"), "connect to [REDACTED_IP] now");
+        assert_eq!(
+            r.redact("connect to 10.0.0.1 now"),
+            "connect to [REDACTED_IP] now"
+        );
     }
 
     #[test]
@@ -260,7 +266,10 @@ mod tests {
         assert_eq!(out["path"], "/Users/[REDACTED_USER]/x");
         assert_eq!(out["nested"][0], "[REDACTED_EMAIL]");
         assert_eq!(out["nested"][1], 42);
-        assert!(out["nested"][2]["secret"].as_str().unwrap().contains("[REDACTED_SECRET]"));
+        assert!(out["nested"][2]["secret"]
+            .as_str()
+            .unwrap()
+            .contains("[REDACTED_SECRET]"));
     }
 
     #[test]

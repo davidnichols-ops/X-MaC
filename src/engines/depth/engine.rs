@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 use walkdir::WalkDir;
@@ -48,7 +48,10 @@ impl Engine for DepthEngine {
 
         if self.args.permissions {
             let scanner = IntegrityScanner::new(self.args.paths.clone());
-            let findings = scanner.scan(&ctx).await.map_err(|e| EngineError::ScanFailed(e.to_string()))?;
+            let findings = scanner
+                .scan(&ctx)
+                .await
+                .map_err(|e| EngineError::ScanFailed(e.to_string()))?;
             items_scanned += findings.len() as u64;
             findings_count += findings.len() as u64;
             for finding in findings {
@@ -58,7 +61,10 @@ impl Engine for DepthEngine {
 
         if self.args.symlinks {
             let scanner = SymlinkScanner::new(self.args.paths.clone());
-            let findings = scanner.scan(&ctx).await.map_err(|e| EngineError::ScanFailed(e.to_string()))?;
+            let findings = scanner
+                .scan(&ctx)
+                .await
+                .map_err(|e| EngineError::ScanFailed(e.to_string()))?;
             items_scanned += findings.len() as u64;
             findings_count += findings.len() as u64;
             for finding in findings {
@@ -120,12 +126,7 @@ impl DepthEngine {
                 .follow_links(false)
                 .into_iter()
                 .filter_map(|e| e.ok())
-                .filter(|e| {
-                    e.path()
-                        .extension()
-                        .map(|x| x == ext)
-                        .unwrap_or(false)
-                });
+                .filter(|e| e.path().extension().map(|x| x == ext).unwrap_or(false));
 
             for entry in entries {
                 let path = entry.path().to_path_buf();
@@ -139,7 +140,7 @@ impl DepthEngine {
         findings
     }
 
-    fn check_dylib(path: &PathBuf) -> Option<crate::core::types::Finding> {
+    fn check_dylib(path: &Path) -> Option<crate::core::types::Finding> {
         if cfg!(target_os = "macos") {
             Self::check_dylib_macos(path)
         } else {
@@ -147,7 +148,7 @@ impl DepthEngine {
         }
     }
 
-    fn check_dylib_macos(path: &PathBuf) -> Option<crate::core::types::Finding> {
+    fn check_dylib_macos(path: &Path) -> Option<crate::core::types::Finding> {
         use std::process::Command;
 
         let output = Command::new("otool")
@@ -186,11 +187,17 @@ impl DepthEngine {
                                     EngineId::Depth,
                                     crate::core::types::Severity::Medium,
                                     crate::core::types::Category::MissingDylib,
-                                    crate::core::types::Target::Path(path.clone()),
+                                    crate::core::types::Target::Path(path.to_path_buf()),
                                     "Missing dylib dependency",
-                                    format!("{} depends on missing library: {}", path.display(), dep_path),
+                                    format!(
+                                        "{} depends on missing library: {}",
+                                        path.display(),
+                                        dep_path
+                                    ),
                                 )
-                                .with_hint("Reinstall the package or rebuild the library".to_string()),
+                                .with_hint(
+                                    "Reinstall the package or rebuild the library".to_string(),
+                                ),
                             );
                         }
                     }
@@ -205,7 +212,7 @@ impl DepthEngine {
     /// ldd prints lines like:
     ///   libfoo.so.1 => /usr/lib/libfoo.so.1 (0x...)
     ///   libbar.so.1 => not found
-    fn check_dylib_linux(path: &PathBuf) -> Option<crate::core::types::Finding> {
+    fn check_dylib_linux(path: &Path) -> Option<crate::core::types::Finding> {
         use std::process::Command;
 
         let output = Command::new("ldd")
@@ -226,7 +233,7 @@ impl DepthEngine {
                                 EngineId::Depth,
                                 crate::core::types::Severity::Medium,
                                 crate::core::types::Category::MissingDylib,
-                                crate::core::types::Target::Path(path.clone()),
+                                crate::core::types::Target::Path(path.to_path_buf()),
                                 "Missing shared library dependency",
                                 format!("{} depends on missing library: {}", path.display(), lib_name),
                             )

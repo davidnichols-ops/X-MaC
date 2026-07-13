@@ -1,0 +1,66 @@
+# X-MaC development profile
+# Clears build artifacts aggressively. Keeps dev tools fast.
+# Copy to ~/.config/xmac/config.toml or use: xmac config set-profile development
+
+profile = "development"
+
+[clean]
+min_age_days = 7         # very young threshold — catch stale build artifacts
+min_size_mb = 1
+dedup = false
+xcode = true             # clear DerivedData aggressively
+pkg_caches = true        # clear npm/pip/cargo caches
+temp = true
+build_artifacts = true   # clear node_modules, target, __pycache__, dist
+browser = true
+mail = false
+ios_backups = false
+languages = false
+trash = true
+large_files = true       # find large build artifacts
+min_large_size_mb = 50   # lower threshold for large files
+
+[maintain]
+dns = true
+spotlight = true         # keep Spotlight indexed for code search
+launchservices = true
+periodic = true
+repair_permissions = false
+purge_ram = true
+dyld = false
+quicklook = true
+
+[optimize]
+pressure_threshold = 0.75
+
+[daemon]
+auto_purge_memory = true
+auto_clean_threshold_mb = 1000  # auto-clean if >1GB reclaimable
+check_interval_secs = 300
+
+[notifications]
+enabled = true
+scan_complete = true
+cleanup_recommended = true
+low_disk_space_gb = 20
+
+[history]
+max_entries = 200
+auto_export = false
+
+[logging]
+level = "info"
+file_rotation = "daily"
+
+# Example automation rule: purge memory when utilization > 80%
+[[automation]]
+name = "auto-purge-on-pressure"
+enabled = true
+cooldown_secs = 600
+
+[automation.condition]
+type = "memory_pressure"
+threshold = 0.80
+
+[automation.action]
+type = "purge_memory"

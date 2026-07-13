@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use super::system_awareness::{SystemSnapshot, MemoryDimension, CpuDimension, DiskDimension, ThermalDimension, BatteryDimension};
+use super::system_awareness::{
+    BatteryDimension, CpuDimension, DiskDimension, MemoryDimension, SystemSnapshot,
+    ThermalDimension,
+};
 use crate::config::profiles::OptimizationProfile;
 use crate::config::store::AdaptiveState;
 
@@ -50,7 +53,7 @@ impl Severity {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse_severity(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "info" => Some(Severity::Info),
             "low" => Some(Severity::Low),
@@ -106,9 +109,11 @@ impl Advisor {
 
         // Sort by severity (descending), then by confidence (descending)
         recs.sort_by(|a, b| {
-            b.severity
-                .cmp(&a.severity)
-                .then_with(|| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal))
+            b.severity.cmp(&a.severity).then_with(|| {
+                b.confidence
+                    .partial_cmp(&a.confidence)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
         });
 
         recs
@@ -143,7 +148,9 @@ impl Advisor {
                     gb(mem.compressed_bytes),
                     gb(mem.swap_used_bytes),
                 ),
-                action: "Purge inactive memory and close memory-hungry apps you don't need right now.".to_string(),
+                action:
+                    "Purge inactive memory and close memory-hungry apps you don't need right now."
+                        .to_string(),
                 command: Some("xmac ram-boost".to_string()),
                 estimated_impact: format!(
                     "Could free up to {} of inactive memory",
@@ -200,7 +207,12 @@ impl Advisor {
         if cpu.utilization_pct > 80.0 {
             let top = cpu.top_processes.first();
             let top_desc = top
-                .map(|p| format!(" The top consumer is {} (pid {}, {:.1}% CPU).", p.name, p.pid, p.cpu_pct))
+                .map(|p| {
+                    format!(
+                        " The top consumer is {} (pid {}, {:.1}% CPU).",
+                        p.name, p.pid, p.cpu_pct
+                    )
+                })
                 .unwrap_or_default();
 
             recs.push(Recommendation {
@@ -231,16 +243,20 @@ impl Advisor {
                     id: "cpu_runaway".to_string(),
                     severity: Severity::Medium,
                     category: "cpu".to_string(),
-                    title: format!("Runaway process: {} using {:.0}% CPU", top.name, top.cpu_pct),
+                    title: format!(
+                        "Runaway process: {} using {:.0}% CPU",
+                        top.name, top.cpu_pct
+                    ),
                     explanation: format!(
                         "The process '{}' (pid {}) is consuming {:.1}% CPU — \
                          more than a full core. This may indicate a bug, \
                          an infinite loop, or heavy computation.",
-                        top.name,
-                        top.pid,
-                        top.cpu_pct,
+                        top.name, top.pid, top.cpu_pct,
                     ),
-                    action: format!("If you don't need this process, quit the associated app or run: kill {}", top.pid),
+                    action: format!(
+                        "If you don't need this process, quit the associated app or run: kill {}",
+                        top.pid
+                    ),
                     command: Some(format!("kill {}", top.pid)),
                     estimated_impact: "Frees CPU resources for other tasks".to_string(),
                     confidence: 0.75,
@@ -270,7 +286,7 @@ impl Advisor {
                     ),
                     action: "Run a cleanup scan to find and remove reclaimable space. Consider moving large files to external storage or cloud.".to_string(),
                     command: Some("xmac quick".to_string()),
-                    estimated_impact: format!("Could reclaim several GB of cache and temp files"),
+                    estimated_impact: "Could reclaim several GB of cache and temp files".to_string(),
                     confidence: 0.95,
                     auto_safe: true,
                 });
@@ -331,19 +347,28 @@ impl Advisor {
         if battery.charge_pct < 20.0 && !battery.is_plugged {
             recs.push(Recommendation {
                 id: "battery_low".to_string(),
-                severity: if battery.charge_pct < 10.0 { Severity::High } else { Severity::Medium },
+                severity: if battery.charge_pct < 10.0 {
+                    Severity::High
+                } else {
+                    Severity::Medium
+                },
                 category: "battery".to_string(),
                 title: format!("Battery low: {:.0}%", battery.charge_pct),
                 explanation: format!(
                     "Your battery is at {:.0}%. {}",
                     battery.charge_pct,
                     if let Some(mins) = battery.time_remaining_mins {
-                        format!("Approximately {} hours {} minutes remaining.", mins / 60, mins % 60)
+                        format!(
+                            "Approximately {} hours {} minutes remaining.",
+                            mins / 60,
+                            mins % 60
+                        )
                     } else {
                         "Time remaining estimate unavailable.".to_string()
                     }
                 ),
-                action: "Plug in your charger soon. Save your work if you're below 10%.".to_string(),
+                action: "Plug in your charger soon. Save your work if you're below 10%."
+                    .to_string(),
                 command: None,
                 estimated_impact: "Prevents unexpected shutdown".to_string(),
                 confidence: 0.95,
@@ -352,7 +377,9 @@ impl Advisor {
         }
 
         // Battery health
-        if battery.condition.to_lowercase().contains("service") || battery.condition.to_lowercase().contains("replace") {
+        if battery.condition.to_lowercase().contains("service")
+            || battery.condition.to_lowercase().contains("replace")
+        {
             recs.push(Recommendation {
                 id: "battery_health".to_string(),
                 severity: Severity::Medium,
@@ -485,6 +512,7 @@ impl Advisor {
 
     /// Apply adaptive learning weights — boost recommendations for categories
     /// the user tends to accept, and demote ones they dismiss.
+    #[allow(clippy::ptr_arg)]
     fn apply_adaptive_weights(&self, recs: &mut Vec<Recommendation>) {
         if !self.adaptive.enabled {
             return;
@@ -519,14 +547,25 @@ pub fn format_recommendations_text(recs: &[Recommendation], health_score: Option
     let mut out = String::new();
 
     if let Some(score) = health_score {
-        let status = if score >= 85.0 { "excellent" }
-            else if score >= 70.0 { "good" }
-            else if score >= 50.0 { "fair" }
-            else if score >= 30.0 { "poor" }
-            else { "critical" };
-        out.push_str(&format!("╔══════════════════════════════════════════╗\n"));
-        out.push_str(&format!("║  System Health: {:.0}/100 ({}){}\n", score, status, " ".repeat(20 - status.len() - 3 - score.to_string().len())));
-        out.push_str(&format!("╚══════════════════════════════════════════╝\n\n"));
+        let status = if score >= 85.0 {
+            "excellent"
+        } else if score >= 70.0 {
+            "good"
+        } else if score >= 50.0 {
+            "fair"
+        } else if score >= 30.0 {
+            "poor"
+        } else {
+            "critical"
+        };
+        out.push_str("╔══════════════════════════════════════════╗\n");
+        out.push_str(&format!(
+            "║  System Health: {:.0}/100 ({}){}\n",
+            score,
+            status,
+            " ".repeat(20 - status.len() - 3 - score.to_string().len())
+        ));
+        out.push_str("╚══════════════════════════════════════════╝\n\n");
     }
 
     if recs.is_empty() {
@@ -543,13 +582,23 @@ pub fn format_recommendations_text(recs: &[Recommendation], health_score: Option
             Severity::Info => "🔵",
         };
 
-        out.push_str(&format!("{}. {} [{}] {}\n", i + 1, severity_icon, rec.severity.label(), rec.title));
+        out.push_str(&format!(
+            "{}. {} [{}] {}\n",
+            i + 1,
+            severity_icon,
+            rec.severity.label(),
+            rec.title
+        ));
         out.push_str(&format!("   {}\n", rec.explanation));
         out.push_str(&format!("   → {}\n", rec.action));
         if let Some(cmd) = &rec.command {
             out.push_str(&format!("   $ {}\n", cmd));
         }
-        out.push_str(&format!("   Impact: {} (confidence: {:.0}%)\n\n", rec.estimated_impact, rec.confidence * 100.0));
+        out.push_str(&format!(
+            "   Impact: {} (confidence: {:.0}%)\n\n",
+            rec.estimated_impact,
+            rec.confidence * 100.0
+        ));
     }
 
     out
@@ -613,8 +662,16 @@ mod tests {
         let recs = advisor.analyze(&snapshot);
 
         // Memory recs should have higher confidence than disk recs
-        let mem_confidence = recs.iter().filter(|r| r.category == "memory").map(|r| r.confidence).fold(0.0f64, f64::max);
-        let disk_confidence = recs.iter().filter(|r| r.category == "disk").map(|r| r.confidence).fold(0.0f64, f64::max);
+        let mem_confidence = recs
+            .iter()
+            .filter(|r| r.category == "memory")
+            .map(|r| r.confidence)
+            .fold(0.0f64, f64::max);
+        let disk_confidence = recs
+            .iter()
+            .filter(|r| r.category == "disk")
+            .map(|r| r.confidence)
+            .fold(0.0f64, f64::max);
 
         // Only check if both exist
         if mem_confidence > 0.0 && disk_confidence > 0.0 {
@@ -624,12 +681,15 @@ mod tests {
 
     #[test]
     fn test_severity_from_str() {
-        assert_eq!(Severity::from_str("critical"), Some(Severity::Critical));
-        assert_eq!(Severity::from_str("HIGH"), Some(Severity::High));
-        assert_eq!(Severity::from_str("Medium"), Some(Severity::Medium));
-        assert_eq!(Severity::from_str("low"), Some(Severity::Low));
-        assert_eq!(Severity::from_str("info"), Some(Severity::Info));
-        assert_eq!(Severity::from_str("unknown"), None);
+        assert_eq!(
+            Severity::parse_severity("critical"),
+            Some(Severity::Critical)
+        );
+        assert_eq!(Severity::parse_severity("HIGH"), Some(Severity::High));
+        assert_eq!(Severity::parse_severity("Medium"), Some(Severity::Medium));
+        assert_eq!(Severity::parse_severity("low"), Some(Severity::Low));
+        assert_eq!(Severity::parse_severity("info"), Some(Severity::Info));
+        assert_eq!(Severity::parse_severity("unknown"), None);
     }
 
     #[test]
@@ -667,9 +727,12 @@ mod tests {
         let recs = advisor.analyze(&snapshot);
         // Verify sorted by severity descending
         for i in 1..recs.len() {
-            assert!(recs[i-1].severity >= recs[i].severity,
+            assert!(
+                recs[i - 1].severity >= recs[i].severity,
                 "Recommendations not sorted: {:?} before {:?}",
-                recs[i-1].severity, recs[i].severity);
+                recs[i - 1].severity,
+                recs[i].severity
+            );
         }
     }
 

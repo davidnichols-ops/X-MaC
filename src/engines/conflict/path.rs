@@ -30,7 +30,8 @@ impl PathConflictScanner {
                     }
 
                     if Self::is_executable(&path) {
-                        let binary_name = path.file_name()
+                        let binary_name = path
+                            .file_name()
                             .map(|n| n.to_string_lossy().to_string())
                             .unwrap_or_default();
 
@@ -42,7 +43,8 @@ impl PathConflictScanner {
 
         for (binary_name, paths) in binary_map {
             if paths.len() > 1 {
-                let path_strings: Vec<String> = paths.iter()
+                let path_strings: Vec<String> = paths
+                    .iter()
                     .map(|p| p.to_string_lossy().to_string())
                     .collect();
 
@@ -56,7 +58,10 @@ impl PathConflictScanner {
                         format!("Found {} at: {}", binary_name, path_strings.join(", ")),
                     )
                     .with_metadata("paths".to_string(), serde_json::json!(path_strings))
-                    .with_hint("The first occurrence in PATH will be used. Consider removing duplicates.".to_string()),
+                    .with_hint(
+                        "The first occurrence in PATH will be used. Consider removing duplicates."
+                            .to_string(),
+                    ),
                 );
             }
         }
@@ -82,7 +87,6 @@ impl PathConflictScanner {
             false
         }
     }
-
 }
 
 impl Default for PathConflictScanner {

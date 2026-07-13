@@ -1,11 +1,16 @@
 [package]
 name = "x-mac"
-version = "2.0.0"
+version = "2.1.0"
 edition = "2021"
 authors = ["X-MaC Contributors"]
-description = "macOS system sanitizer & discovery tool"
+description = "Open-source macOS cleaner, optimizer, and system monitor with on-device GNN intelligence"
 license = "MIT"
-repository = "https://github.com/example/x-mac"
+repository = "https://github.com/davidnichols-ops/X-MaC"
+homepage = "https://github.com/davidnichols-ops/X-MaC"
+documentation = "https://github.com/davidnichols-ops/X-MaC/blob/main/docs/ARCHITECTURE.md"
+readme = "README.md"
+keywords = ["macos", "cleaner", "optimizer", "system", "maintenance"]
+categories = ["command-line-utilities", "os::macos-apis"]
 
 [dependencies]
 clap = { version = "4.5", features = ["derive", "env"] }

@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
     use crate::cleanup::{CleanupExecutor, CleanupPolicy};
     use crate::core::types::{Category, EngineId, Finding, Severity, Target};
+    use std::path::PathBuf;
 
     fn make_finding(path: impl Into<PathBuf>, category: Category, size: u64) -> Finding {
         Finding::new(
@@ -17,8 +17,7 @@ mod tests {
     }
 
     fn test_home() -> PathBuf {
-        crate::util::macos::MacosUtils::home_dir()
-            .join(".xmac_test_cleanup")
+        crate::util::macos::MacosUtils::home_dir().join(".xmac_test_cleanup")
     }
 
     fn setup_test_dir(name: &str) -> PathBuf {
@@ -74,7 +73,11 @@ mod tests {
 
     #[test]
     fn system_path_is_blocked() {
-        let findings = vec![make_finding("/Applications/SomeApp.app", Category::Cache, 100)];
+        let findings = vec![make_finding(
+            "/Applications/SomeApp.app",
+            Category::Cache,
+            100,
+        )];
         let executor = CleanupExecutor::new(CleanupPolicy::safe(), false);
         let plan = executor.plan(&findings);
         assert!(plan.executable().is_empty());

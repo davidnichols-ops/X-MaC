@@ -24,11 +24,16 @@ impl PortConflictScanner {
                         Category::PortConflict,
                         Target::Port(port),
                         format!("Port {} is in use", port),
-                        format!("Process {} (PID {}) is listening on port {}", 
-                            process_info.name, process_info.pid, port),
+                        format!(
+                            "Process {} (PID {}) is listening on port {}",
+                            process_info.name, process_info.pid, port
+                        ),
                     )
                     .with_metadata("pid".to_string(), serde_json::json!(process_info.pid))
-                    .with_hint(format!("Kill process {} with 'kill {}' or use a different port", process_info.pid, process_info.pid)),
+                    .with_hint(format!(
+                        "Kill process {} with 'kill {}' or use a different port",
+                        process_info.pid, process_info.pid
+                    )),
                 );
             }
         }

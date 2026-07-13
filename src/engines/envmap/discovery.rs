@@ -155,10 +155,7 @@ pub fn gather_system_packages() -> Vec<SourceResult> {
         results.push(SourceResult::ok("homebrew_casks", casks));
     } else if cfg!(target_os = "linux") {
         // Try dpkg-query first, then rpm, then pacman.
-        let dpkg = run_command(
-            &["dpkg-query", "-W", "-f=${Package} ${Version}\n"],
-            None,
-        );
+        let dpkg = run_command(&["dpkg-query", "-W", "-f=${Package} ${Version}\n"], None);
         if !dpkg.is_empty() {
             results.push(SourceResult::ok("dpkg", dpkg));
         } else {
@@ -192,10 +189,7 @@ pub fn gather_language_packages() -> Vec<SourceResult> {
     results.push(SourceResult::ok("pipx", pipx));
 
     // npm global packages (parseable form).
-    let npm = run_command(
-        &["npm", "list", "-g", "--depth=0", "--parseable"],
-        None,
-    );
+    let npm = run_command(&["npm", "list", "-g", "--depth=0", "--parseable"], None);
     // npm --parseable emits paths; reduce to basenames for readability.
     let npm = npm
         .into_iter()
@@ -295,8 +289,10 @@ mod tests {
 
     #[test]
     fn run_command_timed_missing_binary_returns_empty() {
-        let out =
-            run_command_timed(&["this-binary-definitely-does-not-exist-xyz123"], Duration::from_secs(1));
+        let out = run_command_timed(
+            &["this-binary-definitely-does-not-exist-xyz123"],
+            Duration::from_secs(1),
+        );
         assert!(out.is_empty());
     }
 

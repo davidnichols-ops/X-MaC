@@ -13,7 +13,10 @@ mod engines;
 mod intelligence;
 mod util;
 
-use cli::{args::{Cli, OutputFormat}, output::OutputWriter};
+use cli::{
+    args::{Cli, OutputFormat},
+    output::OutputWriter,
+};
 use core::context::ScanContext;
 use core::engine::Engine;
 use core::types::Finding;
@@ -50,9 +53,7 @@ async fn main() -> Result<()> {
     let xmac_config = xmac_config.config().clone();
 
     let engine_results = match &cli.command {
-        cli::args::Commands::Quick(args) => {
-            run_quick(ctx.clone(), args).await
-        }
+        cli::args::Commands::Quick(args) => run_quick(ctx.clone(), args).await,
         cli::args::Commands::Scan(args) | cli::args::Commands::Doctor(args) => {
             run_scan(ctx.clone(), args).await
         }
@@ -77,7 +78,8 @@ async fn main() -> Result<()> {
             vec![engine.run(ctx.clone()).await]
         }
         cli::args::Commands::Maintain(args) => {
-            let engine = engines::maintain::MaintainEngine::new(args.clone()).with_config(&xmac_config);
+            let engine =
+                engines::maintain::MaintainEngine::new(args.clone()).with_config(&xmac_config);
             vec![engine.run(ctx.clone()).await]
         }
         cli::args::Commands::Disk(args) => {
@@ -88,9 +90,7 @@ async fn main() -> Result<()> {
             let engine = engines::graph::GraphEngine::new(args.clone());
             vec![engine.run(ctx.clone()).await]
         }
-        cli::args::Commands::All(args) => {
-            run_all_engines(ctx.clone(), args).await
-        }
+        cli::args::Commands::All(args) => run_all_engines(ctx.clone(), args).await,
         cli::args::Commands::Install(args) => {
             // Handle install before the scan pipeline — it doesn't scan.
             return run_install(&cli, args);
@@ -343,9 +343,16 @@ fn run_install(cli: &Cli, args: &cli::args::InstallArgs) -> Result<()> {
     let _ = std::fs::set_permissions(&current_exe, std::fs::Permissions::from_mode(0o755));
 
     if !cli_quiet(cli) {
-        eprintln!("Installed: {} -> {}", target.display(), current_exe.display());
+        eprintln!(
+            "Installed: {} -> {}",
+            target.display(),
+            current_exe.display()
+        );
         eprintln!("You can now run `xmac` from any directory.");
-        eprintln!("If '{}' is not on your PATH, add it to your shell profile:", install_dir.display());
+        eprintln!(
+            "If '{}' is not on your PATH, add it to your shell profile:",
+            install_dir.display()
+        );
         eprintln!("  export PATH=\"{}:$PATH\"", install_dir.display());
     }
 
@@ -360,8 +367,8 @@ fn cli_quiet(cli: &Cli) -> bool {
 /// The `purge` command — runs a clean scan, builds a transactional plan, and
 /// executes it with full safety checks and undo metadata.
 async fn run_purge(cli: &Cli, args: &cli::args::PurgeArgs) -> Result<()> {
-    use cli::args::PurgeCategoryArg;
     use cleanup::{CleanupExecutor, CleanupPolicy};
+    use cli::args::PurgeCategoryArg;
 
     let mut policy = CleanupPolicy::safe();
     if args.force_review {
@@ -398,7 +405,9 @@ async fn run_purge(cli: &Cli, args: &cli::args::PurgeArgs) -> Result<()> {
                 PurgeCategoryArg::Cache => crate::core::types::Category::Cache,
                 PurgeCategoryArg::TempFile => crate::core::types::Category::TempFile,
                 PurgeCategoryArg::BuildArtifact => crate::core::types::Category::BuildArtifact,
-                PurgeCategoryArg::PackageManagerCache => crate::core::types::Category::PackageManagerCache,
+                PurgeCategoryArg::PackageManagerCache => {
+                    crate::core::types::Category::PackageManagerCache
+                }
                 PurgeCategoryArg::BrowserCache => crate::core::types::Category::BrowserCache,
                 PurgeCategoryArg::Log => crate::core::types::Category::Log,
                 PurgeCategoryArg::TrashBin => crate::core::types::Category::TrashBin,
@@ -487,7 +496,8 @@ async fn run_quick(
 
     // 2. Maintenance tasks (safe ones only — no sudo)
     if !args.no_maintain {
-        let maintain_engine = engines::maintain::MaintainEngine::default().with_config(&xmac_config);
+        let maintain_engine =
+            engines::maintain::MaintainEngine::default().with_config(&xmac_config);
         results.push(maintain_engine.run(ctx.clone()).await);
     }
 
@@ -506,10 +516,7 @@ async fn run_quick(
 }
 
 /// The `ram-boost` command — memory optimizer with before/after comparison.
-async fn run_ram_boost(
-    cli: &Cli,
-    args: cli::args::RamBoostArgs,
-) -> Result<()> {
+async fn run_ram_boost(cli: &Cli, args: cli::args::RamBoostArgs) -> Result<()> {
     use tokio::sync::mpsc;
 
     let (tx, mut rx) = mpsc::channel::<core::types::Finding>(1000);
@@ -518,9 +525,9 @@ async fn run_ram_boost(
     // Run the RAM boost pipeline
     let boost_handle = {
         let ctx = ctx.clone();
-        tokio::spawn(async move {
-            engines::maintain::MaintainEngine::run_ram_boost(args, ctx).await
-        })
+        tokio::spawn(
+            async move { engines::maintain::MaintainEngine::run_ram_boost(args, ctx).await },
+        )
     };
 
     drop(ctx);
@@ -554,10 +561,7 @@ async fn run_ram_boost(
 /// The `optimize` command — memory telemetry, graph building, and pressure
 /// prediction. In observe mode (default), collects a snapshot, builds the
 /// memory graph, and emits findings with predictions. No actions are taken.
-async fn run_optimize(
-    cli: &Cli,
-    args: cli::args::OptimizeArgs,
-) -> Result<()> {
+async fn run_optimize(cli: &Cli, args: cli::args::OptimizeArgs) -> Result<()> {
     use tokio::sync::mpsc;
 
     let (tx, mut rx) = mpsc::channel::<core::types::Finding>(1000);
@@ -566,9 +570,9 @@ async fn run_optimize(
     // Run the optimize engine
     let optimize_handle = {
         let ctx = ctx.clone();
-        tokio::spawn(async move {
-            engines::optimize::OptimizeEngine::run_optimize(args, ctx).await
-        })
+        tokio::spawn(
+            async move { engines::optimize::OptimizeEngine::run_optimize(args, ctx).await },
+        )
     };
 
     drop(ctx);
@@ -604,7 +608,10 @@ async fn run_optimize(
 
 fn run_config(_cli: &Cli, args: &cli::args::ConfigArgs) -> Result<()> {
     use cli::args::ConfigAction;
-    use config::{ConfigManager, profiles::{OptimizationProfile, ProfilePreset}};
+    use config::{
+        profiles::{OptimizationProfile, ProfilePreset},
+        ConfigManager,
+    };
 
     match &args.action {
         ConfigAction::Init => {
@@ -647,7 +654,11 @@ fn run_config(_cli: &Cli, args: &cli::args::ConfigArgs) -> Result<()> {
             let mut mgr = ConfigManager::load();
             mgr.set_profile(profile);
             mgr.save().map_err(|e| anyhow::anyhow!(e))?;
-            eprintln!("Active profile set to: {} ({})", profile.label(), profile.description());
+            eprintln!(
+                "Active profile set to: {} ({})",
+                profile.label(),
+                profile.description()
+            );
             Ok(())
         }
         ConfigAction::Set { key, value } => {
@@ -681,42 +692,105 @@ fn set_config_value(config: &mut config::Config, key: &str, value: &str) -> Resu
                 _ => anyhow::bail!("Unknown profile: {}", value),
             };
         }
-        "clean.min_age_days" => config.clean.min_age_days = value.parse().map_err(|e| anyhow::anyhow!("parse error: {}", e))?,
-        "clean.min_size_mb" => config.clean.min_size_mb = value.parse().map_err(|e| anyhow::anyhow!("parse error: {}", e))?,
+        "clean.min_age_days" => {
+            config.clean.min_age_days = value
+                .parse()
+                .map_err(|e| anyhow::anyhow!("parse error: {}", e))?
+        }
+        "clean.min_size_mb" => {
+            config.clean.min_size_mb = value
+                .parse()
+                .map_err(|e| anyhow::anyhow!("parse error: {}", e))?
+        }
         "clean.dedup" => config.clean.dedup = parse_bool(value)?,
         "clean.xcode" => config.clean.xcode = parse_bool(value)?,
         "clean.build_artifacts" => config.clean.build_artifacts = parse_bool(value)?,
         "clean.browser" => config.clean.browser = parse_bool(value)?,
         "clean.large_files" => config.clean.large_files = parse_bool(value)?,
-        "clean.min_large_size_mb" => config.clean.min_large_size_mb = value.parse().map_err(|e| anyhow::anyhow!("parse error: {}", e))?,
+        "clean.min_large_size_mb" => {
+            config.clean.min_large_size_mb = value
+                .parse()
+                .map_err(|e| anyhow::anyhow!("parse error: {}", e))?
+        }
         "maintain.dns" => config.maintain.dns = parse_bool(value)?,
         "maintain.spotlight" => config.maintain.spotlight = parse_bool(value)?,
         "maintain.launchservices" => config.maintain.launchservices = parse_bool(value)?,
         "maintain.purge_ram" => config.maintain.purge_ram = parse_bool(value)?,
         "maintain.quicklook" => config.maintain.quicklook = parse_bool(value)?,
-        "optimize.max_processes" => config.optimize.max_processes = value.parse().map_err(|e| anyhow::anyhow!("parse error: {}", e))?,
+        "optimize.max_processes" => {
+            config.optimize.max_processes = value
+                .parse()
+                .map_err(|e| anyhow::anyhow!("parse error: {}", e))?
+        }
         "optimize.exclude_system" => config.optimize.exclude_system = parse_bool(value)?,
-        "optimize.buffer_size" => config.optimize.buffer_size = value.parse().map_err(|e| anyhow::anyhow!("parse error: {}", e))?,
-        "optimize.top_n" => config.optimize.top_n = value.parse().map_err(|e| anyhow::anyhow!("parse error: {}", e))?,
-        "optimize.proactive_predictions" => config.optimize.proactive_predictions = parse_bool(value)?,
-        "optimize.pressure_threshold" => config.optimize.pressure_threshold = value.parse().map_err(|e| anyhow::anyhow!("parse error: {}", e))?,
+        "optimize.buffer_size" => {
+            config.optimize.buffer_size = value
+                .parse()
+                .map_err(|e| anyhow::anyhow!("parse error: {}", e))?
+        }
+        "optimize.top_n" => {
+            config.optimize.top_n = value
+                .parse()
+                .map_err(|e| anyhow::anyhow!("parse error: {}", e))?
+        }
+        "optimize.proactive_predictions" => {
+            config.optimize.proactive_predictions = parse_bool(value)?
+        }
+        "optimize.pressure_threshold" => {
+            config.optimize.pressure_threshold = value
+                .parse()
+                .map_err(|e| anyhow::anyhow!("parse error: {}", e))?
+        }
         "optimize.ai_advisor" => config.optimize.ai_advisor = parse_bool(value)?,
         "daemon.enabled" => config.daemon.enabled = parse_bool(value)?,
-        "daemon.interval_secs" => config.daemon.interval_secs = value.parse().map_err(|e| anyhow::anyhow!("parse error: {}", e))?,
-        "daemon.auto_clean_threshold_mb" => config.daemon.auto_clean_threshold_mb = value.parse().map_err(|e| anyhow::anyhow!("parse error: {}", e))?,
+        "daemon.interval_secs" => {
+            config.daemon.interval_secs = value
+                .parse()
+                .map_err(|e| anyhow::anyhow!("parse error: {}", e))?
+        }
+        "daemon.auto_clean_threshold_mb" => {
+            config.daemon.auto_clean_threshold_mb = value
+                .parse()
+                .map_err(|e| anyhow::anyhow!("parse error: {}", e))?
+        }
         "daemon.auto_purge_memory" => config.daemon.auto_purge_memory = parse_bool(value)?,
         "daemon.collect_telemetry" => config.daemon.collect_telemetry = parse_bool(value)?,
-        "daemon.telemetry_interval_secs" => config.daemon.telemetry_interval_secs = value.parse().map_err(|e| anyhow::anyhow!("parse error: {}", e))?,
+        "daemon.telemetry_interval_secs" => {
+            config.daemon.telemetry_interval_secs = value
+                .parse()
+                .map_err(|e| anyhow::anyhow!("parse error: {}", e))?
+        }
         "notifications.enabled" => config.notifications.enabled = parse_bool(value)?,
-        "notifications.memory_pressure" => config.notifications.memory_pressure = parse_bool(value)?,
-        "notifications.reclaimable_space" => config.notifications.reclaimable_space = parse_bool(value)?,
-        "notifications.space_threshold_mb" => config.notifications.space_threshold_mb = value.parse().map_err(|e| anyhow::anyhow!("parse error: {}", e))?,
-        "notifications.proactive_warnings" => config.notifications.proactive_warnings = parse_bool(value)?,
-        "history.max_snapshots" => config.history.max_snapshots = value.parse().map_err(|e| anyhow::anyhow!("parse error: {}", e))?,
-        "history.max_transactions" => config.history.max_transactions = value.parse().map_err(|e| anyhow::anyhow!("parse error: {}", e))?,
+        "notifications.memory_pressure" => {
+            config.notifications.memory_pressure = parse_bool(value)?
+        }
+        "notifications.reclaimable_space" => {
+            config.notifications.reclaimable_space = parse_bool(value)?
+        }
+        "notifications.space_threshold_mb" => {
+            config.notifications.space_threshold_mb = value
+                .parse()
+                .map_err(|e| anyhow::anyhow!("parse error: {}", e))?
+        }
+        "notifications.proactive_warnings" => {
+            config.notifications.proactive_warnings = parse_bool(value)?
+        }
+        "history.max_snapshots" => {
+            config.history.max_snapshots = value
+                .parse()
+                .map_err(|e| anyhow::anyhow!("parse error: {}", e))?
+        }
+        "history.max_transactions" => {
+            config.history.max_transactions = value
+                .parse()
+                .map_err(|e| anyhow::anyhow!("parse error: {}", e))?
+        }
         "logging.level" => config.logging.level = value.to_string(),
         "logging.file_logging" => config.logging.file_logging = parse_bool(value)?,
-        _ => anyhow::bail!("Unknown config key: '{}'. Use 'xmac config show' to see available keys.", key),
+        _ => anyhow::bail!(
+            "Unknown config key: '{}'. Use 'xmac config show' to see available keys.",
+            key
+        ),
     }
     Ok(())
 }
@@ -790,8 +864,8 @@ async fn run_daemon(_cli: &Cli, args: cli::args::DaemonArgs) -> Result<()> {
 // ═══════════════════════════════════════════════════════════════════════
 
 async fn run_zen(cli: &Cli, args: &cli::args::ZenArgs) -> Result<()> {
-    let is_json = cli.global.format == OutputFormat::Json
-        || cli.global.format == OutputFormat::JsonPretty;
+    let is_json =
+        cli.global.format == OutputFormat::Json || cli.global.format == OutputFormat::JsonPretty;
 
     let result = intelligence::zen::run_zen(cli, args).await?;
 
@@ -802,7 +876,10 @@ async fn run_zen(cli: &Cli, args: &cli::args::ZenArgs) -> Result<()> {
         };
         println!("{}", json);
     } else {
-        print!("{}", intelligence::zen::format_zen_result_text(&result, args.dry_run || !args.execute));
+        print!(
+            "{}",
+            intelligence::zen::format_zen_result_text(&result, args.dry_run || !args.execute)
+        );
     }
 
     Ok(())
@@ -814,7 +891,7 @@ async fn run_zen(cli: &Cli, args: &cli::args::ZenArgs) -> Result<()> {
 
 async fn run_advisor(_cli: &Cli, args: &cli::args::AdvisorArgs) -> Result<()> {
     use config::ConfigManager;
-    use intelligence::advisor::{Advisor, Severity, format_recommendations_text};
+    use intelligence::advisor::{format_recommendations_text, Advisor, Severity};
 
     let mgr = ConfigManager::load();
     let config = mgr.config();
@@ -827,7 +904,7 @@ async fn run_advisor(_cli: &Cli, args: &cli::args::AdvisorArgs) -> Result<()> {
     let mut recs = advisor.analyze(&snapshot);
 
     // Filter by min severity
-    if let Some(min_sev) = Severity::from_str(&args.min_severity) {
+    if let Some(min_sev) = Severity::parse_severity(&args.min_severity) {
         recs.retain(|r| r.severity >= min_sev);
     }
 
@@ -847,9 +924,13 @@ async fn run_advisor(_cli: &Cli, args: &cli::args::AdvisorArgs) -> Result<()> {
             println!("{}", json);
         }
     } else {
-        let health = if args.health_score { Some(snapshot.health_score) } else { None };
+        let health = if args.health_score {
+            Some(snapshot.health_score)
+        } else {
+            None
+        };
         let text = format_recommendations_text(&recs, health);
-    print!("{}", text);
+        print!("{}", text);
     }
 
     Ok(())
@@ -860,8 +941,8 @@ async fn run_advisor(_cli: &Cli, args: &cli::args::AdvisorArgs) -> Result<()> {
 // ═══════════════════════════════════════════════════════════════════════
 
 fn run_history(_cli: &Cli, args: &cli::args::HistoryArgs) -> Result<()> {
-    use config::ConfigManager;
     use cleanup::history::{load_history, save_history};
+    use config::ConfigManager;
 
     let mgr = ConfigManager::load();
     let history_path = &mgr.config().history.path;
@@ -883,7 +964,9 @@ fn run_history(_cli: &Cli, args: &cli::args::HistoryArgs) -> Result<()> {
     }
 
     if args.summary {
-        let total_reclaimed: u64 = history.transactions.iter()
+        let total_reclaimed: u64 = history
+            .transactions
+            .iter()
             .map(|t| t.successful_bytes())
             .sum();
         let total_snapshots = history.snapshots.len();
@@ -893,22 +976,29 @@ fn run_history(_cli: &Cli, args: &cli::args::HistoryArgs) -> Result<()> {
         eprintln!("════════════════════════════════════════");
         eprintln!("  Total scans:        {}", total_snapshots);
         eprintln!("  Total cleanups:     {}", total_transactions);
-        eprintln!("  Total reclaimed:    {}", crate::util::disk::format_bytes(total_reclaimed));
+        eprintln!(
+            "  Total reclaimed:    {}",
+            crate::util::disk::format_bytes(total_reclaimed)
+        );
         eprintln!();
 
         if !history.snapshots.is_empty() {
             let first = history.snapshots.first().unwrap();
             let last = history.snapshots.last().unwrap();
-            eprintln!("  First scan:         {} (reclaimable: {})",
+            eprintln!(
+                "  First scan:         {} (reclaimable: {})",
                 chrono::DateTime::from_timestamp(first.timestamp as i64, 0)
                     .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
                     .unwrap_or_else(|| first.timestamp.to_string()),
-                crate::util::disk::format_bytes(first.reclaimable_bytes));
-            eprintln!("  Last scan:          {} (reclaimable: {})",
+                crate::util::disk::format_bytes(first.reclaimable_bytes)
+            );
+            eprintln!(
+                "  Last scan:          {} (reclaimable: {})",
                 chrono::DateTime::from_timestamp(last.timestamp as i64, 0)
                     .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
                     .unwrap_or_else(|| last.timestamp.to_string()),
-                crate::util::disk::format_bytes(last.reclaimable_bytes));
+                crate::util::disk::format_bytes(last.reclaimable_bytes)
+            );
         }
         return Ok(());
     }
@@ -924,13 +1014,14 @@ fn run_history(_cli: &Cli, args: &cli::args::HistoryArgs) -> Result<()> {
             let dt = chrono::DateTime::from_timestamp(t.started_at as i64, 0)
                 .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
                 .unwrap_or_else(|| t.started_at.to_string());
-            eprintln!("  {} | reclaimed {} | {} actions",
+            eprintln!(
+                "  {} | reclaimed {} | {} actions",
                 dt,
                 crate::util::disk::format_bytes(t.successful_bytes()),
-                t.successful_count());
+                t.successful_count()
+            );
         }
     }
 
     Ok(())
 }
-

@@ -1,0 +1,53 @@
+# X-MaC conservative profile
+# Minimal intervention — only the safest operations. Ideal for production machines.
+# Copy to ~/.config/xmac/config.toml or use: xmac config set-profile conservative
+
+profile = "conservative"
+
+[clean]
+min_age_days = 90        # only flag very old files
+min_size_mb = 10         # only flag files >= 10MB
+dedup = false
+xcode = true
+pkg_caches = true
+temp = true
+build_artifacts = false  # don't touch build artifacts
+browser = false          # don't touch browser caches
+mail = false
+ios_backups = false
+languages = false        # don't remove language files
+trash = true
+large_files = false      # don't scan for large files
+min_large_size_mb = 500
+
+[maintain]
+dns = true
+spotlight = false        # don't reindex (can be slow)
+launchservices = false
+periodic = true
+repair_permissions = false
+purge_ram = false        # don't purge RAM (might interfere with running apps)
+dyld = false
+quicklook = false
+
+[optimize]
+pressure_threshold = 0.90  # only act at very high pressure
+
+[daemon]
+auto_purge_memory = false   # never auto-purge
+auto_clean_threshold_mb = 0 # never auto-clean
+check_interval_secs = 900   # check every 15 minutes
+
+[notifications]
+enabled = true
+scan_complete = true
+cleanup_recommended = true
+low_disk_space_gb = 5
+
+[history]
+max_entries = 100
+auto_export = false
+
+[logging]
+level = "info"
+file_rotation = "daily"
