@@ -82,8 +82,10 @@ pub async fn run_zen(
     if !args.no_clean {
         let (tx, mut rx) = mpsc::channel::<Finding>(1000);
         let ctx = Arc::new(ScanContext::new(cli, tx).await?);
+        let config = crate::config::ConfigManager::load();
         let clean_args = crate::engines::clean::CleanEngine::default_args();
-        let clean_engine = crate::engines::clean::CleanEngine::new(clean_args);
+        let clean_engine = crate::engines::clean::CleanEngine::new(clean_args)
+            .with_config(config.config());
         let _ = clean_engine.run(ctx.clone()).await;
         drop(ctx);
 
@@ -166,7 +168,9 @@ pub async fn run_zen(
     if !args.no_maintain {
         let (tx, mut rx) = mpsc::channel::<Finding>(1000);
         let ctx = Arc::new(ScanContext::new(cli, tx).await?);
-        let maintain_engine = crate::engines::maintain::MaintainEngine::default();
+        let config = crate::config::ConfigManager::load();
+        let maintain_engine = crate::engines::maintain::MaintainEngine::default()
+            .with_config(config.config());
         let _ = maintain_engine.run(ctx.clone()).await;
         drop(ctx);
 

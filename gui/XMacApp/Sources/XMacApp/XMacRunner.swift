@@ -137,7 +137,11 @@ final class XMacRunner: ObservableObject {
     }
 
     private let xmacPath: String = {
+        // Look for the bundled binary first (inside the .app bundle), then
+        // fall back to installed locations, then PATH.
+        let bundleDir = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/xmac").path
         let candidates = [
+            bundleDir,
             "/Users/david/.local/bin/xmac",
             "/opt/homebrew/bin/xmac",
             "/usr/local/bin/xmac",

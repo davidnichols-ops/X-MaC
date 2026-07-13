@@ -28,6 +28,55 @@ impl CleanEngine {
         }
     }
 
+    /// Apply config overrides to the engine's args. Config values are used
+    /// as defaults; CLI args take precedence where they were explicitly set.
+    /// The active optimization profile further tunes behavior.
+    pub fn with_config(mut self, config: &crate::config::Config) -> Self {
+        let cc = &config.clean;
+        let profile = config.profile;
+
+        // Profile-based min age override (more aggressive profiles use younger age)
+        let profile_age = profile.min_age_days();
+        if self.args.min_age == "30d" {
+            // Use the smaller of config and profile — profile wins for aggressive modes
+            self.args.min_age = format!("{}d", profile_age.min(cc.min_age_days));
+        }
+        if self.args.min_size == "1M" {
+            self.args.min_size = format!("{}M", cc.min_size_mb);
+        }
+        if self.args.min_large_size == "100M" {
+            self.args.min_large_size = format!("{}M", cc.min_large_size_mb);
+        }
+
+        // Profile-based build artifact clearing
+        if profile.clear_build_artifacts() && self.args.build_artifacts {
+            // Development/Aggressive: also lower min age for build artifacts to 1 day
+            // We can't selectively lower age per-category, but the scan will find more
+        }
+
+        // Category toggles from config
+        if self.args.xcode && !cc.xcode { self.args.xcode = false; }
+        if self.args.pkg_caches && !cc.pkg_caches { self.args.pkg_caches = false; }
+        if self.args.temp && !cc.temp { self.args.temp = false; }
+        if self.args.build_artifacts && !cc.build_artifacts { self.args.build_artifacts = false; }
+        if self.args.browser && !cc.browser { self.args.browser = false; }
+        if self.args.mail && !cc.mail { self.args.mail = false; }
+        if self.args.ios_backups && !cc.ios_backups { self.args.ios_backups = false; }
+        if self.args.languages && !cc.languages { self.args.languages = false; }
+        if self.args.trash && !cc.trash { self.args.trash = false; }
+        if self.args.large_files && !cc.large_files { self.args.large_files = false; }
+        if !cc.dedup { self.args.dedup = false; } else { self.args.dedup = self.args.dedup || cc.dedup; }
+
+        // Conservative profile: disable aggressive categories
+        if matches!(profile, crate::config::profiles::OptimizationProfile::Conservative) {
+            self.args.dedup = false;
+            self.args.large_files = false;
+            self.args.languages = false;
+        }
+
+        self
+    }
+
     async fn scan_caches(&self, ctx: &ScanContext) -> (Vec<Finding>, u64) {
         let mut findings = Vec::new();
         let mut items = 0u64;

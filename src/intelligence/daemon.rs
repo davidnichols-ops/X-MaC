@@ -125,11 +125,14 @@ impl Daemon {
 
         // 4. Auto-clean if reclaimable space exceeds threshold
         let auto_clean_mb = self.config.config().daemon.auto_clean_threshold_mb;
-        if auto_clean_mb > 0 {
-            // We'd need to run a quick clean scan here. For now, just log.
+        if auto_clean_mb > 0 && snapshot.disk.overall_utilization > 0.85 {
             if self.verbose {
-                eprintln!("  auto-clean threshold: {} MB (scan skipped in daemon mode)", auto_clean_mb);
+                eprintln!("  auto-clean: disk utilization {:.0}% — running clean scan", snapshot.disk.overall_utilization * 100.0);
             }
+            use std::process::Command;
+            let _ = Command::new("xmac")
+                .args(["clean", "--min-age", "7d"])
+                .output();
         }
     }
 
@@ -184,15 +187,32 @@ impl Daemon {
         match action {
             AutomationAction::PurgeMemory => {
                 self.purge_memory().await;
+                if self.verbose {
+                    eprintln!("  action: purged memory");
+                }
             }
             AutomationAction::ScanClean => {
                 if self.verbose {
-                    eprintln!("  action: scan clean (would run xmac clean)");
+                    eprintln!("  action: running clean scan...");
+                }
+                use std::process::Command;
+                let _ = Command::new("xmac")
+                    .args(["clean", "--min-age", "7d"])
+                    .output();
+                if self.verbose {
+                    eprintln!("  action: clean scan complete");
                 }
             }
             AutomationAction::RunMaintenance => {
                 if self.verbose {
-                    eprintln!("  action: run maintenance (would run xmac maintain)");
+                    eprintln!("  action: running maintenance...");
+                }
+                use std::process::Command;
+                let _ = Command::new("xmac")
+                    .args(["maintain"])
+                    .output();
+                if self.verbose {
+                    eprintln!("  action: maintenance complete");
                 }
             }
             AutomationAction::KillProcess { name } => {

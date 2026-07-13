@@ -45,6 +45,10 @@ async fn main() -> Result<()> {
 
     let scan_start = Instant::now();
 
+    // Load config once — used to apply profile-based overrides to engines
+    let xmac_config = config::ConfigManager::load();
+    let xmac_config = xmac_config.config().clone();
+
     let engine_results = match &cli.command {
         cli::args::Commands::Quick(args) => {
             run_quick(ctx.clone(), args).await
@@ -53,7 +57,7 @@ async fn main() -> Result<()> {
             run_scan(ctx.clone(), args).await
         }
         cli::args::Commands::Clean(args) => {
-            let engine = engines::clean::CleanEngine::new(args.clone());
+            let engine = engines::clean::CleanEngine::new(args.clone()).with_config(&xmac_config);
             vec![engine.run(ctx.clone()).await]
         }
         cli::args::Commands::Conflict(args) => {
@@ -73,7 +77,7 @@ async fn main() -> Result<()> {
             vec![engine.run(ctx.clone()).await]
         }
         cli::args::Commands::Maintain(args) => {
-            let engine = engines::maintain::MaintainEngine::new(args.clone());
+            let engine = engines::maintain::MaintainEngine::new(args.clone()).with_config(&xmac_config);
             vec![engine.run(ctx.clone()).await]
         }
         cli::args::Commands::Disk(args) => {
@@ -364,6 +368,9 @@ async fn run_purge(cli: &Cli, args: &cli::args::PurgeArgs) -> Result<()> {
         policy.allow_trash_overrides = true;
     }
 
+    let xmac_config = config::ConfigManager::load();
+    let xmac_config = xmac_config.config().clone();
+
     // 1. Run the clean scan to produce findings.
     let clean_args = cli::args::CleanArgs {
         min_age: args.min_age.clone(),
@@ -373,7 +380,7 @@ async fn run_purge(cli: &Cli, args: &cli::args::PurgeArgs) -> Result<()> {
 
     let (tx, mut rx) = mpsc::channel::<Finding>(1000);
     let ctx = Arc::new(ScanContext::new(cli, tx).await?);
-    let clean_engine = engines::clean::CleanEngine::new(clean_args);
+    let clean_engine = engines::clean::CleanEngine::new(clean_args).with_config(&xmac_config);
     let _ = clean_engine.run(ctx.clone()).await;
 
     drop(ctx);
@@ -467,17 +474,20 @@ async fn run_quick(
 ) -> Vec<std::result::Result<core::types::EngineStats, core::error::EngineError>> {
     let mut results = Vec::new();
 
+    let xmac_config = config::ConfigManager::load();
+    let xmac_config = xmac_config.config().clone();
+
     // 1. Clean scan (with dedup if requested)
     let clean_args = cli::args::CleanArgs {
         dedup: args.dedup,
         ..engines::clean::CleanEngine::default_args()
     };
-    let clean_engine = engines::clean::CleanEngine::new(clean_args);
+    let clean_engine = engines::clean::CleanEngine::new(clean_args).with_config(&xmac_config);
     results.push(clean_engine.run(ctx.clone()).await);
 
     // 2. Maintenance tasks (safe ones only — no sudo)
     if !args.no_maintain {
-        let maintain_engine = engines::maintain::MaintainEngine::default();
+        let maintain_engine = engines::maintain::MaintainEngine::default().with_config(&xmac_config);
         results.push(maintain_engine.run(ctx.clone()).await);
     }
 

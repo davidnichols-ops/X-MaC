@@ -29,6 +29,21 @@ impl MaintainEngine {
         Self { args }
     }
 
+    /// Apply config overrides. Config disables tasks that CLI left at default-true.
+    pub fn with_config(mut self, config: &crate::config::Config) -> Self {
+        let mc = &config.maintain;
+        if self.args.dns && !mc.dns { self.args.dns = false; }
+        if self.args.spotlight && !mc.spotlight { self.args.spotlight = false; }
+        if self.args.launchservices && !mc.launchservices { self.args.launchservices = false; }
+        if self.args.periodic && !mc.periodic { self.args.periodic = false; }
+        if self.args.purge_ram && !mc.purge_ram { self.args.purge_ram = false; }
+        if self.args.quicklook && !mc.quicklook { self.args.quicklook = false; }
+        // Enable tasks that config turns on (only if CLI left them at default-false)
+        if !self.args.repair_permissions && mc.repair_permissions { self.args.repair_permissions = true; }
+        if !self.args.dyld && mc.dyld { self.args.dyld = true; }
+        self
+    }
+
     fn run_command(cmd: &str, args: &[&str]) -> (bool, String) {
         match std::process::Command::new(cmd).args(args).output() {
             Ok(output) => {
