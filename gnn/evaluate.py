@@ -21,7 +21,7 @@ CHECKPOINT_PATH = GNN_DIR / "model" / "xmac_gnn.pt"
 
 
 def load_model(checkpoint_path):
-    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
     model = GATModel(
         num_features=checkpoint.get("num_features", NUM_FEATURES),
         hidden_dim=checkpoint["hidden_dim"],
@@ -111,6 +111,8 @@ def main():
     parser.add_argument("--batch-size", type=int, default=64)
     args = parser.parse_args()
     model, checkpoint = load_model(args.checkpoint)
+    # Training data uses PyG Data objects which require pickle.
+    # TODO: migrate to safetensors to enable weights_only=True.
     graphs = torch.load(DATA_DIR / "test.pt", weights_only=False)
     labels, predictions, safety_mae, anomaly_mae = evaluate(model, graphs, args.batch_size)
     test_acc = float((labels == predictions).mean())

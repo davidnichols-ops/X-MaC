@@ -239,6 +239,8 @@ def train(args):
         print("Run: python memory_data_generator.py --num-graphs 10000")
         sys.exit(1)
 
+    # Training data uses PyG Data objects which require pickle.
+    # TODO: migrate to safetensors to enable weights_only=True.
     train_data = torch.load(train_path, weights_only=False)
     val_data = torch.load(val_path, weights_only=False)
     test_data = torch.load(test_path, weights_only=False)

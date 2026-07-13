@@ -156,9 +156,6 @@ xmac quick
 # Once the tap is published:
 brew tap davidnichols-ops/xmac
 brew install xmac
-
-# Or install directly from the repo:
-brew install --HEAD https://raw.githubusercontent.com/davidnichols-ops/X-MaC/main/packaging/homebrew/xmac.rb
 ```
 
 ### Linux

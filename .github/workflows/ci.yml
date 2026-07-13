@@ -95,6 +95,9 @@ jobs:
       - name: Build Rust binary
         run: cargo build --release
 
+      - name: Verify CoreML model integrity
+        run: bash scripts/verify_models.sh
+
       - name: Install binary
         run: |
           mkdir -p ~/.local/bin

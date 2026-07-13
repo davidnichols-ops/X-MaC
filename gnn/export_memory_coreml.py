@@ -231,6 +231,8 @@ def main():
     print(f"Teacher loaded from {args.checkpoint}", flush=True)
 
     # Load graphs
+    # Training data uses PyG Data objects which require pickle.
+    # TODO: migrate to safetensors to enable weights_only=True.
     train_graphs = torch.load(MEMORY_DATA_DIR / "train.pt", weights_only=False)
     print(f"Loaded {len(train_graphs)} training graphs", flush=True)
 

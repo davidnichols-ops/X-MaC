@@ -156,6 +156,8 @@ def main():
     random.seed(42)
     torch.manual_seed(42)
     teacher, _ = load_model(args.checkpoint)
+    # Training data uses PyG Data objects which require pickle.
+    # TODO: migrate to safetensors to enable weights_only=True.
     graphs = torch.load(DATA_DIR / "train.pt", weights_only=False)
     features, targets = distillation_data(teacher, graphs, args.samples)
     permutation = torch.randperm(features.size(0))

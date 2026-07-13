@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use std::time::Duration;
 use tokio::signal;
 use tokio::time::interval;
@@ -12,6 +13,11 @@ pub struct Daemon {
     interval_secs: u64,
     verbose: bool,
 }
+
+/// Cached resolution of the xmac binary path. Computed once on first
+/// call, then reused for the lifetime of the process to avoid leaking
+/// memory on every daemon cycle.
+static XMAC_BINARY: OnceLock<String> = OnceLock::new();
 
 impl Daemon {
     pub fn new(config: ConfigManager, interval_secs: u64, verbose: bool) -> Self {
@@ -87,35 +93,38 @@ impl Daemon {
     /// Resolve the xmac binary path. Prefers the current executable's
     /// directory (which may be the .app bundle), then falls back to
     /// standard install locations. Never uses bare "xmac" from PATH
-    /// to prevent PATH injection attacks.
+    /// to prevent PATH injection attacks. The result is cached for
+    /// the lifetime of the process.
     fn xmac_binary(&self) -> &str {
-        // Try current_exe directory first — this handles the .app bundle case
-        // and the case where the user ran ./target/release/x-mac daemon.
-        if let Ok(exe) = std::env::current_exe() {
-            if let Some(dir) = exe.parent() {
-                let candidate = dir.join("xmac");
-                if candidate.exists() {
-                    return Box::leak(candidate.to_string_lossy().into_owned().into_boxed_str());
-                }
-                // The binary might be named "x-mac" not "xmac"
-                let candidate2 = dir.join("x-mac");
-                if candidate2.exists() {
-                    return Box::leak(candidate2.to_string_lossy().into_owned().into_boxed_str());
+        XMAC_BINARY.get_or_init(|| {
+            // Try current_exe directory first — this handles the .app bundle case
+            // and the case where the user ran ./target/release/x-mac daemon.
+            if let Ok(exe) = std::env::current_exe() {
+                if let Some(dir) = exe.parent() {
+                    let candidate = dir.join("xmac");
+                    if candidate.exists() {
+                        return candidate.to_string_lossy().into_owned();
+                    }
+                    // The binary might be named "x-mac" not "xmac"
+                    let candidate2 = dir.join("x-mac");
+                    if candidate2.exists() {
+                        return candidate2.to_string_lossy().into_owned();
+                    }
                 }
             }
-        }
-        // Fall back to standard install locations
-        for path in &[
-            "/opt/homebrew/bin/xmac",
-            "/usr/local/bin/xmac",
-            "/usr/local/bin/x-mac",
-        ] {
-            if std::path::Path::new(path).exists() {
-                return path;
+            // Fall back to standard install locations
+            for path in &[
+                "/opt/homebrew/bin/xmac",
+                "/usr/local/bin/xmac",
+                "/usr/local/bin/x-mac",
+            ] {
+                if std::path::Path::new(path).exists() {
+                    return path.to_string();
+                }
             }
-        }
-        // Last resort: bare "xmac" (less safe but better than failing silently)
-        "xmac"
+            // Last resort: bare "xmac" (less safe but better than failing silently)
+            "xmac".to_string()
+        })
     }
 
     /// Run a single daemon cycle — telemetry collection, rule checking,

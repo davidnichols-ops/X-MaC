@@ -12,20 +12,28 @@ APP_BUNDLE="$STAGING_DIR/$APP_NAME.app"
 
 echo "=== Building X-MaC GUI ==="
 
+# Step 0: Verify CoreML model integrity
+echo "[0/6] Verifying CoreML model integrity..."
+if [ -f "$PROJECT_ROOT/scripts/verify_models.sh" ]; then
+    bash "$PROJECT_ROOT/scripts/verify_models.sh"
+else
+    echo "  WARNING: verify_models.sh not found, skipping model verification"
+fi
+
 # Step 1: Build the Rust binary
-echo "[1/5] Building Rust binary..."
+echo "[1/6] Building Rust binary..."
 cd "$PROJECT_ROOT"
 cargo build --release 2>&1 | tail -3
 cp target/release/x-mac ~/.local/bin/xmac
 echo "  Rust binary installed to ~/.local/bin/xmac"
 
 # Step 2: Build the Swift app
-echo "[2/5] Building Swift app..."
+echo "[2/6] Building Swift app..."
 cd "$SCRIPT_DIR/XMacApp"
 swift build -c release 2>&1 | tail -5
 
 # Step 3: Create the .app bundle
-echo "[3/5] Creating .app bundle..."
+echo "[3/6] Creating .app bundle..."
 rm -rf "$STAGING_DIR"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
@@ -44,7 +52,7 @@ if [ -f "$RUST_BIN" ]; then
 fi
 
 # Step 4: Copy resources
-echo "[4/5] Copying resources..."
+echo "[4/6] Copying resources..."
 # Copy CoreML model
 if [ -d "$PROJECT_ROOT/gnn/XMacGNN.mlpackage" ]; then
     cp -r "$PROJECT_ROOT/gnn/XMacGNN.mlpackage" "$APP_BUNDLE/Contents/Resources/"
@@ -84,7 +92,7 @@ if [ -f "$SCRIPT_DIR/install_launch_agent.sh" ]; then
 fi
 
 # Step 5: Create Info.plist
-echo "[5/5] Creating Info.plist..."
+echo "[5/6] Creating Info.plist..."
 cat > "$APP_BUNDLE/Contents/Info.plist" << 'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -99,7 +107,7 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << 'PLIST'
     <key>CFBundleVersion</key>
     <string>4</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.1.0</string>
+    <string>2.1.1</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleExecutable</key>
