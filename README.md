@@ -21,7 +21,7 @@
 
 X-MaC is a free, open-source Mac cleaner that combines a fast Rust scan engine, a Graph Neural Network safety scorer, and a native SwiftUI app — all running entirely on your device. Nothing ever leaves your Mac.
 
-> **Status:** Active development. The CLI is stable and fully functional. The GUI is feature-complete but not yet notarized for distribution. The GNN model is trained and exported to CoreML but accuracy is still improving (currently ~27% on 27-class node classification — see [gnn/README.md](gnn/README.md) for details). Looking for contributors — see [GOOD_FIRST_ISSUES.md](GOOD_FIRST_ISSUES.md).
+> **Status:** Active development. The CLI is stable and fully functional. The GUI is feature-complete but not yet notarized for distribution. Two GNN models are trained and exported to CoreML: the file safety scorer (99.76% validation accuracy on 27-class node classification) and the memory optimization model (6 action classes + pressure prediction). Looking for contributors — see [GOOD_FIRST_ISSUES.md](GOOD_FIRST_ISSUES.md).
 
 ## Why X-MaC?
 

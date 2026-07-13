@@ -20,7 +20,7 @@ This document tracks planned work. Items are driven by community interest and co
 
 - [ ] Publish Homebrew tap (`brew tap davidnichols-ops/xmac`)
 - [ ] Notarize the macOS app for distribution
-- [ ] GNN model accuracy improvement (currently ~27% on 27-class classification, target 95%)
+- [ ] GNN model improvement — file scorer is at 99.76% val accuracy, memory model needs final accuracy verification
 - [ ] Localization — the UI is English-only right now
 - [ ] Dark/light mode theming (currently dark-only)
 
