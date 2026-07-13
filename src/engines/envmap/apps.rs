@@ -312,6 +312,7 @@ mod tests {
         assert!(parse_app_bundle(&app).is_none());
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn enumerate_apps_in_walks_directory() {
         let tmp = TempDir::new().unwrap();

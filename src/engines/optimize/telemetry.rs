@@ -713,6 +713,7 @@ fn parse_swapusage() -> (u64, u64) {
 mod tests {
     use super::*;
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn collect_system_telemetry() {
         let tel = SystemTelemetry::collect();
@@ -721,6 +722,7 @@ mod tests {
         assert!(tel.pressure_level >= 1 && tel.pressure_level <= 4);
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn collect_all_processes() {
         let procs = ProcessTelemetry::collect_all();
@@ -732,6 +734,7 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn collect_full_snapshot() {
         let snap = TelemetrySnapshot::collect();

@@ -593,6 +593,7 @@ const COMPRESSOR_FEATURE_DIM: usize = 6;
 mod tests {
     use super::*;
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn build_graph_from_snapshot() {
         let mut builder = GraphBuilder::new(50, true, 10);
@@ -616,6 +617,7 @@ mod tests {
         assert!(has_hardware);
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn process_features_are_24_dim() {
         let builder = GraphBuilder::new(50, true, 10);
@@ -664,6 +666,7 @@ mod tests {
         assert!(graph.prediction_confidence.is_some());
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn graph_with_trends() {
         let mut builder = GraphBuilder::new(50, true, 10);

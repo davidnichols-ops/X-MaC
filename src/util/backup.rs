@@ -62,14 +62,17 @@ fn extract_volume_root(path: &Path) -> Option<PathBuf> {
         // /mnt/<name>/... → /mnt/<name>
         for prefix in &["/media/", "/mnt/"] {
             if let Some(rest) = path_str.strip_prefix(prefix) {
-                let parts: Vec<&str> = rest.splitn(3, '/').collect();
-                if parts.len() >= 2 {
-                    return Some(PathBuf::from(format!(
-                        "{}{}/{}",
-                        prefix, parts[0], parts[1]
-                    )));
-                } else if !parts[0].is_empty() {
-                    return Some(PathBuf::from(format!("{}{}", prefix, parts[0])));
+                let parts: Vec<&str> = rest.split('/').filter(|s| !s.is_empty()).collect();
+                if *prefix == "/media/" {
+                    // /media/<user>/<name> needs at least 2 components
+                    if parts.len() >= 2 {
+                        return Some(PathBuf::from(format!("/media/{}/{}", parts[0], parts[1])));
+                    }
+                } else {
+                    // /mnt/<name> needs at least 1 component
+                    if !parts.is_empty() {
+                        return Some(PathBuf::from(format!("/mnt/{}", parts[0])));
+                    }
                 }
             }
         }
