@@ -352,7 +352,6 @@ impl MemoryStats {
                         }
                         if let Some(rest) = line.strip_prefix("VmRSS:") {
                             rss = rest
-                                .trim()
                                 .split_whitespace()
                                 .next()
                                 .and_then(|n| n.parse::<u64>().ok())
