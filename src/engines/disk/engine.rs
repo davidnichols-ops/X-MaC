@@ -96,9 +96,13 @@ fn linux_stats() -> Option<ApfsStats> {
         }
         let buf = buf.assume_init();
 
-        let block_size = buf.f_frsize;
+        #[allow(clippy::unnecessary_cast)]
+        let block_size = buf.f_frsize as u64;
+        #[allow(clippy::unnecessary_cast)]
         let total = buf.f_blocks as u64 * block_size;
+        #[allow(clippy::unnecessary_cast)]
         let free = buf.f_bavail as u64 * block_size;
+        #[allow(clippy::unnecessary_cast)]
         let used = (buf.f_blocks as u64 - buf.f_bfree as u64) * block_size;
 
         // Best-effort: /usr as "system", home as "data"

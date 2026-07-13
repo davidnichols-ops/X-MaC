@@ -347,12 +347,12 @@ impl MemoryStats {
                     let mut rss = 0u64;
                     let mut proc_name = String::new();
                     for line in content.lines() {
-                        if line.starts_with("Name:") {
-                            proc_name = line[5..].trim().to_string();
+                        if let Some(rest) = line.strip_prefix("Name:") {
+                            proc_name = rest.trim().to_string();
                         }
-                        if line.starts_with("VmRSS:") {
-                            let rest = line[6..].trim();
+                        if let Some(rest) = line.strip_prefix("VmRSS:") {
                             rss = rest
+                                .trim()
                                 .split_whitespace()
                                 .next()
                                 .and_then(|n| n.parse::<u64>().ok())
