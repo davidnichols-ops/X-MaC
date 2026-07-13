@@ -189,6 +189,11 @@ pub enum Commands {
 
     /// View cleanup and scan history with trends and savings reports.
     History(HistoryArgs),
+
+    /// Generate shell completion scripts. Source them in your shell config
+    /// for tab-completion of xmac commands and flags.
+    /// Example: `xmac completions --shell zsh > ~/.zsh/completions/_xmac`
+    Completions(CompletionsArgs),
 }
 
 impl Commands {
@@ -215,6 +220,7 @@ impl Commands {
             Commands::Zen(_) => crate::core::types::EngineId::All,
             Commands::Advisor(_) => crate::core::types::EngineId::All,
             Commands::History(_) => crate::core::types::EngineId::All,
+            Commands::Completions(_) => crate::core::types::EngineId::All,
         }
     }
 }
@@ -306,6 +312,10 @@ pub struct CleanArgs {
     /// Detect package-manager caches (npm, pip, cargo, Homebrew, go, etc.).
     #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
     pub pkg_caches: bool,
+
+    /// Detect Docker image and build caches. Safe to prune via `docker system prune`.
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub docker: bool,
 
     /// Detect temp files (.DS_Store, editor swap files, /tmp contents).
     #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
@@ -479,6 +489,7 @@ pub enum OutputFormat {
     Json,
     JsonPretty,
     Report,
+    Csv,
 }
 
 /// Arguments for the `maintain` command — system maintenance tasks.
@@ -814,4 +825,26 @@ pub struct HistoryArgs {
     /// Clear all history.
     #[arg(long)]
     pub clear: bool,
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Completions command
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Arguments for the `completions` command.
+#[derive(Args, Debug, Clone)]
+pub struct CompletionsArgs {
+    /// Which shell to generate completions for.
+    #[arg(long)]
+    pub shell: ShellArg,
+}
+
+/// Supported shells for completion generation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ShellArg {
+    Bash,
+    Zsh,
+    Fish,
+    Elvish,
+    PowerShell,
 }

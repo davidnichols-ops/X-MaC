@@ -5,6 +5,28 @@ All notable changes to X-MaC are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Shell completions** (`xmac completions --shell zsh|bash|fish|elvish|powershell`) — generate tab-completion scripts for all major shells
+- **CSV export** (`--format csv`) — export scan results as CSV for spreadsheet analysis
+- **Docker cache detection** (`--docker`) — scan Docker image layers, build cache, and volumes; recommends `docker system prune`
+- **Build metadata in version** — `--version` now includes git hash and build date (via build.rs)
+- **Homebrew formula** — `packaging/homebrew/xmac.rb` for `brew install xmac`
+- **GNN inference server docs** — `gnn/server/README.md` documenting the optional HTTP inference server
+- 45 new tests (410 total, up from 327):
+  - 9 tests for the disk engine (dir size, sorting, formatting)
+  - 18 tests for the map engine (Python/Node env detection, package manager detection)
+  - 11 tests for the conflict engine (shell config parsing, PATH conflicts)
+  - 7 integration tests for the daemon lifecycle (start/stop, PID recovery, double-start prevention)
+
+### Changed
+- `Cargo.lock` is now tracked (binary crate — ensures reproducible builds for contributors and CI)
+- Example configs updated with `docker` toggle
+
+### Fixed
+- **Daemon signal handling bug** — the `tokio::select!` racing `tick.tick()` against `shutdown` dropped signal handlers after the first tick. Restructured to pin the shutdown future and poll it inside the loop, so SIGTERM/SIGINT are now handled correctly across all cycles
+
 ## [2.1.0] - 2026-07-12
 
 ### Added

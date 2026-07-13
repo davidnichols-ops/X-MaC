@@ -11,7 +11,7 @@
 [![Swift](https://img.shields.io/badge/Swift-5.9+-orange?style=flat-square&logo=swift)](https://swift.org)
 [![Platform](https://img.shields.io/badge/macOS-13%2B-blue?style=flat-square&logo=apple)](https://www.apple.com/macos)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-327+-brightgreen?style=flat-square)](#testing)
+[![Tests](https://img.shields.io/badge/tests-410+-brightgreen?style=flat-square)](#testing)
 
 [Install](#installation) · [Features](#features) · [Architecture](#architecture) · [Contributing](CONTRIBUTING.md) · [Roadmap](ROADMAP.md)
 
@@ -41,7 +41,7 @@ X-MaC is a free, open-source Mac cleaner that combines a fast Rust scan engine, 
 
 ```bash
 xmac quick              # clean + maintain + disk overview in one shot
-xmac clean              # find reclaimable space (caches, build artifacts, browsers)
+xmac clean              # find reclaimable space (caches, build artifacts, browsers, Docker)
 xmac purge              # clean + delete with confirmation and undo
 xmac disk               # disk usage breakdown with APFS-accurate stats
 xmac maintain           # flush DNS, reindex Spotlight, rebuild LaunchServices
@@ -54,6 +54,7 @@ xmac zen                # one-click comprehensive optimization (preview or execu
 xmac config             # manage config, profiles, settings
 xmac daemon             # background daemon with auto-purge and automation rules
 xmac history            # scan history and analytics
+xmac completions        # generate shell completions (zsh, bash, fish, elvish, powershell)
 ```
 
 ### GUI
@@ -237,7 +238,7 @@ X-MaC/
 ## Testing
 
 ```bash
-cargo test                  # run all 327+ tests
+cargo test                  # run all 410+ tests
 cargo test --lib            # library tests only (fast)
 cargo test -- --nocapture   # with output
 cargo clippy -- -D warnings # lint

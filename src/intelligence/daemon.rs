@@ -36,6 +36,8 @@ impl Daemon {
         let mut tick = interval(Duration::from_secs(self.interval_secs));
 
         // Set up graceful shutdown via SIGTERM/SIGINT.
+        // We poll the shutdown future inside the loop so signal handlers
+        // stay alive across all cycles (not just the first tick).
         let shutdown = async {
             #[cfg(unix)]
             {
@@ -54,23 +56,30 @@ impl Daemon {
             }
         };
 
-        let sig = tokio::select! {
-            _ = tick.tick() => {
-                // First tick fires immediately — run a cycle.
-                loop {
-                    self.run_cycle().await;
-                    tick.tick().await;
-                }
-            }
-            sig = shutdown => {
-                if self.verbose {
-                    eprintln!("xmac daemon: received {}, shutting down", sig);
-                }
-                sig
-            }
-        };
+        // Pin the shutdown future so we can poll it across loop iterations.
+        tokio::pin!(shutdown);
 
-        let _ = sig;
+        // First tick fires immediately — run a cycle, then check for shutdown
+        // on every subsequent tick.
+        tick.tick().await; // consume the immediate first tick
+        loop {
+            // Run a cycle.
+            self.run_cycle().await;
+
+            // Wait for either the next tick or a shutdown signal.
+            tokio::select! {
+                _ = &mut shutdown => {
+                    if self.verbose {
+                        eprintln!("xmac daemon: received shutdown signal, shutting down");
+                    }
+                    break;
+                }
+                _ = tick.tick() => {
+                    // Next cycle — loop continues.
+                }
+            }
+        }
+
         self.remove_pid_file();
         Ok(())
     }

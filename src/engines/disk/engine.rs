@@ -414,3 +414,121 @@ impl Default for DiskEngine {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cli::args::DiskArgs;
+    use crate::util::disk::format_bytes;
+    use std::fs;
+    use std::path::PathBuf;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_disk_engine_new_preserves_args() {
+        let args = DiskArgs {
+            top: 5,
+            min_size: "500M".to_string(),
+            paths: vec![PathBuf::from("/tmp")],
+        };
+        let engine = DiskEngine::new(args);
+        assert_eq!(engine.id(), EngineId::All);
+        assert_eq!(engine.name(), "Disk Engine");
+        assert!(!engine.description().is_empty());
+    }
+
+    #[test]
+    fn test_disk_engine_default_values() {
+        let engine = DiskEngine::default();
+        assert_eq!(engine.id(), EngineId::All);
+        assert_eq!(engine.name(), "Disk Engine");
+        assert!(engine.description().contains("disk usage"));
+    }
+
+    #[test]
+    fn test_dir_size_physical_nonexistent_returns_zero() {
+        let missing = std::path::Path::new("/this/path/does/not/exist/xyz");
+        assert_eq!(DiskEngine::dir_size_physical(missing), 0);
+    }
+
+    #[test]
+    fn test_dir_size_physical_sums_files() {
+        let dir = TempDir::new().unwrap();
+        // Write a few files with known logical sizes.
+        fs::write(dir.path().join("a.bin"), vec![0u8; 4096]).unwrap();
+        fs::write(dir.path().join("b.bin"), vec![0u8; 8192]).unwrap();
+        let sub = dir.path().join("sub");
+        fs::create_dir(&sub).unwrap();
+        fs::write(sub.join("c.bin"), vec![0u8; 2048]).unwrap();
+
+        let size = DiskEngine::dir_size_physical(dir.path());
+        // Physical size is blocks*512, which is >= logical size sum.
+        assert!(size >= 4096 + 8192 + 2048);
+        assert!(size > 0);
+    }
+
+    #[test]
+    fn test_dir_size_fast_nonexistent_returns_zero() {
+        let missing = std::path::Path::new("/this/path/does/not/exist/abc");
+        assert_eq!(dir_size_fast(missing), 0);
+    }
+
+    #[test]
+    fn test_dir_size_fast_sums_files() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("x.bin"), vec![0u8; 4096]).unwrap();
+        let nested = dir.path().join("nested/deep");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(nested.join("y.bin"), vec![0u8; 8192]).unwrap();
+
+        let size = dir_size_fast(dir.path());
+        assert!(size >= 4096 + 8192);
+    }
+
+    #[test]
+    fn test_top_n_sorting_truncates_largest() {
+        // Replicates the sort-by-descending-size + truncate(top) logic
+        // used in DiskEngine::scan for directory entries.
+        let mut entries: Vec<(PathBuf, u64, bool)> = vec![
+            (PathBuf::from("/a"), 100, true),
+            (PathBuf::from("/b"), 500, true),
+            (PathBuf::from("/c"), 300, true),
+            (PathBuf::from("/d"), 50, false),
+            (PathBuf::from("/e"), 1000, true),
+        ];
+        entries.sort_by_key(|e| std::cmp::Reverse(e.1));
+        entries.truncate(3);
+
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].1, 1000);
+        assert_eq!(entries[1].1, 500);
+        assert_eq!(entries[2].1, 300);
+    }
+
+    #[test]
+    fn test_format_bytes_units_scale_correctly() {
+        assert!(format_bytes(0).contains("B"));
+        assert!(format_bytes(1024).contains("KB"));
+        assert!(format_bytes(1024 * 1024).contains("MB"));
+        assert!(format_bytes(1024 * 1024 * 1024).contains("GB"));
+    }
+
+    #[test]
+    fn test_apfs_stats_struct_fields_are_consistent() {
+        // Sanity-check the ApfsStats struct can be constructed and that
+        // total = system + data + free is a plausible invariant (we only
+        // verify field arithmetic, not real disk values).
+        let stats = ApfsStats {
+            total: 1_000_000_000,
+            free: 400_000_000,
+            system_used: 200_000_000,
+            data_used: 400_000_000,
+            applications_used: 50_000_000,
+        };
+        assert_eq!(
+            stats.system_used + stats.data_used + stats.free,
+            1_000_000_000
+        );
+        assert!(stats.applications_used <= stats.data_used);
+    }
+}

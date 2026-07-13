@@ -148,6 +148,11 @@ impl CleanRules {
             paths.push(home.join("Library/Caches/Homebrew"));
             paths.push(home.join("Library/Caches/go-build"));
             paths.push(home.join(".cache"));
+            // Docker Desktop on macOS stores data inside the VM, but the
+            // Docker CLI config and build cache are on the host.
+            paths.push(home.join("Library/Containers/com.docker.docker/Data/vms/0/data"));
+            paths.push(home.join(".docker/build"));
+            paths.push(home.join(".docker/cache"));
         } else {
             // Linux: XDG cache home covers pip, go-build, etc.
             let xdg_cache = std::env::var("XDG_CACHE_HOME")
@@ -162,6 +167,42 @@ impl CleanRules {
             paths.push(PathBuf::from("/var/cache/dnf"));
             paths.push(PathBuf::from("/var/cache/pacman/pkg"));
             paths.push(PathBuf::from("/var/cache/zypp"));
+            // Docker on Linux — build cache and image layers
+            paths.push(home.join(".docker/build"));
+            paths.push(home.join(".docker/cache"));
+            // Root-owned Docker data (will only be scanned if running as root)
+            paths.push(PathBuf::from("/var/lib/docker/overlay2"));
+            paths.push(PathBuf::from("/var/lib/docker/buildkit"));
+        }
+        // Docker build cache (cross-platform, Docker uses this path on all OSes)
+        paths.push(home.join(".local/share/docker/overlay2"));
+        paths
+    }
+
+    /// Docker image and container cache paths. Docker Desktop and Docker Engine
+    /// store images, containers, build caches, and volumes in well-known
+    /// directories. These can grow to many GB and are safe to prune via
+    /// `docker system prune`.
+    pub fn docker_paths(&self) -> Vec<PathBuf> {
+        let home = MacosUtils::home_dir();
+        let mut paths = Vec::new();
+
+        if cfg!(target_os = "macos") {
+            // Docker Desktop on macOS stores everything inside the VM, but
+            // the Docker CLI config and some caches are on the host.
+            paths.push(home.join("Library/Containers/com.docker.docker/Data"));
+            paths.push(home.join(".docker/build"));
+            paths.push(home.join(".docker/cache"));
+        } else {
+            // Linux: Docker Engine stores data under /var/lib/docker
+            paths.push(PathBuf::from("/var/lib/docker/overlay2"));
+            paths.push(PathBuf::from("/var/lib/docker/buildkit"));
+            paths.push(PathBuf::from("/var/lib/docker/volumes"));
+            paths.push(PathBuf::from("/var/lib/docker/image"));
+            // Rootless Docker
+            paths.push(home.join(".local/share/docker/overlay2"));
+            paths.push(home.join(".local/share/docker/buildkit"));
+            paths.push(home.join(".local/share/docker/volumes"));
         }
         paths
     }

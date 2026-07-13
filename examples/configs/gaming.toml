@@ -10,6 +10,7 @@ min_size_mb = 1
 dedup = false
 xcode = true
 pkg_caches = true
+docker = true
 temp = true
 build_artifacts = true
 browser = true

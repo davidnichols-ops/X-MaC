@@ -118,6 +118,8 @@ pub struct CleanConfig {
     #[serde(default = "default_true")]
     pub pkg_caches: bool,
     #[serde(default = "default_true")]
+    pub docker: bool,
+    #[serde(default = "default_true")]
     pub temp: bool,
     #[serde(default = "default_true")]
     pub build_artifacts: bool,
@@ -160,6 +162,7 @@ impl Default for CleanConfig {
             dedup: false,
             xcode: true,
             pkg_caches: true,
+            docker: true,
             temp: true,
             build_artifacts: true,
             browser: true,

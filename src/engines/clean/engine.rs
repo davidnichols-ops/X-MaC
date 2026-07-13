@@ -64,6 +64,9 @@ impl CleanEngine {
         if self.args.pkg_caches && !cc.pkg_caches {
             self.args.pkg_caches = false;
         }
+        if self.args.docker && !cc.docker {
+            self.args.docker = false;
+        }
         if self.args.temp && !cc.temp {
             self.args.temp = false;
         }
@@ -414,6 +417,56 @@ impl CleanEngine {
         }
 
         Ok(hasher.finalize().to_hex().to_string())
+    }
+
+    // ---- Docker cache detection ------------------------------------------
+
+    /// Detect Docker image and build cache directories. These can grow to
+    /// many GB and are safe to prune via `docker system prune`.
+    async fn scan_docker_caches(&self, _ctx: &ScanContext) -> (Vec<Finding>, u64) {
+        let mut findings = Vec::new();
+        let mut items = 0u64;
+
+        for path in self.rules.docker_paths() {
+            if !path.exists() {
+                continue;
+            }
+            items += 1;
+
+            let size = if path.is_dir() {
+                CleanScanner::dir_size(&path)
+            } else {
+                CleanScanner::file_size(&path)
+            };
+
+            if size == 0 {
+                continue;
+            }
+
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| path.to_string_lossy().to_string());
+
+            findings.push(
+                Finding::new(
+                    EngineId::Clean,
+                    Severity::Medium,
+                    Category::PackageManagerCache,
+                    Target::Path(path.clone()),
+                    "Docker cache detected",
+                    format!(
+                        "Found Docker cache '{}' with size {} — prune with 'docker system prune'",
+                        name,
+                        crate::util::disk::format_bytes(size)
+                    ),
+                )
+                .with_size(size)
+                .with_hint("Run 'docker system prune -a' to remove unused images, containers, and build cache".to_string()),
+            );
+        }
+
+        (findings, items)
     }
 
     // ---- New scan methods: package-manager caches ------------------------
@@ -1271,6 +1324,15 @@ impl Engine for CleanEngine {
             }
         }
 
+        if self.args.docker {
+            let (docker_findings, docker_items) = self.scan_docker_caches(&ctx).await;
+            items_scanned += docker_items;
+            findings_count += docker_findings.len() as u64;
+            for finding in docker_findings {
+                ctx.emit(finding).await;
+            }
+        }
+
         if self.args.temp {
             let (temp_findings, temp_items) = self.scan_temp_files(&ctx).await;
             items_scanned += temp_items;
@@ -1385,6 +1447,7 @@ impl CleanEngine {
             dedup: false,
             xcode: true,
             pkg_caches: true,
+            docker: true,
             temp: true,
             build_artifacts: true,
             browser: true,

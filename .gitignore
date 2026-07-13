@@ -2,7 +2,8 @@
 /target/
 /.cargo/
 *.rs.bk
-Cargo.lock
+# Cargo.lock IS tracked — this is a binary crate, not a library.
+# Tracking it ensures reproducible builds for all contributors and CI.
 
 # Swift / Xcode
 gui/XMacApp/.build/

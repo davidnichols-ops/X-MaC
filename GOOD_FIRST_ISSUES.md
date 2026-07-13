@@ -15,15 +15,17 @@ Pick an issue that interests you, comment on it (or just open a PR), and ask for
 - [ ] Add inline doc comments to all public functions in `src/config/store.rs`
 
 ### Tests
-- [ ] Add tests for the `disk` engine (currently has no unit tests)
-- [ ] Add tests for the `map` engine (Python/Node environment detection)
-- [ ] Add tests for the `conflict` engine (PATH conflict detection)
+- [x] Add tests for the `disk` engine (9 tests added)
+- [x] Add tests for the `map` engine (18 tests added — Python/Node env detection)
+- [x] Add tests for the `conflict` engine (11 tests added — shell config parsing)
+- [x] Add daemon lifecycle integration tests (7 tests added)
 - [ ] Add integration test for `xmac zen --no-clean --no-maintain` (dry-run preview)
 
 ### CLI
-- [ ] Add `--version` flag output with build metadata (git hash, build date)
+- [x] Add `--version` flag output with build metadata (git hash, build date)
 - [ ] Add `xmac doctor` command that checks system health and prints recommendations
-- [ ] Add shell completion generation (`xmac completions --shell zsh`)
+- [x] Add shell completion generation (`xmac completions --shell zsh`)
+- [x] Add CSV export (`--format csv`) for scan results
 
 ### GUI
 - [ ] Add a "Largest files" view when clicking a disk donut segment
@@ -39,8 +41,8 @@ Pick an issue that interests you, comment on it (or just open a PR), and ask for
 ## Medium-Difficulty Tasks
 
 - [ ] Implement duplicate file finder with BLAKE3 hashing (CLI flag exists, logic not implemented)
-- [ ] Add Homebrew formula for `xmac` CLI
-- [ ] Add Docker image cache detection to the clean engine
+- [x] Add Homebrew formula for `xmac` CLI (`packaging/homebrew/xmac.rb`)
+- [x] Add Docker image cache detection to the clean engine (`--docker` flag)
 - [ ] Implement scheduled scan UI in the GUI (backend exists via daemon)
 - [ ] Add Notification Center integration for scan completion on macOS
 - [ ] Implement Space Lens (drill-down treemap) in the GUI

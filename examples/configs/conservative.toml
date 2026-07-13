@@ -10,6 +10,7 @@ min_size_mb = 10         # only flag files >= 10MB
 dedup = false
 xcode = true
 pkg_caches = true
+docker = false
 temp = true
 build_artifacts = false  # don't touch build artifacts
 browser = false          # don't touch browser caches

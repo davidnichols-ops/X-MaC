@@ -119,6 +119,9 @@ async fn main() -> Result<()> {
         cli::args::Commands::History(args) => {
             return run_history(&cli, args);
         }
+        cli::args::Commands::Completions(args) => {
+            return run_completions(args.clone());
+        }
     };
 
     drop(ctx);
@@ -1023,5 +1026,21 @@ fn run_history(_cli: &Cli, args: &cli::args::HistoryArgs) -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+/// Generate shell completion scripts.
+fn run_completions(args: cli::args::CompletionsArgs) -> Result<()> {
+    use clap::CommandFactory;
+    use cli::args::ShellArg;
+    let mut cmd = cli::args::Cli::command();
+    let shell = match args.shell {
+        ShellArg::Bash => clap_complete::Shell::Bash,
+        ShellArg::Zsh => clap_complete::Shell::Zsh,
+        ShellArg::Fish => clap_complete::Shell::Fish,
+        ShellArg::Elvish => clap_complete::Shell::Elvish,
+        ShellArg::PowerShell => clap_complete::Shell::PowerShell,
+    };
+    clap_complete::generate(shell, &mut cmd, "xmac", &mut std::io::stdout());
     Ok(())
 }

@@ -55,6 +55,41 @@ impl OutputWriter {
             OutputFormat::JsonPretty | OutputFormat::Report => {
                 self.buffer.push(finding.clone());
             }
+            OutputFormat::Csv => {
+                // CSV: one finding per line, write header on first finding
+                if self.buffer.is_empty() {
+                    writeln!(
+                        self.writer,
+                        "id,engine,severity,category,title,description,size_bytes,target"
+                    )?;
+                }
+                self.buffer.push(finding.clone());
+                let target_str = match &finding.target {
+                    crate::core::types::Target::Path(p) => p.display().to_string(),
+                    crate::core::types::Target::Process(pid) => format!("pid:{}", pid),
+                    crate::core::types::Target::Port(p) => format!("port:{}", p),
+                    crate::core::types::Target::EnvironmentVariable(v) => v.clone(),
+                    crate::core::types::Target::LaunchdLabel(l) => l.clone(),
+                    crate::core::types::Target::Package(p) => p.clone(),
+                };
+                // Escape quotes in CSV fields
+                let esc = |s: &str| s.replace('"', "\"\"");
+                let engine_str = format!("{:?}", finding.engine);
+                let severity_str = format!("{:?}", finding.severity);
+                let category_str = format!("{:?}", finding.category);
+                writeln!(
+                    self.writer,
+                    "{},{},{},{},\"{}\",\"{}\",{},\"{}\"",
+                    finding.id,
+                    engine_str,
+                    severity_str,
+                    category_str,
+                    esc(&finding.title),
+                    esc(&finding.description),
+                    finding.size_bytes.unwrap_or(0),
+                    esc(&target_str),
+                )?;
+            }
         }
         Ok(())
     }

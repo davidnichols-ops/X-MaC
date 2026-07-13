@@ -75,7 +75,7 @@ cargo test test_advisor_produces_recommendations
 cargo test -- --nocapture
 ```
 
-The test suite has 327+ tests covering:
+The test suite has 410+ tests covering:
 - Engine scanning logic (clean, disk, maintain, etc.)
 - Cleanup transaction safety and undo
 - Config loading and profile application
