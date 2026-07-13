@@ -162,6 +162,33 @@ pub enum Commands {
     /// kill memory-hungry processes. On macOS runs `purge`; on Linux drops
     /// kernel caches. Shows before/after comparison.
     RamBoost(RamBoostArgs),
+
+    /// Optimize memory: collect telemetry, build a memory graph, and predict
+    /// pressure. In observe mode (default), no actions are taken — the engine
+    /// reports the current state and predicted pressure trajectory.
+    Optimize(OptimizeArgs),
+
+    /// View or edit configuration. Supports `init`, `show`, `profile`,
+    /// `set`, and `path` subcommands.
+    Config(ConfigArgs),
+
+    /// Run the background daemon for smart scheduling, telemetry collection,
+    /// and proactive optimization. Manages a PID file for single-instance
+    /// enforcement and supports graceful shutdown via SIGTERM/SIGINT.
+    Daemon(DaemonArgs),
+
+    /// Zen Mode — one-click comprehensive optimization with preview. Runs
+    /// a clean scan, memory optimization, and safe maintenance in one pass,
+    /// then shows a summary of what was done and what was reclaimed.
+    Zen(ZenArgs),
+
+    /// AI Advisor — analyzes system state and produces natural-language
+    /// recommendations. Explains what's happening and what to do in plain
+    /// English, with severity-ranked actionable suggestions.
+    Advisor(AdvisorArgs),
+
+    /// View cleanup and scan history with trends and savings reports.
+    History(HistoryArgs),
 }
 
 impl Commands {
@@ -182,6 +209,12 @@ impl Commands {
             Commands::Purge(_) => crate::core::types::EngineId::Clean,
             Commands::Install(_) => crate::core::types::EngineId::All,
             Commands::RamBoost(_) => crate::core::types::EngineId::All,
+            Commands::Optimize(_) => crate::core::types::EngineId::All,
+            Commands::Config(_) => crate::core::types::EngineId::All,
+            Commands::Daemon(_) => crate::core::types::EngineId::All,
+            Commands::Zen(_) => crate::core::types::EngineId::All,
+            Commands::Advisor(_) => crate::core::types::EngineId::All,
+            Commands::History(_) => crate::core::types::EngineId::All,
         }
     }
 }
@@ -595,5 +628,187 @@ pub struct RamBoostArgs {
     /// Enabled by default — disable with --allow-system-kill (dangerous).
     #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
     pub protect_system: bool,
+
+    /// Use osascript to run purge with admin privileges (shows macOS password dialog).
+    #[arg(long, default_value = "false")]
+    pub privileged: bool,
+}
+
+/// Arguments for the `optimize` command — memory telemetry, graph building,
+/// and pressure prediction. Phase 1 (observe) collects data and predicts;
+/// future phases will add action recommendation and execution.
+#[derive(Args, Debug, Clone)]
+pub struct OptimizeArgs {
+    /// Observation mode: collect telemetry and predict pressure without
+    /// taking any actions. This is the default and safest mode.
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub observe: bool,
+
+    /// Maximum number of process nodes to include in the memory graph
+    /// (sorted by RSS, descending). Larger graphs capture more detail
+    /// but increase inference latency.
+    #[arg(long, default_value = "50")]
+    pub max_processes: usize,
+
+    /// Exclude system processes (kernel_task, launchd, WindowServer, etc.)
+    /// from the memory graph. Enabled by default for cleaner output.
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub exclude_system: bool,
+
+    /// Number of telemetry snapshots to keep in the ring buffer for
+    /// trend analysis. More snapshots = better trend detection but
+    /// more memory usage.
+    #[arg(long, default_value = "288")]
+    pub buffer_size: usize,
+
+    /// Number of top memory-consuming processes to emit as findings.
+    #[arg(long, default_value = "10")]
+    pub top_n: usize,
+
+    /// Write the memory graph as JSON to the specified file.
+    #[arg(long)]
+    pub output_graph: Option<std::path::PathBuf>,
+
+    /// Continuous mode: collect snapshots every N seconds and emit
+    /// findings for each. Set to 0 for a single snapshot (default).
+    #[arg(long, default_value = "0")]
+    pub interval_secs: u64,
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Config command
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Arguments for the `config` command.
+#[derive(Args, Debug, Clone)]
+pub struct ConfigArgs {
+    #[command(subcommand)]
+    pub action: ConfigAction,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum ConfigAction {
+    /// Create a default config file at ~/.config/xmac/config.toml.
+    Init,
+    /// Print the current config as TOML.
+    Show,
+    /// Print the config file path.
+    Path,
+    /// List available optimization profiles.
+    Profiles,
+    /// Set the active optimization profile.
+    SetProfile { name: String },
+    /// Set a specific config key (dotted path, e.g. `clean.min_age_days`).
+    Set { key: String, value: String },
+    /// Get a specific config value by dotted path.
+    Get { key: String },
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Daemon command
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Arguments for the `daemon` command.
+#[derive(Args, Debug, Clone)]
+pub struct DaemonArgs {
+    /// Run once and exit (useful for testing or cron integration).
+    #[arg(long)]
+    pub once: bool,
+
+    /// Override the check interval (seconds).
+    #[arg(long)]
+    pub interval: Option<u64>,
+
+    /// Enable verbose daemon logging.
+    #[arg(long)]
+    pub daemon_verbose: bool,
+
+    /// Check if the daemon is currently running.
+    #[arg(long)]
+    pub status: bool,
+
+    /// Stop a running daemon (sends SIGTERM via PID file).
+    #[arg(long)]
+    pub stop: bool,
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Zen Mode command
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Arguments for the `zen` command — one-click comprehensive optimization.
+#[derive(Args, Debug, Clone)]
+pub struct ZenArgs {
+    /// Preview what would be done without taking any actions.
+    #[arg(long)]
+    pub dry_run: bool,
+
+    /// Skip the memory optimization step.
+    #[arg(long)]
+    pub no_memory: bool,
+
+    /// Skip the maintenance step.
+    #[arg(long)]
+    pub no_maintain: bool,
+
+    /// Skip the disk cleanup step.
+    #[arg(long)]
+    pub no_clean: bool,
+
+    /// Use a specific optimization profile for this run.
+    #[arg(long)]
+    pub profile: Option<String>,
+
+    /// Actually execute cleanup (without this, zen mode is preview-only).
+    #[arg(long)]
+    pub execute: bool,
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Advisor command
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Arguments for the `advisor` command — AI-powered recommendations.
+#[derive(Args, Debug, Clone)]
+pub struct AdvisorArgs {
+    /// Only show recommendations at or above this severity (info, low, medium, high, critical).
+    #[arg(long, default_value = "info")]
+    pub min_severity: String,
+
+    /// Maximum number of recommendations to show.
+    #[arg(long, default_value = "20")]
+    pub top: usize,
+
+    /// Output format: text (default) or json.
+    #[arg(long, default_value = "text")]
+    pub advisor_format: String,
+
+    /// Include system health score (0-100) in the output.
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub health_score: bool,
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  History command
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Arguments for the `history` command.
+#[derive(Args, Debug, Clone)]
+pub struct HistoryArgs {
+    /// Show the last N entries.
+    #[arg(long, default_value = "20")]
+    pub last: usize,
+
+    /// Show a summary of total savings over time.
+    #[arg(long)]
+    pub summary: bool,
+
+    /// Export history as JSON to a file.
+    #[arg(long)]
+    pub export: Option<std::path::PathBuf>,
+
+    /// Clear all history.
+    #[arg(long)]
+    pub clear: bool,
 }
 

@@ -7,8 +7,10 @@ use tracing::{info, warn};
 
 mod cleanup;
 mod cli;
+mod config;
 mod core;
 mod engines;
+mod intelligence;
 mod util;
 
 use cli::{args::{Cli, OutputFormat}, output::OutputWriter};
@@ -94,6 +96,24 @@ async fn main() -> Result<()> {
         }
         cli::args::Commands::RamBoost(args) => {
             return run_ram_boost(&cli, args.clone()).await;
+        }
+        cli::args::Commands::Optimize(args) => {
+            return run_optimize(&cli, args.clone()).await;
+        }
+        cli::args::Commands::Config(args) => {
+            return run_config(&cli, args);
+        }
+        cli::args::Commands::Daemon(args) => {
+            return run_daemon(&cli, args.clone()).await;
+        }
+        cli::args::Commands::Zen(args) => {
+            return run_zen(&cli, args).await;
+        }
+        cli::args::Commands::Advisor(args) => {
+            return run_advisor(&cli, args).await;
+        }
+        cli::args::Commands::History(args) => {
+            return run_history(&cli, args);
         }
     };
 
@@ -520,3 +540,387 @@ async fn run_ram_boost(
 
     Ok(())
 }
+
+/// The `optimize` command — memory telemetry, graph building, and pressure
+/// prediction. In observe mode (default), collects a snapshot, builds the
+/// memory graph, and emits findings with predictions. No actions are taken.
+async fn run_optimize(
+    cli: &Cli,
+    args: cli::args::OptimizeArgs,
+) -> Result<()> {
+    use tokio::sync::mpsc;
+
+    let (tx, mut rx) = mpsc::channel::<core::types::Finding>(1000);
+    let ctx = Arc::new(ScanContext::new(cli, tx).await?);
+
+    // Run the optimize engine
+    let optimize_handle = {
+        let ctx = ctx.clone();
+        tokio::spawn(async move {
+            engines::optimize::OptimizeEngine::run_optimize(args, ctx).await
+        })
+    };
+
+    drop(ctx);
+
+    // Print findings as they arrive
+    let is_json = cli.global.format == cli::args::OutputFormat::Json
+        || cli.global.format == cli::args::OutputFormat::JsonPretty;
+
+    let mut findings = Vec::new();
+    while let Some(finding) = rx.recv().await {
+        if is_json {
+            serde_json::to_writer(std::io::stdout(), &finding)?;
+            println!();
+        } else {
+            println!("{}", finding.title);
+            println!("{}", finding.description);
+            if let Some(hint) = &finding.remediation_hint {
+                println!("  → {}", hint);
+            }
+            println!();
+        }
+        findings.push(finding);
+    }
+
+    optimize_handle.await??;
+
+    Ok(())
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Config command
+// ═══════════════════════════════════════════════════════════════════════
+
+fn run_config(_cli: &Cli, args: &cli::args::ConfigArgs) -> Result<()> {
+    use cli::args::ConfigAction;
+    use config::{ConfigManager, profiles::{OptimizationProfile, ProfilePreset}};
+
+    match &args.action {
+        ConfigAction::Init => {
+            let mgr = ConfigManager::load();
+            let path = mgr.path().to_path_buf();
+            mgr.ensure_config_file().map_err(|e| anyhow::anyhow!(e))?;
+            eprintln!("Created config file at: {}", path.display());
+            eprintln!("Edit it to customize X-MaC behavior.");
+            Ok(())
+        }
+        ConfigAction::Show => {
+            let mgr = ConfigManager::load();
+            let toml = toml::to_string_pretty(mgr.config()).map_err(|e| anyhow::anyhow!(e))?;
+            println!("{}", toml);
+            Ok(())
+        }
+        ConfigAction::Path => {
+            println!("{}", ConfigManager::default_config_path().display());
+            Ok(())
+        }
+        ConfigAction::Profiles => {
+            eprintln!("Available optimization profiles:\n");
+            for preset in ProfilePreset::all() {
+                eprintln!("  {:15} {}", preset.name, preset.description);
+            }
+            eprintln!("\nSet with: xmac config set-profile <name>");
+            Ok(())
+        }
+        ConfigAction::SetProfile { name } => {
+            let profile = match name.to_lowercase().as_str() {
+                "balanced" => OptimizationProfile::Balanced,
+                "gaming" => OptimizationProfile::Gaming,
+                "development" | "dev" => OptimizationProfile::Development,
+                "video" | "video_editing" | "videoediting" => OptimizationProfile::VideoEditing,
+                "conservative" => OptimizationProfile::Conservative,
+                "aggressive" => OptimizationProfile::Aggressive,
+                "custom" => OptimizationProfile::Custom,
+                _ => anyhow::bail!("Unknown profile '{}'. Available: balanced, gaming, development, video_editing, conservative, aggressive, custom", name),
+            };
+            let mut mgr = ConfigManager::load();
+            mgr.set_profile(profile);
+            mgr.save().map_err(|e| anyhow::anyhow!(e))?;
+            eprintln!("Active profile set to: {} ({})", profile.label(), profile.description());
+            Ok(())
+        }
+        ConfigAction::Set { key, value } => {
+            let mut mgr = ConfigManager::load();
+            set_config_value(mgr.config_mut(), key, value)?;
+            mgr.save().map_err(|e| anyhow::anyhow!(e))?;
+            eprintln!("Set {} = {}", key, value);
+            Ok(())
+        }
+        ConfigAction::Get { key } => {
+            let mgr = ConfigManager::load();
+            let val = get_config_value(mgr.config(), key);
+            println!("{}", val);
+            Ok(())
+        }
+    }
+}
+
+fn set_config_value(config: &mut config::Config, key: &str, value: &str) -> Result<()> {
+    use config::profiles::OptimizationProfile;
+    match key {
+        "profile" => {
+            config.profile = match value.to_lowercase().as_str() {
+                "balanced" => OptimizationProfile::Balanced,
+                "gaming" => OptimizationProfile::Gaming,
+                "development" | "dev" => OptimizationProfile::Development,
+                "video_editing" | "videoediting" => OptimizationProfile::VideoEditing,
+                "conservative" => OptimizationProfile::Conservative,
+                "aggressive" => OptimizationProfile::Aggressive,
+                "custom" => OptimizationProfile::Custom,
+                _ => anyhow::bail!("Unknown profile: {}", value),
+            };
+        }
+        "clean.min_age_days" => config.clean.min_age_days = value.parse().map_err(|e| anyhow::anyhow!("parse error: {}", e))?,
+        "clean.min_size_mb" => config.clean.min_size_mb = value.parse().map_err(|e| anyhow::anyhow!("parse error: {}", e))?,
+        "clean.dedup" => config.clean.dedup = parse_bool(value)?,
+        "clean.xcode" => config.clean.xcode = parse_bool(value)?,
+        "clean.build_artifacts" => config.clean.build_artifacts = parse_bool(value)?,
+        "clean.browser" => config.clean.browser = parse_bool(value)?,
+        "clean.large_files" => config.clean.large_files = parse_bool(value)?,
+        "clean.min_large_size_mb" => config.clean.min_large_size_mb = value.parse().map_err(|e| anyhow::anyhow!("parse error: {}", e))?,
+        "maintain.dns" => config.maintain.dns = parse_bool(value)?,
+        "maintain.spotlight" => config.maintain.spotlight = parse_bool(value)?,
+        "maintain.launchservices" => config.maintain.launchservices = parse_bool(value)?,
+        "maintain.purge_ram" => config.maintain.purge_ram = parse_bool(value)?,
+        "maintain.quicklook" => config.maintain.quicklook = parse_bool(value)?,
+        "optimize.max_processes" => config.optimize.max_processes = value.parse().map_err(|e| anyhow::anyhow!("parse error: {}", e))?,
+        "optimize.exclude_system" => config.optimize.exclude_system = parse_bool(value)?,
+        "optimize.buffer_size" => config.optimize.buffer_size = value.parse().map_err(|e| anyhow::anyhow!("parse error: {}", e))?,
+        "optimize.top_n" => config.optimize.top_n = value.parse().map_err(|e| anyhow::anyhow!("parse error: {}", e))?,
+        "optimize.proactive_predictions" => config.optimize.proactive_predictions = parse_bool(value)?,
+        "optimize.pressure_threshold" => config.optimize.pressure_threshold = value.parse().map_err(|e| anyhow::anyhow!("parse error: {}", e))?,
+        "optimize.ai_advisor" => config.optimize.ai_advisor = parse_bool(value)?,
+        "daemon.enabled" => config.daemon.enabled = parse_bool(value)?,
+        "daemon.interval_secs" => config.daemon.interval_secs = value.parse().map_err(|e| anyhow::anyhow!("parse error: {}", e))?,
+        "daemon.auto_clean_threshold_mb" => config.daemon.auto_clean_threshold_mb = value.parse().map_err(|e| anyhow::anyhow!("parse error: {}", e))?,
+        "daemon.auto_purge_memory" => config.daemon.auto_purge_memory = parse_bool(value)?,
+        "daemon.collect_telemetry" => config.daemon.collect_telemetry = parse_bool(value)?,
+        "daemon.telemetry_interval_secs" => config.daemon.telemetry_interval_secs = value.parse().map_err(|e| anyhow::anyhow!("parse error: {}", e))?,
+        "notifications.enabled" => config.notifications.enabled = parse_bool(value)?,
+        "notifications.memory_pressure" => config.notifications.memory_pressure = parse_bool(value)?,
+        "notifications.reclaimable_space" => config.notifications.reclaimable_space = parse_bool(value)?,
+        "notifications.space_threshold_mb" => config.notifications.space_threshold_mb = value.parse().map_err(|e| anyhow::anyhow!("parse error: {}", e))?,
+        "notifications.proactive_warnings" => config.notifications.proactive_warnings = parse_bool(value)?,
+        "history.max_snapshots" => config.history.max_snapshots = value.parse().map_err(|e| anyhow::anyhow!("parse error: {}", e))?,
+        "history.max_transactions" => config.history.max_transactions = value.parse().map_err(|e| anyhow::anyhow!("parse error: {}", e))?,
+        "logging.level" => config.logging.level = value.to_string(),
+        "logging.file_logging" => config.logging.file_logging = parse_bool(value)?,
+        _ => anyhow::bail!("Unknown config key: '{}'. Use 'xmac config show' to see available keys.", key),
+    }
+    Ok(())
+}
+
+fn get_config_value(config: &config::Config, key: &str) -> String {
+    match key {
+        "profile" => format!("{:?}", config.profile),
+        "clean.min_age_days" => config.clean.min_age_days.to_string(),
+        "clean.min_size_mb" => config.clean.min_size_mb.to_string(),
+        "clean.dedup" => config.clean.dedup.to_string(),
+        "clean.xcode" => config.clean.xcode.to_string(),
+        "clean.build_artifacts" => config.clean.build_artifacts.to_string(),
+        "clean.browser" => config.clean.browser.to_string(),
+        "clean.large_files" => config.clean.large_files.to_string(),
+        "clean.min_large_size_mb" => config.clean.min_large_size_mb.to_string(),
+        "optimize.max_processes" => config.optimize.max_processes.to_string(),
+        "optimize.pressure_threshold" => config.optimize.pressure_threshold.to_string(),
+        "optimize.ai_advisor" => config.optimize.ai_advisor.to_string(),
+        "daemon.enabled" => config.daemon.enabled.to_string(),
+        "daemon.interval_secs" => config.daemon.interval_secs.to_string(),
+        "daemon.auto_purge_memory" => config.daemon.auto_purge_memory.to_string(),
+        "notifications.enabled" => config.notifications.enabled.to_string(),
+        "logging.level" => config.logging.level.clone(),
+        _ => format!("(unknown key: {})", key),
+    }
+}
+
+fn parse_bool(s: &str) -> Result<bool> {
+    match s.to_lowercase().as_str() {
+        "true" | "1" | "yes" | "on" => Ok(true),
+        "false" | "0" | "no" | "off" => Ok(false),
+        _ => anyhow::bail!("Expected boolean (true/false), got: {}", s),
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Daemon command
+// ═══════════════════════════════════════════════════════════════════════
+
+async fn run_daemon(_cli: &Cli, args: cli::args::DaemonArgs) -> Result<()> {
+    use config::ConfigManager;
+    use intelligence::daemon::Daemon;
+
+    let mgr = ConfigManager::load();
+
+    if args.status {
+        match Daemon::is_running(&mgr.config().daemon.pid_file) {
+            Some(pid) => {
+                eprintln!("xmac daemon is running (pid {})", pid);
+            }
+            None => {
+                eprintln!("xmac daemon is not running");
+            }
+        }
+        return Ok(());
+    }
+
+    if args.stop {
+        Daemon::stop(&mgr.config().daemon.pid_file)?;
+        eprintln!("xmac daemon stopped");
+        return Ok(());
+    }
+
+    let interval = args.interval.unwrap_or(mgr.config().daemon.interval_secs);
+    let daemon = Daemon::new(mgr, interval, args.daemon_verbose);
+    daemon.run(args.once).await
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Zen Mode command
+// ═══════════════════════════════════════════════════════════════════════
+
+async fn run_zen(cli: &Cli, args: &cli::args::ZenArgs) -> Result<()> {
+    let is_json = cli.global.format == OutputFormat::Json
+        || cli.global.format == OutputFormat::JsonPretty;
+
+    let result = intelligence::zen::run_zen(cli, args).await?;
+
+    if is_json {
+        let json = match cli.global.format {
+            OutputFormat::JsonPretty => serde_json::to_string_pretty(&result)?,
+            _ => serde_json::to_string(&result)?,
+        };
+        println!("{}", json);
+    } else {
+        print!("{}", intelligence::zen::format_zen_result_text(&result, args.dry_run || !args.execute));
+    }
+
+    Ok(())
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Advisor command
+// ═══════════════════════════════════════════════════════════════════════
+
+async fn run_advisor(_cli: &Cli, args: &cli::args::AdvisorArgs) -> Result<()> {
+    use config::ConfigManager;
+    use intelligence::advisor::{Advisor, Severity, format_recommendations_text};
+
+    let mgr = ConfigManager::load();
+    let config = mgr.config();
+
+    // Collect system snapshot
+    let snapshot = intelligence::SystemSnapshot::collect();
+
+    // Create advisor with current profile and adaptive state
+    let advisor = Advisor::new(config.profile, config.adaptive.clone());
+    let mut recs = advisor.analyze(&snapshot);
+
+    // Filter by min severity
+    if let Some(min_sev) = Severity::from_str(&args.min_severity) {
+        recs.retain(|r| r.severity >= min_sev);
+    }
+
+    // Limit to top N
+    recs.truncate(args.top);
+
+    if args.advisor_format == "json" {
+        let json = serde_json::to_string_pretty(&recs)?;
+        if args.health_score {
+            let output = serde_json::json!({
+                "health_score": snapshot.health_score,
+                "status": snapshot.status,
+                "recommendations": recs,
+            });
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        } else {
+            println!("{}", json);
+        }
+    } else {
+        let health = if args.health_score { Some(snapshot.health_score) } else { None };
+        let text = format_recommendations_text(&recs, health);
+    print!("{}", text);
+    }
+
+    Ok(())
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  History command
+// ═══════════════════════════════════════════════════════════════════════
+
+fn run_history(_cli: &Cli, args: &cli::args::HistoryArgs) -> Result<()> {
+    use config::ConfigManager;
+    use cleanup::history::{load_history, save_history};
+
+    let mgr = ConfigManager::load();
+    let history_path = &mgr.config().history.path;
+
+    if args.clear {
+        let empty = cleanup::history::CleanupHistory::new();
+        save_history(&empty, history_path).map_err(|e| anyhow::anyhow!(e))?;
+        eprintln!("History cleared.");
+        return Ok(());
+    }
+
+    let history = load_history(history_path);
+
+    if let Some(export_path) = &args.export {
+        let json = serde_json::to_string_pretty(&history)?;
+        std::fs::write(export_path, json)?;
+        eprintln!("History exported to: {}", export_path.display());
+        return Ok(());
+    }
+
+    if args.summary {
+        let total_reclaimed: u64 = history.transactions.iter()
+            .map(|t| t.successful_bytes())
+            .sum();
+        let total_snapshots = history.snapshots.len();
+        let total_transactions = history.transactions.len();
+
+        eprintln!("X-MaC History Summary");
+        eprintln!("════════════════════════════════════════");
+        eprintln!("  Total scans:        {}", total_snapshots);
+        eprintln!("  Total cleanups:     {}", total_transactions);
+        eprintln!("  Total reclaimed:    {}", crate::util::disk::format_bytes(total_reclaimed));
+        eprintln!();
+
+        if !history.snapshots.is_empty() {
+            let first = history.snapshots.first().unwrap();
+            let last = history.snapshots.last().unwrap();
+            eprintln!("  First scan:         {} (reclaimable: {})",
+                chrono::DateTime::from_timestamp(first.timestamp as i64, 0)
+                    .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
+                    .unwrap_or_else(|| first.timestamp.to_string()),
+                crate::util::disk::format_bytes(first.reclaimable_bytes));
+            eprintln!("  Last scan:          {} (reclaimable: {})",
+                chrono::DateTime::from_timestamp(last.timestamp as i64, 0)
+                    .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
+                    .unwrap_or_else(|| last.timestamp.to_string()),
+                crate::util::disk::format_bytes(last.reclaimable_bytes));
+        }
+        return Ok(());
+    }
+
+    // Show recent entries
+    eprintln!("X-MaC History (last {} entries)\n", args.last);
+
+    let transactions: Vec<_> = history.transactions.iter().rev().take(args.last).collect();
+    if transactions.is_empty() {
+        eprintln!("  No cleanup history yet. Run 'xmac purge' to start building history.");
+    } else {
+        for t in transactions {
+            let dt = chrono::DateTime::from_timestamp(t.started_at as i64, 0)
+                .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
+                .unwrap_or_else(|| t.started_at.to_string());
+            eprintln!("  {} | reclaimed {} | {} actions",
+                dt,
+                crate::util::disk::format_bytes(t.successful_bytes()),
+                t.successful_count());
+        }
+    }
+
+    Ok(())
+}
+
