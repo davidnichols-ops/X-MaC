@@ -21,6 +21,8 @@
 
 X-MaC is a free, open-source Mac cleaner that combines a fast Rust scan engine, a Graph Neural Network safety scorer, and a native SwiftUI app — all running entirely on your device. Nothing ever leaves your Mac.
 
+> **Status:** Active development. The CLI is stable and fully functional. The GUI is feature-complete but not yet notarized for distribution. The GNN model is trained and exported to CoreML but accuracy is still improving (currently ~27% on 27-class node classification — see [gnn/README.md](gnn/README.md) for details). Looking for contributors — see [GOOD_FIRST_ISSUES.md](GOOD_FIRST_ISSUES.md).
+
 ## Why X-MaC?
 
 | | CleanMyMac | CleanerOne Pro | **X-MaC** |
@@ -51,13 +53,17 @@ xmac conflict           # detect PATH and environment conflicts
 xmac depth              # filesystem integrity (permissions, symlinks, dylibs)
 xmac advisor            # AI advisor — natural-language system health recommendations
 xmac zen                # one-click comprehensive optimization (preview or execute)
+xmac optimize           # memory telemetry, graph building, pressure prediction
+xmac ram-boost          # purge inactive RAM, show top memory consumers
 xmac config             # manage config, profiles, settings
 xmac daemon             # background daemon with auto-purge and automation rules
 xmac history            # scan history and analytics
 xmac completions        # generate shell completions (zsh, bash, fish, elvish, powershell)
 ```
 
-### GUI
+**Output formats:** `--format report` (default, human-readable), `--format json` (NDJSON, one finding per line), `--format json-pretty` (indented array), `--format csv` (spreadsheet export).
+
+### GUI (macOS only)
 
 - **Dashboard** — action-first hero with one-tap Quick Clean and reclaimable total
 - **Zen Mode** — one-click comprehensive optimization with before/after health score
@@ -65,18 +71,29 @@ xmac completions        # generate shell completions (zsh, bash, fish, elvish, p
 - **Disk Analyzer** — interactive donut chart with live hover tooltips
 - **Smart Scan (GNN)** — graph neural network scores every finding by safety
 - **Clean / Maintain / Map / Depth** — full engine access with category breakdowns
-- **Menu Bar Extra** — quick access to Zen Mode, AI Advisor, and Quick Clean
+- **Menu Bar Extra** — quick access to Zen Mode, AI Advisor, and Quick Clean from the system menu bar
+- **RAM Boost** — purge inactive memory with before/after comparison
 - **Onboarding** — first-launch walkthrough
 - **Crash reporter + adaptive fixer** — logs errors, auto-applies known recovery patterns
+- **Scan history** — view past scans and savings over time
+- **Settings** — config profiles, cleanup policies, per-category controls
 
 ### Intelligence Suite
 
 - **Config profiles** — 7 profiles (Balanced, Gaming, Development, Video Editing, Conservative, Aggressive, Custom) that tune engine thresholds
-- **Background daemon** — auto-purge on memory pressure, auto-clean on disk pressure, automation rules with cooldowns
+- **Background daemon** — auto-purge on memory pressure, auto-clean on disk pressure, automation rules with cooldowns, graceful shutdown via SIGTERM/SIGINT
 - **AI Advisor** — multi-dimensional system awareness (CPU + memory + thermal + battery + disk) with natural-language recommendations
 - **Zen Mode** — comprehensive optimization with preview, before/after health score, memory delta, disk reclaimable summary
 - **Adaptive learning** — tracks user feedback to adjust advisor confidence over time
 - **History & analytics** — scan history with export and trend tracking
+
+### Safe Cleanup
+
+- **Trash-first** — files go to Trash, never `rm -rf`
+- **Dry-run by default** — `xmac clean` scans but doesn't delete; `xmac purge` requires confirmation
+- **Undo support** — every cleanup transaction records undo metadata
+- **Verification** — post-cleanup verification confirms files were moved
+- **Preflight checks** — every candidate is validated before deletion
 
 ## Architecture
 
@@ -121,6 +138,8 @@ open /Applications/X-MaC.app
 
 The build script compiles the Rust binary, bundles it inside the `.app` along with the CoreML model — no external dependencies at runtime.
 
+> **Note:** The app is not yet notarized. On first launch, right-click → Open to bypass Gatekeeper, or run `xattr -cr /Applications/X-MaC.app`.
+
 ### CLI only
 
 ```bash
@@ -129,6 +148,17 @@ cd X-MaC
 cargo build --release
 ./target/release/x-mac install   # installs xmac to ~/.local/bin
 xmac quick
+```
+
+### Homebrew (formula exists, tap not yet published)
+
+```bash
+# Once the tap is published:
+brew tap davidnichols-ops/xmac
+brew install xmac
+
+# Or install directly from the repo:
+brew install --HEAD https://raw.githubusercontent.com/davidnichols-ops/X-MaC/main/packaging/homebrew/xmac.rb
 ```
 
 ### Linux
@@ -140,7 +170,7 @@ cargo build --release
 ./target/release/x-mac quick --no-disk
 ```
 
-macOS-specific features (Spotlight, LaunchServices, purge) gracefully degrade on Linux.
+macOS-specific features (Spotlight, LaunchServices, purge) gracefully degrade on Linux. The GUI is macOS-only (SwiftUI).
 
 ### Requirements
 
@@ -165,11 +195,17 @@ xmac zen --no-clean --no-maintain
 # Run safe cleanup + maintenance + disk overview
 xmac quick
 
+# Export results as CSV
+xmac --format csv clean > findings.csv
+
 # Set a gaming profile (aggressive memory cleanup)
 xmac config set-profile gaming
 
 # Start the background daemon
 xmac daemon --start
+
+# Generate shell completions
+xmac completions --shell zsh > ~/.zsh/completions/_xmac
 ```
 
 ## Configuration
@@ -184,7 +220,7 @@ xmac config get clean.min_age_days
 xmac config set clean.min_age_days 7
 ```
 
-See [examples/configs/](examples/configs/) for sample configurations and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for config system details.
+See [examples/configs/](examples/configs/) for sample configurations (default, gaming, development, conservative) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for config system details.
 
 ## Project Structure
 
@@ -193,7 +229,7 @@ X-MaC/
 ├── src/                    # Rust engine (the core)
 │   ├── core/               # Engine trait, types, context, errors
 │   ├── engines/            # 10 scan engines
-│   │   ├── clean/          # Cache, build artifact, browser, iOS backup scanner
+│   │   ├── clean/          # Cache, build artifact, browser, Docker, iOS backup scanner
 │   │   ├── disk/           # APFS-aware disk usage analyzer
 │   │   ├── maintain/       # macOS/Linux maintenance tasks
 │   │   ├── optimize/       # Memory optimizer with GNN telemetry
@@ -204,46 +240,57 @@ X-MaC/
 │   │   ├── envmap/         # Environment variable mapper
 │   │   └── diag/           # System diagnostics
 │   ├── cleanup/            # Safe deletion: trash-first, dry-run, undo
-│   ├── cli/                # Clap CLI, argument parsing, output
+│   ├── cli/                # Clap CLI, argument parsing, output (text/JSON/CSV)
 │   ├── config/             # TOML config, optimization profiles
 │   ├── intelligence/       # System awareness, AI advisor, daemon, zen mode
 │   └── util/               # Disk, memory, macOS, backup utilities
 │
-├── gui/                    # Native SwiftUI macOS app
+├── gui/                    # Native SwiftUI macOS app (30 Swift source files)
 │   └── XMacApp/
 │       └── Sources/XMacApp/
-│           ├── XMacApp.swift        # App entry point + menu bar
-│           ├── XMacRunner.swift     # Rust bridge (process runner)
+│           ├── XMacApp.swift        # App entry point + menu bar extra
+│           ├── XMacRunner.swift     # Rust bridge (subprocess + NDJSON)
 │           ├── ContentView.swift    # Sidebar + navigation
 │           ├── DashboardView.swift  # Hero dashboard
 │           ├── ZenView.swift        # Zen Mode optimization
 │           ├── AdvisorView.swift    # AI Advisor
 │           ├── DiskView.swift       # Donut chart disk analyzer
 │           ├── NeuralScanView.swift # GNN smart scan
+│           ├── CoreMLGNN.swift      # On-device CoreML inference
 │           └── ...
 │
 ├── gnn/                    # On-device Graph Neural Network
 │   ├── model/              # PyTorch GNN architecture
-│   ├── data/               # Training data
+│   ├── data/               # Training data (PyG format)
 │   ├── train.py            # Training script
-│   └── XMacGNN.mlpackage   # Pre-trained CoreML model
+│   ├── export_coreml.py    # CoreML export
+│   ├── server/             # Optional HTTP inference server (dev only)
+│   ├── XMacGNN.mlpackage   # Pre-trained CoreML model (safety scoring)
+│   └── XMacMemoryGNN.mlpackage  # Pre-trained CoreML model (memory optimization)
 │
-├── tests/                  # Rust integration tests
-├── docs/                   # Architecture docs, diagrams, style guide
-├── examples/               # Example configs and usage
-├── scripts/                # Helper scripts (lint, format, build)
-└── .github/                # CI workflows, issue templates
+├── tests/                  # Rust integration tests (daemon lifecycle)
+├── docs/                   # Architecture docs, design principles, style guide
+├── examples/               # Example configs and CLI usage
+├── scripts/                # Helper scripts (check, build, install)
+├── packaging/              # Homebrew formula
+└── .github/                # CI workflows, issue/PR templates
 ```
 
 ## Testing
 
 ```bash
-cargo test                  # run all 410+ tests
-cargo test --lib            # library tests only (fast)
+cargo test                  # run all 410 tests
+cargo test --lib            # library tests only (fast, 168 tests)
 cargo test -- --nocapture   # with output
-cargo clippy -- -D warnings # lint
+cargo clippy -- -D warnings # lint (zero warnings)
 cargo fmt --check           # format check
 ```
+
+Test coverage:
+- **168 library tests** — engine logic, config, cleanup, intelligence, CLI
+- **168 binary tests** — CLI integration, argument parsing
+- **7 daemon integration tests** — lifecycle, PID management, signal handling
+- **67 cleanup tests** — transaction safety, undo, verification
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for detailed testing instructions.
 
@@ -264,9 +311,23 @@ cargo build && cargo test
 
 See [ROADMAP.md](ROADMAP.md) for the full roadmap.
 
-- [ ] **v2.2** — Duplicate file finder, Space Lens treemap, CSV export
-- [ ] **v2.3** — Homebrew tap, TestFlight beta, notarized DMG
-- [ ] **v3.0** — Cross-platform GUI, plugin system, App Store submission
+**Done:**
+- ✅ CSV export (`--format csv`)
+- ✅ Shell completions (`xmac completions`)
+- ✅ Docker cache detection (`--docker`)
+- ✅ Homebrew formula (tap not yet published)
+- ✅ Daemon signal handling fix
+
+**In progress:**
+- Homebrew tap publication + notarized DMG
+- GNN model accuracy improvement (currently ~27%, target 95%)
+
+**Planned:**
+- Duplicate file finder with BLAKE3 hashing
+- Space Lens drill-down treemap
+- App Store submission
+- Cross-platform GUI (Linux via Tauri)
+- Plugin system for custom scan engines
 
 ## License
 
@@ -279,4 +340,4 @@ Built with:
 - [SwiftUI](https://developer.apple.com/xcode/swiftui/) — native macOS UI
 - [PyTorch](https://pytorch.org/) + [Core ML](https://developer.apple.com/documentation/coreml) — on-device GNN
 - [WalkDir](https://github.com/BurntSushi/walkdir) — fast filesystem traversal
-- [Clap](https://clap.rs/) — CLI argument parsing
+- [Clap](https://clap.rs/) + [clap_complete](https://docs.rs/clap_complete) — CLI argument parsing + shell completions

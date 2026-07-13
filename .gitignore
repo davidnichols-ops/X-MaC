@@ -45,3 +45,42 @@ gui/XMacApp/Sources/XMacApp/Resources/
 # Logs / temp
 *.log
 /tmp/
+
+# ═══════════════════════════════════════════════════════════════════════
+# Personal / internal files — NEVER commit these
+# ═══════════════════════════════════════════════════════════════════════
+
+# Outreach and recruitment materials
+outreach-emails/
+outreach-emails/**
+contributor-candidates.md
+
+# Internal AI agent directives and working docs (not for public contributors)
+NORTH_STAR_TRAINING.md
+**/NORTH_STAR_TRAINING.md
+TODO.md
+NOTES.md
+SCRATCH.md
+
+# Personal notes and drafts
+drafts/
+drafts/**
+*.draft
+*.draft.md
+
+# Secrets and credentials — never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+credentials/
+*.token
+
+# Local config that shouldn't be shared
+.local/
+*.local.toml
+*.local.json
