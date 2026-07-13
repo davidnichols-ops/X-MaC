@@ -109,7 +109,7 @@ xmac completions        # generate shell completions (zsh, bash, fish, elvish, p
 │  Profiles · TOML Store · Automation Rules           │
 ├─────────────────────────────────────────────────────┤
 │       GNN Inference  (gnn/ + CoreML on-device)      │  ← Safety scoring
-│  PyTorch GCN → CoreML → on-device inference         │
+│  PyTorch GAT → CoreML → on-device inference         │
 ├─────────────────────────────────────────────────────┤
 │         Rust Scan Engine  (src/engines/)            │  ← Speed + safety
 │  Clean · Disk · Maintain · Map · Depth · Optimize   │
@@ -320,7 +320,7 @@ See [ROADMAP.md](ROADMAP.md) for the full roadmap.
 
 **In progress:**
 - Homebrew tap publication + notarized DMG
-- GNN model accuracy improvement (currently ~27%, target 95%)
+- GNN memory model final accuracy verification
 
 **Planned:**
 - Duplicate file finder with BLAKE3 hashing

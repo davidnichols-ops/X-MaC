@@ -72,7 +72,7 @@ The `.app` bundle is self-contained:
 - Engines are trait objects — easy to mock in tests.
 - Config is a plain struct — easy to construct in tests.
 - The advisor and zen modules are pure functions of `SystemSnapshot` — no I/O needed for unit tests.
-- 327+ tests cover the core logic.
+- 410 tests cover the core logic.
 
 ## 9. Transparent Output
 

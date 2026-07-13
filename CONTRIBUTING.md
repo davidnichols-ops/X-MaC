@@ -8,7 +8,7 @@ Thank you for your interest in contributing to X-MaC! This document covers every
 git clone https://github.com/davidnichols-ops/X-MaC.git
 cd X-MaC
 cargo build          # compile the Rust engine
-cargo test           # run the test suite (327+ tests)
+cargo test           # run the test suite (410 tests)
 cd gui/XMacApp && swift build   # build the SwiftUI app
 ```
 

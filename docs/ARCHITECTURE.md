@@ -26,7 +26,7 @@ graph TB
     end
 
     subgraph GNN["GNN (gnn/)"]
-        Model[PyTorch GCN]
+        Model[PyTorch GAT × 2]
         CoreML[CoreML On-Device]
         Model -->|export| CoreML
     end
@@ -198,20 +198,46 @@ stateDiagram-v2
 
 ## GNN Pipeline
 
+X-MaC includes two on-device GNN models, both running via CoreML with no network calls.
+
+### File Safety Scorer (XMacGNN)
+
 ```mermaid
 graph LR
     Findings[Scan Findings] --> Graph[GraphBuilder]
     Graph --> Nodes[Nodes: category, size, path depth, extension]
     Graph --> Edges[Edges: same-dir, same-app, same-category]
-    Nodes --> GCN[3-Layer GCN]
-    Edges --> GCN
-    GCN --> MLP[MLP → Sigmoid]
+    Nodes --> GAT[3-Layer GAT, 128 hidden, 8 heads]
+    Edges --> GAT
+    GAT --> MLP[MLP → Sigmoid]
     MLP --> Scores[Safety Scores 0-1]
     Scores --> CoreML[CoreML Export]
     CoreML --> GUI[SwiftUI On-Device Inference]
 ```
 
-The GNN runs entirely on-device. No network calls are made. The model is bundled in the `.app` at `Contents/Resources/XMacGNN.mlpackage`.
+- 27 classes, 99.76% validation accuracy, 99.74% test accuracy
+- Bundled at `Contents/Resources/XMacGNN.mlpackage`
+
+### Memory Optimization Model (XMacMemoryGNN)
+
+```mermaid
+graph LR
+    Telemetry[Process Telemetry] --> Graph[GraphBuilder]
+    Graph --> PNodes[Process Nodes: 24 features]
+    Graph --> HNodes[Hardware/Swap/Compressor State]
+    PNodes --> GAT[3-Layer GAT, 128 hidden, 8 heads]
+    HNodes --> GAT
+    GAT --> Actions[6 Action Classes]
+    GAT --> Risk[Risk Score]
+    GAT --> Growth[Growth Prediction]
+    GAT --> Pressure[3-Class Pressure Level]
+    Actions --> CoreML2[CoreML Export]
+    CoreML2 --> CLI[CLI / Daemon / Zen Mode]
+```
+
+- 10,000 synthetic training graphs across 10 scenarios
+- CoreML export verified (MAE 0.0006 vs PyTorch)
+- Bundled at `Contents/Resources/XMacMemoryGNN.mlpackage`
 
 ## Data Types
 
@@ -237,10 +263,11 @@ pub struct Finding {
 
 ### Output Formats
 
-The CLI supports three output formats via `--format`:
-- **text** (default) — human-readable, colored
-- **json** — single JSON object
-- **ndjson** — newline-delimited JSON (one finding per line, for streaming to GUI)
+The CLI supports four output formats via `--format`:
+- **report** (default) — human-readable, colored
+- **json** — NDJSON, one finding per line (for streaming to GUI)
+- **json-pretty** — indented JSON array
+- **csv** — comma-separated values with quoted fields (for spreadsheet export)
 
 ## Extension Points
 
