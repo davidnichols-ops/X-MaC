@@ -420,6 +420,7 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    #[cfg(target_os = "macos")]
     #[tokio::test]
     async fn test_envmap_engine_scan_emits_findings() {
         // Use a temp dir as an app dir so the apps scanner has something to
