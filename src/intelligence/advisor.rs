@@ -460,6 +460,26 @@ impl Advisor {
                 confidence: 0.95,
                 auto_safe: true,
             });
+        } else {
+            // Always provide a health summary so the user gets feedback
+            recs.push(Recommendation {
+                id: "health_summary".to_string(),
+                severity: Severity::Info,
+                category: "system".to_string(),
+                title: format!("System health is {} ({:.0}/100)", snapshot.status, snapshot.health_score),
+                explanation: format!(
+                    "Your system health score is {:.0}/100 (status: {}). \
+                     No critical issues detected. Run the AI Advisor periodically \
+                     to catch problems early.",
+                    snapshot.health_score,
+                    snapshot.status,
+                ),
+                action: "Consider running a quick scan to look for reclaimable space and optimization opportunities.".to_string(),
+                command: Some("xmac advisor".to_string()),
+                estimated_impact: "Proactive monitoring prevents future issues".to_string(),
+                confidence: 0.80,
+                auto_safe: true,
+            });
         }
     }
 
@@ -600,5 +620,101 @@ mod tests {
         if mem_confidence > 0.0 && disk_confidence > 0.0 {
             assert!(mem_confidence >= disk_confidence);
         }
+    }
+
+    #[test]
+    fn test_severity_from_str() {
+        assert_eq!(Severity::from_str("critical"), Some(Severity::Critical));
+        assert_eq!(Severity::from_str("HIGH"), Some(Severity::High));
+        assert_eq!(Severity::from_str("Medium"), Some(Severity::Medium));
+        assert_eq!(Severity::from_str("low"), Some(Severity::Low));
+        assert_eq!(Severity::from_str("info"), Some(Severity::Info));
+        assert_eq!(Severity::from_str("unknown"), None);
+    }
+
+    #[test]
+    fn test_severity_label() {
+        assert_eq!(Severity::Critical.label(), "Critical");
+        assert_eq!(Severity::High.label(), "High");
+        assert_eq!(Severity::Medium.label(), "Medium");
+        assert_eq!(Severity::Low.label(), "Low");
+        assert_eq!(Severity::Info.label(), "Info");
+    }
+
+    #[test]
+    fn test_advisor_with_gaming_profile() {
+        let snapshot = SystemSnapshot::collect();
+        let advisor = Advisor::new(OptimizationProfile::Gaming, AdaptiveState::default());
+        let recs = advisor.analyze(&snapshot);
+        // Gaming profile has lower pressure threshold, so it should be more aggressive
+        // about memory recommendations
+        assert!(!recs.is_empty());
+    }
+
+    #[test]
+    fn test_advisor_with_conservative_profile() {
+        let snapshot = SystemSnapshot::collect();
+        let advisor = Advisor::new(OptimizationProfile::Conservative, AdaptiveState::default());
+        let recs = advisor.analyze(&snapshot);
+        // Conservative profile has higher pressure threshold
+        assert!(!recs.is_empty());
+    }
+
+    #[test]
+    fn test_recommendations_are_sorted_by_severity() {
+        let snapshot = SystemSnapshot::collect();
+        let advisor = Advisor::new(OptimizationProfile::Balanced, AdaptiveState::default());
+        let recs = advisor.analyze(&snapshot);
+        // Verify sorted by severity descending
+        for i in 1..recs.len() {
+            assert!(recs[i-1].severity >= recs[i].severity,
+                "Recommendations not sorted: {:?} before {:?}",
+                recs[i-1].severity, recs[i].severity);
+        }
+    }
+
+    #[test]
+    fn test_recommendation_serialization() {
+        let rec = Recommendation {
+            id: "test".to_string(),
+            severity: Severity::High,
+            category: "memory".to_string(),
+            title: "Test".to_string(),
+            explanation: "Explanation".to_string(),
+            action: "Action".to_string(),
+            command: Some("xmac test".to_string()),
+            estimated_impact: "High impact".to_string(),
+            confidence: 0.9,
+            auto_safe: false,
+        };
+        let json = serde_json::to_string(&rec).unwrap();
+        let decoded: Recommendation = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.id, "test");
+        assert_eq!(decoded.severity, Severity::High);
+        assert_eq!(decoded.confidence, 0.9);
+    }
+
+    #[test]
+    fn test_format_text_empty() {
+        let text = format_recommendations_text(&[], Some(50.0));
+        assert!(text.contains("50"));
+    }
+
+    #[test]
+    fn test_format_text_no_health() {
+        let rec = Recommendation {
+            id: "test".to_string(),
+            severity: Severity::Info,
+            category: "test".to_string(),
+            title: "Info rec".to_string(),
+            explanation: "Just info.".to_string(),
+            action: "Nothing.".to_string(),
+            command: None,
+            estimated_impact: "None".to_string(),
+            confidence: 0.5,
+            auto_safe: true,
+        };
+        let text = format_recommendations_text(&[rec], None);
+        assert!(text.contains("Info rec"));
     }
 }

@@ -288,3 +288,120 @@ pub fn format_zen_result_text(result: &ZenResult, dry_run: bool) -> String {
 fn gb(bytes: u64) -> f64 {
     bytes as f64 / (1024.0 * 1024.0 * 1024.0)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_zen_result_dry_run() {
+        let result = ZenResult {
+            duration_secs: 1.5,
+            health_before: 70.0,
+            health_after: 75.0,
+            memory_before: MemorySummary {
+                total_bytes: 16_000_000_000,
+                used_bytes: 8_000_000_000,
+                free_bytes: 8_000_000_000,
+                utilization: 0.5,
+            },
+            memory_after: MemorySummary {
+                total_bytes: 16_000_000_000,
+                used_bytes: 7_500_000_000,
+                free_bytes: 8_500_000_000,
+                utilization: 0.469,
+            },
+            reclaimable_bytes: 500_000_000,
+            reclaimed_bytes: 0,
+            findings_count: 10,
+            maintenance_tasks_run: 0,
+            top_categories: vec![("Caches".to_string(), 200_000_000)],
+            steps: vec![
+                ZenStep { name: "Snapshot".to_string(), status: "done".to_string(), detail: "OK".to_string() },
+            ],
+        };
+        let text = format_zen_result_text(&result, true);
+        assert!(text.contains("PREVIEW"));
+        assert!(text.contains("70"));
+        assert!(text.contains("75"));
+        assert!(text.contains("Caches"));
+    }
+
+    #[test]
+    fn test_format_zen_result_complete() {
+        let result = ZenResult {
+            duration_secs: 5.0,
+            health_before: 60.0,
+            health_after: 85.0,
+            memory_before: MemorySummary {
+                total_bytes: 16_000_000_000,
+                used_bytes: 12_000_000_000,
+                free_bytes: 4_000_000_000,
+                utilization: 0.75,
+            },
+            memory_after: MemorySummary {
+                total_bytes: 16_000_000_000,
+                used_bytes: 9_000_000_000,
+                free_bytes: 7_000_000_000,
+                utilization: 0.5625,
+            },
+            reclaimable_bytes: 2_000_000_000,
+            reclaimed_bytes: 1_500_000_000,
+            findings_count: 25,
+            maintenance_tasks_run: 4,
+            top_categories: vec![
+                ("Caches".to_string(), 800_000_000),
+                ("Build Artifacts".to_string(), 500_000_000),
+            ],
+            steps: vec![
+                ZenStep { name: "Clean".to_string(), status: "done".to_string(), detail: "Removed 1.5GB".to_string() },
+                ZenStep { name: "Memory".to_string(), status: "done".to_string(), detail: "Freed 3GB".to_string() },
+            ],
+        };
+        let text = format_zen_result_text(&result, false);
+        assert!(text.contains("COMPLETE"));
+        assert!(text.contains("60"));
+        assert!(text.contains("85"));
+        assert!(text.contains("Build Artifacts"));
+        assert!(text.contains("4 tasks"));
+    }
+
+    #[test]
+    fn test_zen_result_serialization() {
+        let result = ZenResult {
+            duration_secs: 2.0,
+            health_before: 70.0,
+            health_after: 80.0,
+            memory_before: MemorySummary {
+                total_bytes: 16_000_000_000,
+                used_bytes: 8_000_000_000,
+                free_bytes: 8_000_000_000,
+                utilization: 0.5,
+            },
+            memory_after: MemorySummary {
+                total_bytes: 16_000_000_000,
+                used_bytes: 7_000_000_000,
+                free_bytes: 9_000_000_000,
+                utilization: 0.4375,
+            },
+            reclaimable_bytes: 1_000_000_000,
+            reclaimed_bytes: 0,
+            findings_count: 5,
+            maintenance_tasks_run: 0,
+            top_categories: Vec::new(),
+            steps: Vec::new(),
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        let decoded: ZenResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.health_before, 70.0);
+        assert_eq!(decoded.health_after, 80.0);
+        assert_eq!(decoded.findings_count, 5);
+    }
+
+    #[test]
+    fn test_gb_conversion() {
+        assert!((gb(1_073_741_824) - 1.0).abs() < 0.001);
+        assert!((gb(2_147_483_648) - 2.0).abs() < 0.001);
+        assert_eq!(gb(0), 0.0);
+    }
+}

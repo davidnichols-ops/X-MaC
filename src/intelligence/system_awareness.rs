@@ -725,4 +725,155 @@ mod tests {
         // On any real system, total should be > 0
         assert!(mem.total_bytes > 0 || mem.total_bytes == 0); // stub on non-macOS
     }
+
+    #[test]
+    fn test_thermal_pressure_thresholds() {
+        assert_eq!(determine_thermal_pressure(Some(96.0), None), "Critical");
+        assert_eq!(determine_thermal_pressure(Some(86.0), None), "High");
+        assert_eq!(determine_thermal_pressure(Some(76.0), None), "Elevated");
+        assert_eq!(determine_thermal_pressure(Some(50.0), None), "Nominal");
+        assert_eq!(determine_thermal_pressure(None, None), "Unknown");
+    }
+
+    #[test]
+    fn test_thermal_pressure_takes_max() {
+        assert_eq!(determine_thermal_pressure(Some(50.0), Some(96.0)), "Critical");
+        assert_eq!(determine_thermal_pressure(Some(96.0), Some(50.0)), "Critical");
+    }
+
+    #[test]
+    fn test_health_score_computation() {
+        let mem = MemoryDimension {
+            total_bytes: 16_000_000_000,
+            used_bytes: 8_000_000_000,
+            free_bytes: 8_000_000_000,
+            available_bytes: 8_000_000_000,
+            compressed_bytes: 0,
+            swap_used_bytes: 0,
+            swap_total_bytes: 0,
+            utilization: 0.5,
+            pressure_level: 1,
+            pressure_label: "Nominal".to_string(),
+        };
+        let cpu = CpuDimension {
+            core_count: 8,
+            load_average_1m: 0.5,
+            load_average_5m: 0.4,
+            load_average_15m: 0.3,
+            utilization_pct: 10.0,
+            top_processes: Vec::new(),
+        };
+        let thermal = ThermalDimension {
+            cpu_temp_c: Some(50.0),
+            gpu_temp_c: None,
+            fan_speed_rpm: Vec::new(),
+            thermal_pressure: "Nominal".to_string(),
+        };
+        let battery = BatteryDimension {
+            is_present: true,
+            is_charging: false,
+            is_plugged: true,
+            charge_pct: 100.0,
+            cycle_count: 0,
+            condition: "Normal".to_string(),
+            time_remaining_mins: None,
+        };
+        let disk = DiskDimension {
+            volumes: Vec::new(),
+            total_capacity_bytes: 500_000_000_000,
+            total_free_bytes: 400_000_000_000,
+            total_used_bytes: 100_000_000_000,
+            overall_utilization: 0.2,
+        };
+
+        let score = compute_health_score(&mem, &cpu, &thermal, &battery, &disk);
+        // With all dimensions healthy, score should be high
+        assert!(score >= 70.0, "Expected high score, got {}", score);
+    }
+
+    #[test]
+    fn test_health_score_with_high_memory_pressure() {
+        let mem = MemoryDimension {
+            total_bytes: 8_000_000_000,
+            used_bytes: 7_800_000_000,
+            free_bytes: 200_000_000,
+            available_bytes: 200_000_000,
+            compressed_bytes: 0,
+            swap_used_bytes: 3_000_000_000,
+            swap_total_bytes: 4_000_000_000,
+            utilization: 0.975,
+            pressure_level: 4,
+            pressure_label: "Critical".to_string(),
+        };
+        let cpu = CpuDimension {
+            core_count: 8,
+            load_average_1m: 0.3,
+            load_average_5m: 0.2,
+            load_average_15m: 0.1,
+            utilization_pct: 5.0,
+            top_processes: Vec::new(),
+        };
+        let thermal = ThermalDimension {
+            cpu_temp_c: Some(45.0),
+            gpu_temp_c: None,
+            fan_speed_rpm: Vec::new(),
+            thermal_pressure: "Nominal".to_string(),
+        };
+        let battery = BatteryDimension::default();
+        let disk = DiskDimension {
+            volumes: Vec::new(),
+            total_capacity_bytes: 500_000_000_000,
+            total_free_bytes: 400_000_000_000,
+            total_used_bytes: 100_000_000_000,
+            overall_utilization: 0.2,
+        };
+
+        let score = compute_health_score(&mem, &cpu, &thermal, &battery, &disk);
+        // With critical memory pressure and high swap, score should be lower
+        assert!(score < 70.0, "Expected lower score, got {}", score);
+    }
+
+    #[test]
+    fn test_disk_dimension_from_volumes() {
+        let volumes = vec![
+            DiskVolume {
+                name: "/".to_string(),
+                mount_point: "/".to_string(),
+                capacity_bytes: 500_000_000_000,
+                free_bytes: 400_000_000_000,
+                used_bytes: 100_000_000_000,
+                utilization: 0.2,
+                is_apfs: true,
+            },
+            DiskVolume {
+                name: "/Volumes/External".to_string(),
+                mount_point: "/Volumes/External".to_string(),
+                capacity_bytes: 1_000_000_000_000,
+                free_bytes: 800_000_000_000,
+                used_bytes: 200_000_000_000,
+                utilization: 0.2,
+                is_apfs: false,
+            },
+        ];
+        let disk = DiskDimension::from_volumes(volumes);
+        assert_eq!(disk.total_capacity_bytes, 1_500_000_000_000);
+        assert_eq!(disk.total_free_bytes, 1_200_000_000_000);
+        assert_eq!(disk.total_used_bytes, 300_000_000_000);
+        assert!((disk.overall_utilization - 0.2).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_disk_dimension_empty_volumes() {
+        let disk = DiskDimension::from_volumes(Vec::new());
+        assert_eq!(disk.total_capacity_bytes, 0);
+        assert_eq!(disk.overall_utilization, 0.0);
+    }
+
+    #[test]
+    fn test_battery_default_no_battery() {
+        let bat = BatteryDimension::default();
+        assert!(!bat.is_present);
+        assert!(bat.is_plugged);
+        assert_eq!(bat.charge_pct, 100.0);
+    }
 }

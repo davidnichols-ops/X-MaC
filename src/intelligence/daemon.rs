@@ -321,3 +321,43 @@ impl Daemon {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_running_no_pid_file() {
+        let tmp = std::env::temp_dir().join("xmac_test_daemon_nonexistent.pid");
+        let _ = std::fs::remove_file(&tmp);
+        assert!(Daemon::is_running(&tmp).is_none());
+    }
+
+    #[test]
+    fn test_is_running_invalid_pid_file() {
+        let tmp = std::env::temp_dir().join("xmac_test_daemon_invalid.pid");
+        std::fs::write(&tmp, "not-a-number").unwrap();
+        assert!(Daemon::is_running(&tmp).is_none());
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn test_is_running_dead_process() {
+        // Write a PID that's very unlikely to exist
+        let tmp = std::env::temp_dir().join("xmac_test_daemon_dead.pid");
+        std::fs::write(&tmp, "999999").unwrap();
+        // On Unix, this should return None because the process doesn't exist
+        #[cfg(unix)]
+        {
+            assert!(Daemon::is_running(&tmp).is_none());
+        }
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn test_stop_no_daemon_returns_error() {
+        let tmp = std::env::temp_dir().join("xmac_test_daemon_stop_nonexistent.pid");
+        let _ = std::fs::remove_file(&tmp);
+        assert!(Daemon::stop(&tmp).is_err());
+    }
+}
