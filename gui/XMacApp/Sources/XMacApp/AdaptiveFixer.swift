@@ -26,7 +26,6 @@ final class AdaptiveFixer: ObservableObject {
         if (description.contains("xmac") || contextLower.contains("xmac")) &&
             (description.contains("not found") || description.contains("no such file")) {
             let candidates = [
-                fileManager.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/xmac").path,
                 "/opt/homebrew/bin/xmac",
                 "/usr/local/bin/xmac",
                 Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/xmac").path

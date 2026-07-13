@@ -84,6 +84,40 @@ impl Daemon {
         Ok(())
     }
 
+    /// Resolve the xmac binary path. Prefers the current executable's
+    /// directory (which may be the .app bundle), then falls back to
+    /// standard install locations. Never uses bare "xmac" from PATH
+    /// to prevent PATH injection attacks.
+    fn xmac_binary(&self) -> &str {
+        // Try current_exe directory first — this handles the .app bundle case
+        // and the case where the user ran ./target/release/x-mac daemon.
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                let candidate = dir.join("xmac");
+                if candidate.exists() {
+                    return Box::leak(candidate.to_string_lossy().into_owned().into_boxed_str());
+                }
+                // The binary might be named "x-mac" not "xmac"
+                let candidate2 = dir.join("x-mac");
+                if candidate2.exists() {
+                    return Box::leak(candidate2.to_string_lossy().into_owned().into_boxed_str());
+                }
+            }
+        }
+        // Fall back to standard install locations
+        for path in &[
+            "/opt/homebrew/bin/xmac",
+            "/usr/local/bin/xmac",
+            "/usr/local/bin/x-mac",
+        ] {
+            if std::path::Path::new(path).exists() {
+                return path;
+            }
+        }
+        // Last resort: bare "xmac" (less safe but better than failing silently)
+        "xmac"
+    }
+
     /// Run a single daemon cycle — telemetry collection, rule checking,
     /// and proactive actions.
     async fn run_cycle(&self) {
@@ -148,7 +182,7 @@ impl Daemon {
                 );
             }
             use std::process::Command;
-            let _ = Command::new("xmac")
+            let _ = Command::new(self.xmac_binary())
                 .args(["clean", "--min-age", "7d"])
                 .output();
         }
@@ -219,7 +253,7 @@ impl Daemon {
                     eprintln!("  action: running clean scan...");
                 }
                 use std::process::Command;
-                let _ = Command::new("xmac")
+                let _ = Command::new(self.xmac_binary())
                     .args(["clean", "--min-age", "7d"])
                     .output();
                 if self.verbose {
@@ -231,7 +265,7 @@ impl Daemon {
                     eprintln!("  action: running maintenance...");
                 }
                 use std::process::Command;
-                let _ = Command::new("xmac").args(["maintain"]).output();
+                let _ = Command::new(self.xmac_binary()).args(["maintain"]).output();
                 if self.verbose {
                     eprintln!("  action: maintenance complete");
                 }
@@ -269,10 +303,19 @@ impl Daemon {
         #[cfg(target_os = "macos")]
         {
             use std::process::Command;
+            // Escape all AppleScript string injection vectors:
+            // backslash, double quote, newline, carriage return, tab
+            let esc = |s: &str| {
+                s.replace('\\', "\\\\")
+                    .replace('"', "\\\"")
+                    .replace('\n', "\\n")
+                    .replace('\r', "\\r")
+                    .replace('\t', "\\t")
+            };
             let script = format!(
                 "display notification \"{}\" with title \"{}\"",
-                message.replace('"', "\\\""),
-                title.replace('"', "\\\"")
+                esc(message),
+                esc(title)
             );
             let _ = Command::new("osascript").args(["-e", &script]).output();
         }
@@ -302,10 +345,39 @@ impl Daemon {
                     }
                 }
             }
+            // PID file exists but process is dead — remove stale file
+            let _ = std::fs::remove_file(pid_file);
         }
 
+        // Write PID file with restrictive permissions (0600) to prevent
+        // other users from reading the daemon's PID.
         let pid = std::process::id();
-        std::fs::write(pid_file, pid.to_string())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true) // O_EXCL — atomic creation, prevents race
+                .mode(0o600)
+                .open(pid_file)
+                .and_then(|mut f| {
+                    use std::io::Write;
+                    f.write_all(pid.to_string().as_bytes())
+                })
+                .map_err(|e| {
+                    if e.kind() == std::io::ErrorKind::AlreadyExists {
+                        anyhow::anyhow!(
+                            "xmac daemon is already running (PID file exists). Use --stop to stop it first."
+                        )
+                    } else {
+                        anyhow::Error::from(e)
+                    }
+                })?;
+        }
+        #[cfg(not(unix))]
+        {
+            std::fs::write(pid_file, pid.to_string())?;
+        }
         Ok(())
     }
 

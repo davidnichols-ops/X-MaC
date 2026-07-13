@@ -138,7 +138,7 @@ open /Applications/X-MaC.app
 
 The build script compiles the Rust binary, bundles it inside the `.app` along with the CoreML model — no external dependencies at runtime.
 
-> **Note:** The app is not yet notarized. On first launch, right-click → Open to bypass Gatekeeper, or run `xattr -cr /Applications/X-MaC.app`.
+> **Note:** The app is not yet notarized. On first launch, macOS Gatekeeper will block it. The safest approach is to verify the download's integrity and then right-click → Open to allow it. Do not use `xattr -cr` as it removes all security attributes from the bundle.
 
 ### CLI only
 

@@ -114,6 +114,34 @@ fn default_rules() -> Vec<RedactionRule> {
             r"(?i)(passwd|password|secret|token|api_key|apikey|auth_token|access_token|private_key)\s*[:=]\s*\S+",
             "${1}=[REDACTED_SECRET]",
         ),
+        // GitHub tokens (ghp_, gho_, ghs_, ghu_, ghr_).
+        (r"gh[posur]_[A-Za-z0-9]{36}", "[REDACTED_GITHUB_TOKEN]"),
+        // GitLab tokens (glpat-).
+        (r"glpat-[A-Za-z0-9_-]{20}", "[REDACTED_GITLAB_TOKEN]"),
+        // Slack tokens (xoxb-, xoxp-, xoxa-, xoxr-).
+        (r"xox[abpr]-[A-Za-z0-9-]+", "[REDACTED_SLACK_TOKEN]"),
+        // Stripe keys (sk_live_, pk_live_, rk_live_).
+        (r"(?:sk|pk|rk)_live_[A-Za-z0-9]+", "[REDACTED_STRIPE_KEY]"),
+        // PEM private key blocks.
+        (
+            r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----",
+            "[REDACTED_PEM_KEY]",
+        ),
+        // JWT tokens (eyJ... header.payload.signature).
+        (
+            r"eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+",
+            "[REDACTED_JWT]",
+        ),
+        // Bearer tokens.
+        (
+            r"(?i)Bearer\s+[A-Za-z0-9_.~+/=-]+",
+            "Bearer [REDACTED_TOKEN]",
+        ),
+        // .env file content (KEY=value patterns).
+        (
+            r"(?i)(DATABASE_URL|REDIS_URL|SECRET_KEY|JWT_SECRET|API_KEY|PRIVATE_KEY)\s*=\s*\S+",
+            "${1}=[REDACTED_SECRET]",
+        ),
         // macOS user home directories.
         (r"/Users/[a-zA-Z0-9_\-.]+", "/Users/[REDACTED_USER]"),
         // Linux user home directories.
@@ -281,7 +309,9 @@ mod tests {
     #[test]
     fn default_rule_count_matches_mif() {
         let r = Redactor::new();
-        // MIF defines 9 sensitive patterns in SENSITIVE_PATTERNS.
-        assert_eq!(r.rule_count(), 9);
+        // The redactor includes the original 9 MIF sensitive patterns
+        // plus additional token/key patterns (GitHub, GitLab, Slack, Stripe,
+        // PEM, JWT, Bearer, .env) for broader credential coverage.
+        assert_eq!(r.rule_count(), 17);
     }
 }

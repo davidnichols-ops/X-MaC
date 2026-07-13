@@ -46,11 +46,13 @@ pub fn verify_removal(original: &Path, expected_trash: Option<&Path>) -> Verific
 }
 
 /// Verify that a path is safe to touch before any destructive action.
+/// Uses symlink_metadata to check the symlink itself, not its target.
 pub fn verify_can_cleanup(path: &Path) -> Result<(), String> {
-    if !path.exists() {
-        return Err(format!("path does not exist: {}", path.display()));
-    }
-    let metadata = std::fs::metadata(path).map_err(|e| format!("cannot read metadata: {e}"))?;
+    // Use symlink_metadata so we check the symlink itself, not the target.
+    // This prevents TOCTOU attacks where a regular file is replaced with a
+    // symlink between planning and execution.
+    let metadata =
+        std::fs::symlink_metadata(path).map_err(|e| format!("cannot read metadata: {e}"))?;
     if metadata.permissions().readonly() {
         return Err(format!("path is read-only: {}", path.display()));
     }

@@ -11,7 +11,7 @@ struct SettingsView: View {
 
     private var xmacPath: String {
         let candidates = [
-            "/Users/david/.local/bin/xmac",
+            Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/xmac").path,
             "/opt/homebrew/bin/xmac",
             "/usr/local/bin/xmac",
         ]

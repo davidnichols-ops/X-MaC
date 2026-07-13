@@ -127,24 +127,36 @@ impl CleanupPolicy {
     }
 
     /// Decide whether a path is protected. The check is case-insensitive on
-    /// macOS and resolves the path before comparing it.
+    /// macOS and resolves the path before comparing it. Both the canonical
+    /// (resolved) path and the raw path are checked to handle macOS symlinks
+    /// like /etc → /private/etc, /var → /private/var, /tmp → /private/tmp.
     pub fn is_protected(&self, path: &Path) -> bool {
         let resolved = match path.canonicalize() {
             Ok(p) => p,
             Err(_) => path.to_path_buf(),
         };
 
-        let path_lower = resolved.to_string_lossy().to_lowercase();
-        for protected in &self.protected_paths {
-            let protected_lower = protected.to_string_lossy().to_lowercase();
-            if path_lower == protected_lower {
-                return true;
+        // Check both the canonical path and the raw path against the
+        // protected list. This handles the case where /etc canonicalizes
+        // to /private/etc but the protected list contains /etc, and
+        // vice versa.
+        let candidates = [resolved.as_path(), path];
+
+        for candidate in candidates {
+            let path_lower = candidate.to_string_lossy().to_lowercase();
+            for protected in &self.protected_paths {
+                let protected_lower = protected.to_string_lossy().to_lowercase();
+                if path_lower == protected_lower {
+                    return true;
+                }
             }
-        }
-        for prefix in &self.protected_path_prefixes {
-            let prefix_lower = prefix.to_string_lossy().to_lowercase();
-            if path_lower == prefix_lower || path_lower.starts_with(&format!("{}/", prefix_lower)) {
-                return true;
+            for prefix in &self.protected_path_prefixes {
+                let prefix_lower = prefix.to_string_lossy().to_lowercase();
+                if path_lower == prefix_lower
+                    || path_lower.starts_with(&format!("{}/", prefix_lower))
+                {
+                    return true;
+                }
             }
         }
         false
@@ -164,6 +176,11 @@ fn default_protected_paths() -> Vec<PathBuf> {
         PathBuf::from("/private/var/root"),
         PathBuf::from("/dev"),
         PathBuf::from("/etc"),
+        // macOS canonical paths (symlinks: /etc → /private/etc, etc.)
+        PathBuf::from("/private/etc"),
+        PathBuf::from("/private/var"),
+        PathBuf::from("/private/tmp"),
+        PathBuf::from("/private/var/tmp"),
         PathBuf::from("/Volumes"),
     ]
 }
@@ -180,6 +197,9 @@ fn default_protected_prefixes() -> Vec<PathBuf> {
         PathBuf::from("/private/var/root"),
         PathBuf::from("/dev"),
         PathBuf::from("/etc"),
+        PathBuf::from("/private/etc"),
+        PathBuf::from("/private/var"),
+        PathBuf::from("/private/tmp"),
         PathBuf::from("/Volumes"),
     ]
 }

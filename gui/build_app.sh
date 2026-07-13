@@ -49,29 +49,31 @@ echo "[4/5] Copying resources..."
 if [ -d "$PROJECT_ROOT/gnn/XMacGNN.mlpackage" ]; then
     cp -r "$PROJECT_ROOT/gnn/XMacGNN.mlpackage" "$APP_BUNDLE/Contents/Resources/"
     echo "  Copied XMacGNN.mlpackage"
-elif [ -d "/Applications/X-MaC.app/Contents/Resources/XMacGNN.mlpackage" ]; then
-    cp -r "/Applications/X-MaC.app/Contents/Resources/XMacGNN.mlpackage" "$APP_BUNDLE/Contents/Resources/"
-    echo "  Copied XMacGNN.mlpackage from existing install"
+else
+    echo "  ERROR: XMacGNN.mlpackage not found in $PROJECT_ROOT/gnn/"
+    echo "  Cannot build without the CoreML model. Run gnn/export_coreml.py first."
+    exit 1
 fi
 
 # Copy Memory Optimizer CoreML model
 if [ -d "$PROJECT_ROOT/gnn/XMacMemoryGNN.mlpackage" ]; then
     cp -r "$PROJECT_ROOT/gnn/XMacMemoryGNN.mlpackage" "$APP_BUNDLE/Contents/Resources/"
     echo "  Copied XMacMemoryGNN.mlpackage"
+else
+    echo "  WARNING: XMacMemoryGNN.mlpackage not found — memory optimization will be disabled"
 fi
 
 # Copy label map
 if [ -f "$PROJECT_ROOT/gnn/label_map.json" ]; then
     cp "$PROJECT_ROOT/gnn/label_map.json" "$APP_BUNDLE/Contents/Resources/"
-elif [ -f "/Applications/X-MaC.app/Contents/Resources/label_map.json" ]; then
-    cp "/Applications/X-MaC.app/Contents/Resources/label_map.json" "$APP_BUNDLE/Contents/Resources/"
+else
+    echo "  ERROR: label_map.json not found in $PROJECT_ROOT/gnn/"
+    exit 1
 fi
 
 # Copy or generate icon
 if [ -f "$SCRIPT_DIR/AppIcon.icns" ]; then
     cp "$SCRIPT_DIR/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/"
-elif [ -f "/Applications/X-MaC.app/Contents/Resources/AppIcon.icns" ]; then
-    cp "/Applications/X-MaC.app/Contents/Resources/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/"
 fi
 
 

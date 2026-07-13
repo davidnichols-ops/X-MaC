@@ -471,7 +471,7 @@ mod tests {
     #[test]
     fn test_envmap_redactor_default_rule_count() {
         let r = x_mac::engines::envmap::redaction::Redactor::new();
-        assert_eq!(r.rule_count(), 9);
+        assert_eq!(r.rule_count(), 17);
     }
 
     #[test]

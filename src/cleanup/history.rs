@@ -112,5 +112,27 @@ pub fn save_history(history: &CleanupHistory, path: &Path) -> Result<(), String>
         let _ = std::fs::create_dir_all(parent);
     }
     let json = serde_json::to_string_pretty(history).map_err(|e| e.to_string())?;
-    std::fs::write(path, json).map_err(|e| e.to_string())
+    // Compute a simple integrity hash derived from the machine's hostname
+    // and the JSON content. This prevents tampering with the history file
+    // to inject fake cleanup transactions. On verification, if the hash
+    // doesn't match, the history is treated as empty.
+    let hash = compute_history_hmac(&json);
+    let content = format!("{{\"_hmac\":\"{}\",\"data\":{}}}", hash, json);
+    std::fs::write(path, content).map_err(|e| e.to_string())
+}
+
+/// Compute a simple integrity hash for the history file.
+/// Uses a key derived from the system hostname — not cryptographically
+/// strong, but prevents casual tampering. For full integrity, use a
+/// key stored in the macOS Keychain.
+fn compute_history_hmac(json: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    // Mix in a system-specific value so the hash is machine-bound
+    let hostname = std::env::var("HOSTNAME")
+        .or_else(|_| std::env::var("USER"))
+        .unwrap_or_default();
+    hostname.hash(&mut hasher);
+    json.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
 }

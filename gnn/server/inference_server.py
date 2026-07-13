@@ -20,8 +20,8 @@ app = FastAPI(title="X-MaC GNN Inference Server", version="0.2.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
+    allow_origins=["http://localhost", "http://127.0.0.1"],
+    allow_methods=["POST"],
     allow_headers=["*"],
 )
 
@@ -37,7 +37,7 @@ reverse_label_map = {}
 def load_model():
     global model, label_map, reverse_label_map
     if os.path.exists(MODEL_PATH):
-        checkpoint = torch.load(MODEL_PATH, map_location=device)
+        checkpoint = torch.load(MODEL_PATH, map_location=device, weights_only=True)
         num_features = checkpoint.get("num_features", 16)
         num_classes = checkpoint.get("num_classes", 27)
         hidden_dim = checkpoint.get("hidden_dim", 128)
@@ -233,4 +233,4 @@ def build_purge_plan(scores):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8501)
+    uvicorn.run(app, host="127.0.0.1", port=8501)

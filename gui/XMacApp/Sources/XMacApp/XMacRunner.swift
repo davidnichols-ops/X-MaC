@@ -142,7 +142,6 @@ final class XMacRunner: ObservableObject {
         let bundleDir = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/xmac").path
         let candidates = [
             bundleDir,
-            "/Users/david/.local/bin/xmac",
             "/opt/homebrew/bin/xmac",
             "/usr/local/bin/xmac",
         ]
@@ -664,7 +663,17 @@ final class XMacRunner: ObservableObject {
     private func runProcess(_ args: [String]) async throws -> (String, String) {
         var args = args
         if let override = binaryPathOverride, !args.isEmpty, args[0].contains("xmac") {
-            args[0] = override
+            let bundlePath = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/xmac").path
+            let allowedPaths: Set<String> = [
+                bundlePath,
+                "/opt/homebrew/bin/xmac",
+                "/usr/local/bin/xmac",
+            ]
+            if allowedPaths.contains(override) {
+                args[0] = override
+            } else {
+                logStderr("[XMacRunner] runProcess: ignoring binaryPathOverride '\(override)' — not in whitelist\n")
+            }
         }
 
         let cmdDesc = "\(args[0]) \(args.dropFirst().joined(separator: " "))"
@@ -745,10 +754,16 @@ final class XMacRunner: ObservableObject {
     func runPrivileged(_ command: String) async -> (success: Bool, output: String) {
         logStderr("[XMacRunner] runPrivileged: \(command)")
 
-        // Escape double quotes and backslashes for AppleScript
+        // Escape backslashes, double quotes, newlines, carriage returns, and tabs for AppleScript.
+        // NOTE: This is still string interpolation into an AppleScript string literal, which is
+        // fragile against crafted input. Constructing an NSAppleEventDescriptor and passing the
+        // command via a structured Apple event would be more secure and avoid escaping entirely.
         let escaped = command
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "\\r")
+            .replacingOccurrences(of: "\t", with: "\\t")
 
         let script = "do shell script \"\(escaped)\" with administrator privileges"
 

@@ -312,7 +312,7 @@ mod tests {
         args.redact = true;
         let e = EnvmapEngine::new(args);
         let r = e.build_redactor();
-        assert_eq!(r.rule_count(), 9);
+        assert_eq!(r.rule_count(), 17);
     }
 
     #[test]

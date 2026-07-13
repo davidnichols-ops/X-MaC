@@ -2,6 +2,8 @@ use std::path::Path;
 use std::time::{Duration, SystemTime};
 use walkdir::WalkDir;
 
+use glob::Pattern;
+
 use crate::core::types::ScanConfig;
 use crate::util::disk::dir_size;
 
@@ -61,24 +63,15 @@ impl CleanScanner {
 }
 
 fn glob_match(pattern: &str, path: &str) -> bool {
-    let pattern = pattern.to_lowercase();
-    let path_lower = path.to_lowercase();
-
-    if pattern.contains('*') {
-        let parts: Vec<&str> = pattern.split('*').collect();
-        let mut pos = 0;
-        for part in parts {
-            if part.is_empty() {
-                continue;
-            }
-            if let Some(found) = path_lower[pos..].find(part) {
-                pos += found + part.len();
-            } else {
-                return false;
-            }
+    // Use the glob crate for proper pattern matching with ?, *, and [...]
+    // support. Fall back to case-insensitive substring match if the pattern
+    // is not a valid glob.
+    match Pattern::new(pattern) {
+        Ok(p) => p.matches(path),
+        Err(_) => {
+            let pattern_lower = pattern.to_lowercase();
+            let path_lower = path.to_lowercase();
+            path_lower.contains(&pattern_lower)
         }
-        true
-    } else {
-        path_lower.contains(&pattern)
     }
 }

@@ -60,6 +60,27 @@ impl CleanupExecutor {
         let reason = candidate.reason.clone();
 
         // Re-verify right before touching disk to catch races and changes.
+        // Check for symlink replacement (TOCTOU): a regular file at planning
+        // time could have been swapped with a symlink by execution time.
+        if !self.policy.follow_symlinks {
+            if let Ok(meta) = std::fs::symlink_metadata(path) {
+                if meta.file_type().is_symlink() {
+                    return CleanupActionRecord::new(
+                        path,
+                        None,
+                        format!("{:?}", candidate.action),
+                        false,
+                        candidate.size_bytes,
+                        &category,
+                        &reason,
+                    )
+                    .with_error(
+                        "symbolic link detected at execution time (TOCTOU race)".to_string(),
+                    );
+                }
+            }
+        }
+
         if let Err(e) = verify_can_cleanup(path) {
             return CleanupActionRecord::new(
                 path,
@@ -215,6 +236,16 @@ impl CleanupPlan {
     }
 }
 
+/// Compute the Trash destination path for a given file on macOS.
+///
+/// NOTE: This implementation creates ~/.Trash manually and only handles
+/// files within the user's home directory. The macOS-native approach is
+/// NSFileManager.trashItem(at:resultingItemURL:) which correctly handles
+/// external volumes (using .Trash-<uid> on the volume), network shares,
+/// and Trash semantics. The Swift GUI uses NSFileManager.trashItem
+/// correctly; this Rust implementation is used by the CLI only and is
+/// limited to home-directory items. For files outside $HOME, use the
+/// GUI or move files manually.
 fn macos_trash_path(path: &Path) -> Result<PathBuf, String> {
     let home = MacosUtils::home_dir()
         .canonicalize()
