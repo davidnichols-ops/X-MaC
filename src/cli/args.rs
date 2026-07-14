@@ -194,6 +194,11 @@ pub enum Commands {
     /// for tab-completion of xmac commands and flags.
     /// Example: `xmac completions --shell zsh > ~/.zsh/completions/_xmac`
     Completions(CompletionsArgs),
+
+    /// Digital Twin — collect a complete system snapshot and query the
+    /// reasoning engine. Use subcommands to ask questions, predict problems,
+    /// simulate actions, or get recommendations.
+    Twin(TwinArgs),
 }
 
 impl Commands {
@@ -221,6 +226,7 @@ impl Commands {
             Commands::Advisor(_) => crate::core::types::EngineId::All,
             Commands::History(_) => crate::core::types::EngineId::All,
             Commands::Completions(_) => crate::core::types::EngineId::All,
+            Commands::Twin(_) => crate::core::types::EngineId::All,
         }
     }
 }
@@ -847,4 +853,51 @@ pub enum ShellArg {
     Fish,
     Elvish,
     PowerShell,
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Twin command
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Arguments for the `twin` command — Digital Twin snapshot and reasoning.
+#[derive(Args, Debug, Clone)]
+pub struct TwinArgs {
+    /// Twin subcommand: collect, ask, predict, simulate, recommend, query,
+    /// benchmark, monitor. Defaults to `collect` (full snapshot).
+    #[arg(long, default_value = "collect")]
+    pub action: TwinAction,
+
+    /// Question to ask the reasoning engine (used with --action ask).
+    #[arg(long, value_name = "QUESTION")]
+    pub question: Option<String>,
+
+    /// Action to simulate (used with --action simulate).
+    #[arg(long, value_name = "ACTION_DESC")]
+    pub simulate: Option<String>,
+
+    /// Query dimension: health, memory, disk, battery, process, trust
+    /// (used with --action query).
+    #[arg(long, value_name = "DIMENSION")]
+    pub query: Option<String>,
+}
+
+/// Sub-actions for the `twin` command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum TwinAction {
+    /// Collect a full Digital Twin snapshot (default).
+    Collect,
+    /// Ask the reasoning engine a question.
+    Ask,
+    /// Predict future problems.
+    Predict,
+    /// Simulate an action and assess risk.
+    Simulate,
+    /// Get optimization recommendations.
+    Recommend,
+    /// Query a specific dimension.
+    Query,
+    /// Generate anonymized benchmark data.
+    Benchmark,
+    /// Produce a continuous monitoring plan.
+    Monitor,
 }

@@ -162,6 +162,7 @@ pub struct UnifiedMemoryPlan {
     pub estimated_savings_bytes: u64,
 }
 
+#[allow(dead_code)]
 impl MemoryIntelligence {
     /// Collect memory intelligence.
     pub fn collect() -> Self {

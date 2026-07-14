@@ -50,13 +50,25 @@ final class XMacRunner: ObservableObject {
     @Published var binaryPathOverride: String? = nil
     @Published var scanProgress: Double = 0
 
+    // Digital Twin data
+    @Published var digitalTwin: DigitalTwin?
+    @Published var twinLoading = false
+    @Published var twinError: String?
+    @Published var twinRecommendations: TwinRecommendations?
+    @Published var twinReasoningResult: ReasoningResult?
+    @Published var twinSandboxResult: SandboxResult?
+    @Published var twinPredictions: [String] = []
+    @Published var twinQueryResult: QueryResult?
+    @Published var twinBenchmark: BenchmarkData?
+    @Published var twinMonitoringPlan: MonitoringPlan?
+
     // Universal activity log — tracks all operations across the app
     @Published var activityLog: [ActivityLogEntry] = []
     @Published var lastActivity: ActivityLogEntry? = nil
     @Published var showActivityBanner: Bool = false
 
     enum ScanMode: String {
-        case dashboard, idle, full, clean, maintain, disk, neural, apps, settings, history, automation, ramBoost, zen, advisor
+        case dashboard, idle, full, clean, maintain, disk, neural, apps, settings, history, automation, ramBoost, zen, advisor, twin, twinHardware, twinSoftware, twinFilesystem, twinProcesses, twinMemory, twinEnergy, twinApps, twinReasoning
     }
 
     private var appSettings: AppSettings?
@@ -248,6 +260,155 @@ final class XMacRunner: ObservableObject {
     func openAdvisor() {
         guard !isScanning else { return }
         scanMode = .advisor
+    }
+
+    // MARK: - Digital Twin Navigation
+
+    func openTwin() {
+        guard !isScanning else { return }
+        scanMode = .twin
+        if digitalTwin == nil && !twinLoading {
+            collectTwin()
+        }
+    }
+
+    func openTwinHardware() { scanMode = .twinHardware }
+    func openTwinSoftware() { scanMode = .twinSoftware }
+    func openTwinFilesystem() { scanMode = .twinFilesystem }
+    func openTwinProcesses() { scanMode = .twinProcesses }
+    func openTwinMemory() { scanMode = .twinMemory }
+    func openTwinEnergy() { scanMode = .twinEnergy }
+    func openTwinApps() { scanMode = .twinApps }
+    func openTwinReasoning() { scanMode = .twinReasoning }
+
+    // MARK: - Digital Twin Data Loading
+
+    func collectTwin() {
+        twinLoading = true
+        twinError = nil
+        Task {
+            let result = await trackOperation("Digital Twin Collect") { () async throws -> DigitalTwin in
+                let args = [self.xmacPath, "--format", "json", "twin", "--action", "collect"]
+                let (stdout, _) = try await self.runProcess(args)
+                guard let data = stdout.data(using: .utf8) else {
+                    throw XMacError.invalidOutput("twin collect: no data")
+                }
+                return try JSONDecoder().decode(DigitalTwin.self, from: data)
+            }
+            switch result {
+            case .success(let twin):
+                self.digitalTwin = twin
+                self.twinLoading = false
+            case .failure(let err):
+                self.twinError = err.localizedDescription
+                self.twinLoading = false
+            }
+        }
+    }
+
+    func askTwin(question: String) {
+        twinReasoningResult = nil
+        Task {
+            let result = await trackOperation("Twin Ask") { () async throws -> ReasoningResult in
+                let args = [self.xmacPath, "--format", "json", "twin", "--action", "ask", "--question", question]
+                let (stdout, _) = try await self.runProcess(args)
+                guard let data = stdout.data(using: .utf8) else {
+                    throw XMacError.invalidOutput("twin ask: no data")
+                }
+                return try JSONDecoder().decode(ReasoningResult.self, from: data)
+            }
+            if case .success(let r) = result { self.twinReasoningResult = r }
+        }
+    }
+
+    func predictTwin() {
+        twinPredictions = []
+        Task {
+            let result = await trackOperation("Twin Predict") { () async throws -> [String] in
+                let args = [self.xmacPath, "--format", "json", "twin", "--action", "predict"]
+                let (stdout, _) = try await self.runProcess(args)
+                guard let data = stdout.data(using: .utf8) else {
+                    throw XMacError.invalidOutput("twin predict: no data")
+                }
+                return try JSONDecoder().decode([String].self, from: data)
+            }
+            if case .success(let r) = result { self.twinPredictions = r }
+        }
+    }
+
+    func simulateTwin(action: String) {
+        twinSandboxResult = nil
+        Task {
+            let result = await trackOperation("Twin Simulate") { () async throws -> SandboxResult in
+                let args = [self.xmacPath, "--format", "json", "twin", "--action", "simulate", "--simulate", action]
+                let (stdout, _) = try await self.runProcess(args)
+                guard let data = stdout.data(using: .utf8) else {
+                    throw XMacError.invalidOutput("twin simulate: no data")
+                }
+                return try JSONDecoder().decode(SandboxResult.self, from: data)
+            }
+            if case .success(let r) = result { self.twinSandboxResult = r }
+        }
+    }
+
+    func recommendTwin() {
+        twinRecommendations = nil
+        Task {
+            let result = await trackOperation("Twin Recommend") { () async throws -> TwinRecommendations in
+                let args = [self.xmacPath, "--format", "json", "twin", "--action", "recommend"]
+                let (stdout, _) = try await self.runProcess(args)
+                guard let data = stdout.data(using: .utf8) else {
+                    throw XMacError.invalidOutput("twin recommend: no data")
+                }
+                return try JSONDecoder().decode(TwinRecommendations.self, from: data)
+            }
+            if case .success(let r) = result { self.twinRecommendations = r }
+        }
+    }
+
+    func queryTwin(dimension: String) {
+        twinQueryResult = nil
+        Task {
+            let result = await trackOperation("Twin Query") { () async throws -> QueryResult in
+                let args = [self.xmacPath, "--format", "json", "twin", "--action", "query", "--query", dimension]
+                let (stdout, _) = try await self.runProcess(args)
+                guard let data = stdout.data(using: .utf8) else {
+                    throw XMacError.invalidOutput("twin query: no data")
+                }
+                return try JSONDecoder().decode(QueryResult.self, from: data)
+            }
+            if case .success(let r) = result { self.twinQueryResult = r }
+        }
+    }
+
+    func benchmarkTwin() {
+        twinBenchmark = nil
+        Task {
+            let result = await trackOperation("Twin Benchmark") { () async throws -> BenchmarkData in
+                let args = [self.xmacPath, "--format", "json", "twin", "--action", "benchmark"]
+                let (stdout, _) = try await self.runProcess(args)
+                guard let data = stdout.data(using: .utf8) else {
+                    throw XMacError.invalidOutput("twin benchmark: no data")
+                }
+                return try JSONDecoder().decode(BenchmarkData.self, from: data)
+            }
+            if case .success(let r) = result { self.twinBenchmark = r }
+        }
+    }
+
+    func monitorTwin() {
+        twinMonitoringPlan = nil
+        Task {
+            let result = await trackOperation("Twin Monitor") { () async throws -> MonitoringPlan in
+                let args = [self.xmacPath, "--format", "json", "twin", "--action", "monitor"]
+                let (stdout, _) = try await self.runProcess(args)
+                guard let data = stdout.data(using: .utf8) else {
+                    throw XMacError.invalidOutput("twin monitor: no data")
+                }
+                return try JSONDecoder().decode(MonitoringPlan.self, from: data)
+            }
+            if case .success(let r) = result { self.twinMonitoringPlan = r }
+        }
     }
 
     // MARK: - Zen Mode

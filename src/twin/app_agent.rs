@@ -78,6 +78,7 @@ pub struct AppPolicy {
     pub enabled: bool,
 }
 
+#[allow(dead_code)]
 impl AppIntelligenceGraph {
     /// Collect the application intelligence graph.
     pub fn collect() -> Self {

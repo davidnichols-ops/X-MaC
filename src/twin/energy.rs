@@ -127,6 +127,7 @@ pub struct EnergyPolicy {
     pub enabled: bool,
 }
 
+#[allow(dead_code)]
 impl EnergyTwin {
     /// Collect energy and battery twin data.
     pub fn collect() -> Self {

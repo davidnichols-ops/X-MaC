@@ -11,6 +11,7 @@ mod config;
 mod core;
 mod engines;
 mod intelligence;
+mod twin;
 mod util;
 
 use cli::{
@@ -121,6 +122,9 @@ async fn main() -> Result<()> {
         }
         cli::args::Commands::Completions(args) => {
             return run_completions(args.clone());
+        }
+        cli::args::Commands::Twin(args) => {
+            return run_twin(&cli, args.clone());
         }
     };
 
@@ -1042,5 +1046,106 @@ fn run_completions(args: cli::args::CompletionsArgs) -> Result<()> {
         ShellArg::PowerShell => clap_complete::Shell::PowerShell,
     };
     clap_complete::generate(shell, &mut cmd, "xmac", &mut std::io::stdout());
+    Ok(())
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Digital Twin
+// ═══════════════════════════════════════════════════════════════════════
+
+fn run_twin(cli: &Cli, args: cli::args::TwinArgs) -> Result<()> {
+    use cli::args::{OutputFormat, TwinAction};
+
+    let json_out = cli.global.format == OutputFormat::Json;
+
+    fn print_json<T: serde::Serialize>(value: &T, json_out: bool) -> Result<()> {
+        if json_out {
+            serde_json::to_writer_pretty(std::io::stdout(), value)
+                .map_err(|e| anyhow::anyhow!("JSON serialization error: {}", e))?;
+        } else {
+            let json_str = serde_json::to_string_pretty(value)
+                .unwrap_or_else(|_| "<serialization error>".to_string());
+            println!("{}", json_str);
+        }
+        Ok(())
+    }
+
+    match args.action {
+        TwinAction::Collect => {
+            eprintln!("Collecting Digital Twin snapshot...");
+            let twin = twin::DigitalTwin::collect();
+            print_json(&twin, json_out)?;
+        }
+        TwinAction::Ask => {
+            let question = args
+                .question
+                .as_deref()
+                .unwrap_or("How is my system doing?");
+            eprintln!("Collecting twin and reasoning...");
+            let twin = twin::DigitalTwin::collect();
+            let engine = twin.reason();
+            let result = engine.ask(question);
+            print_json(&result, json_out)?;
+        }
+        TwinAction::Predict => {
+            eprintln!("Collecting twin and predicting problems...");
+            let twin = twin::DigitalTwin::collect();
+            let engine = twin.reason();
+            let predictions = engine.predict_problems();
+            print_json(&predictions, json_out)?;
+        }
+        TwinAction::Simulate => {
+            let action = args.simulate.as_deref().unwrap_or("clear cache");
+            eprintln!("Simulating: {}...", action);
+            let result = twin::reasoning::ReasoningEngine::sandbox_simulation(action);
+            print_json(&result, json_out)?;
+        }
+        TwinAction::Recommend => {
+            eprintln!("Collecting twin and generating recommendations...");
+            let twin = twin::DigitalTwin::collect();
+            let engine = twin.reason();
+            let mut recommendations = serde_json::json!({
+                "cleanup_impact": engine.simulate_cleanup(),
+                "workflow_changes": engine.recommend_workflow_changes(),
+                "hardware_upgrades": engine.recommend_hardware_upgrades(),
+                "software_changes": engine.recommend_software_changes(),
+                "preventive_actions": engine.recommend_preventive_actions(),
+            });
+            if let Some(obj) = recommendations.as_object_mut() {
+                obj.insert(
+                    "health_score".to_string(),
+                    serde_json::json!(twin.health_score),
+                );
+                obj.insert(
+                    "trust_score".to_string(),
+                    serde_json::json!(twin.trust_score),
+                );
+            }
+            print_json(&recommendations, json_out)?;
+        }
+        TwinAction::Query => {
+            let dimension = args.query.as_deref().unwrap_or("health");
+            eprintln!("Querying dimension: {}...", dimension);
+            let twin = twin::DigitalTwin::collect();
+            let engine = twin.reason();
+            let result = engine.query(dimension);
+            print_json(&result, json_out)?;
+        }
+        TwinAction::Benchmark => {
+            eprintln!("Generating anonymized benchmark...");
+            let twin = twin::DigitalTwin::collect();
+            let engine = twin.reason();
+            let benchmark = engine.generate_anonymized_benchmark();
+            print_json(&benchmark, json_out)?;
+        }
+        TwinAction::Monitor => {
+            eprintln!("Generating monitoring plan...");
+            let twin = twin::DigitalTwin::collect();
+            let engine = twin.reason();
+            let plan = engine.continuous_monitoring_plan();
+            print_json(&plan, json_out)?;
+        }
+    }
+
     Ok(())
 }

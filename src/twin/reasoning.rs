@@ -34,6 +34,7 @@ pub struct RecommendedAction {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct OptimizationPlan {
     pub steps: Vec<OptimizationStep>,
     pub estimated_total_impact: String,
@@ -42,6 +43,7 @@ pub struct OptimizationPlan {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct OptimizationStep {
     pub name: String,
     pub action: String,
@@ -253,6 +255,7 @@ pub struct MonitoringAlert {
     pub action: String,
 }
 
+#[allow(dead_code)]
 impl ReasoningEngine {
     pub fn new(twin: DigitalTwin) -> Self {
         Self { twin }
@@ -2570,6 +2573,7 @@ impl ReasoningEngine {
 }
 
 /// Extract a process name from an action string like "kill Chrome".
+#[allow(dead_code)]
 fn extract_process_name(action: &str) -> Option<String> {
     let words: Vec<&str> = action.split_whitespace().collect();
     for (i, word) in words.iter().enumerate() {

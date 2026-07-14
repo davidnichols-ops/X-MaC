@@ -37,6 +37,24 @@ struct ContentView: View {
                 ScanHistoryView()
             case .automation:
                 AutomationView()
+            case .twin:
+                TwinDashboardView()
+            case .twinHardware:
+                TwinHardwareView()
+            case .twinSoftware:
+                TwinSoftwareView()
+            case .twinFilesystem:
+                TwinFilesystemView()
+            case .twinProcesses:
+                TwinProcessView()
+            case .twinMemory:
+                TwinMemoryView()
+            case .twinEnergy:
+                TwinEnergyView()
+            case .twinApps:
+                TwinAppIntelligenceView()
+            case .twinReasoning:
+                TwinReasoningView()
             }
         }
         .frame(minWidth: 1100, minHeight: 720)
@@ -195,6 +213,39 @@ struct SidebarView: View {
                 runner.openApps()
             }
 
+            Divider().background(XTheme.cardBorder)
+
+            // Digital Twin section
+            NavButton(icon: "brain.fill", label: "Digital Twin", isActive: runner.scanMode == .twin, disabled: scanning) {
+                runner.openTwin()
+            }
+            if runner.scanMode.rawValue.hasPrefix("twin") && runner.scanMode != .twin {
+                NavButton(icon: "cpu.fill", label: "Hardware", isActive: runner.scanMode == .twinHardware, disabled: scanning, indent: 1) {
+                    runner.openTwinHardware()
+                }
+                NavButton(icon: "shippingbox.fill", label: "Software", isActive: runner.scanMode == .twinSoftware, disabled: scanning, indent: 1) {
+                    runner.openTwinSoftware()
+                }
+                NavButton(icon: "folder.fill.badge.gearshape", label: "Filesystem", isActive: runner.scanMode == .twinFilesystem, disabled: scanning, indent: 1) {
+                    runner.openTwinFilesystem()
+                }
+                NavButton(icon: "chart.bar.fill", label: "Processes", isActive: runner.scanMode == .twinProcesses, disabled: scanning, indent: 1) {
+                    runner.openTwinProcesses()
+                }
+                NavButton(icon: "memorychip.fill", label: "Memory", isActive: runner.scanMode == .twinMemory, disabled: scanning, indent: 1) {
+                    runner.openTwinMemory()
+                }
+                NavButton(icon: "bolt.fill", label: "Energy", isActive: runner.scanMode == .twinEnergy, disabled: scanning, indent: 1) {
+                    runner.openTwinEnergy()
+                }
+                NavButton(icon: "app.connected.to.app.below.fill", label: "App Intel", isActive: runner.scanMode == .twinApps, disabled: scanning, indent: 1) {
+                    runner.openTwinApps()
+                }
+                NavButton(icon: "lightbulb.fill", label: "Reasoning", isActive: runner.scanMode == .twinReasoning, disabled: scanning, indent: 1) {
+                    runner.openTwinReasoning()
+                }
+            }
+
             Spacer()
 
             if scanning {
@@ -305,6 +356,7 @@ struct NavButton: View {
     let label: String
     let isActive: Bool
     let disabled: Bool
+    var indent: Int = 0
     let action: () -> Void
 
     var body: some View {
@@ -321,6 +373,7 @@ struct NavButton: View {
                 Spacer()
             }
             .padding(.horizontal, 12)
+            .padding(.leading, CGFloat(indent) * 16)
             .padding(.vertical, 8)
             .background(
                 isActive && !disabled
