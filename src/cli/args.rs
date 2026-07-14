@@ -885,6 +885,14 @@ pub struct TwinArgs {
     /// (used with --action query).
     #[arg(long, value_name = "DIMENSION")]
     pub query: Option<String>,
+
+    /// Start time for `what-changed` query (ISO 8601 or relative like "7d", "24h").
+    #[arg(long, value_name = "TIMESTAMP")]
+    pub since: Option<String>,
+
+    /// End time for `what-changed` query (defaults to now).
+    #[arg(long, value_name = "TIMESTAMP")]
+    pub until: Option<String>,
 }
 
 /// Sub-actions for the `twin` command.
@@ -906,4 +914,10 @@ pub enum TwinAction {
     Benchmark,
     /// Produce a continuous monitoring plan.
     Monitor,
+    /// Initialize the persistent twin database (SQLite event store).
+    InitDb,
+    /// Query "what changed?" between two timestamps (--since, --until).
+    WhatChanged,
+    /// Run compaction on the event store (prune raw events older than 7 days).
+    Compact,
 }

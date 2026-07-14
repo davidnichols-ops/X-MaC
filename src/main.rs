@@ -125,7 +125,7 @@ async fn main() -> Result<()> {
             return run_completions(args.clone());
         }
         cli::args::Commands::Twin(args) => {
-            return run_twin(&cli, args.clone());
+            return run_twin(&cli, args.clone()).await;
         }
         cli::args::Commands::Mcp => {
             return mcp::run_server();
@@ -1160,7 +1160,7 @@ fn run_completions(args: cli::args::CompletionsArgs) -> Result<()> {
 //  Digital Twin
 // ═══════════════════════════════════════════════════════════════════════
 
-fn run_twin(cli: &Cli, args: cli::args::TwinArgs) -> Result<()> {
+async fn run_twin(cli: &Cli, args: cli::args::TwinArgs) -> Result<()> {
     use cli::args::{OutputFormat, TwinAction};
 
     let json_out = cli.global.format == OutputFormat::Json;
@@ -1252,7 +1252,140 @@ fn run_twin(cli: &Cli, args: cli::args::TwinArgs) -> Result<()> {
             let plan = engine.continuous_monitoring_plan();
             print_json(&plan, json_out)?;
         }
+        TwinAction::InitDb => {
+            let db_path = twin::database::default_db_path()?;
+            eprintln!(
+                "Initializing Digital Twin database at {}",
+                db_path.display()
+            );
+            let db = twin::database::TwinDb::open(&db_path)?;
+            // Verify tables exist.
+            let conn = db.conn().await;
+            let count: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table'",
+                [],
+                |r| r.get(0),
+            )?;
+            eprintln!("Database initialized. {} tables ready.", count);
+            if json_out {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "status": "initialized",
+                        "path": db_path.display().to_string(),
+                        "tables": count
+                    })
+                );
+            }
+        }
+        TwinAction::WhatChanged => {
+            let db_path = twin::database::default_db_path()?;
+            let db = twin::database::TwinDb::open(&db_path)?;
+            let store = twin::database::EventStore::new(db.handle());
+
+            let end_ms = args
+                .until
+                .as_deref()
+                .map(parse_timestamp)
+                .transpose()?
+                .unwrap_or_else(|| chrono::Utc::now().timestamp_millis());
+            let start_ms = args
+                .since
+                .as_deref()
+                .map(parse_timestamp)
+                .transpose()?
+                .unwrap_or_else(||
+                // Default: 24 hours ago.
+                chrono::Utc::now().timestamp_millis() - 86_400_000);
+
+            eprintln!(
+                "Querying changes from {} to {}...",
+                chrono::DateTime::<chrono::Utc>::from_timestamp_millis(start_ms)
+                    .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
+                    .unwrap_or_else(|| start_ms.to_string()),
+                chrono::DateTime::<chrono::Utc>::from_timestamp_millis(end_ms)
+                    .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
+                    .unwrap_or_else(|| end_ms.to_string()),
+            );
+
+            let report = twin::what_changed::what_changed_between(&store, start_ms, end_ms).await?;
+            if json_out {
+                print_json(&report, true)?;
+            } else {
+                print!("{}", twin::what_changed::format_report(&report));
+            }
+        }
+        TwinAction::Compact => {
+            let db_path = twin::database::default_db_path()?;
+            let db = twin::database::TwinDb::open(&db_path)?;
+            let store = twin::database::EventStore::new(db.handle());
+            eprintln!("Running compaction (raw events older than 7 days → hourly aggregates)...");
+            let (hourly_pruned, raw_deleted) = store.compact_events(7).await?;
+            let event_count = store.event_count().await?;
+            let agg_count = store.aggregate_count().await?;
+            eprintln!(
+                "Compaction complete: {} raw events deleted, {} hourly aggregates pruned.",
+                raw_deleted, hourly_pruned
+            );
+            eprintln!(
+                "Current: {} raw events, {} aggregates.",
+                event_count, agg_count
+            );
+            if json_out {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "raw_events_deleted": raw_deleted,
+                        "hourly_aggregates_pruned": hourly_pruned,
+                        "remaining_events": event_count,
+                        "remaining_aggregates": agg_count,
+                    })
+                );
+            }
+        }
     }
 
     Ok(())
+}
+
+/// Parse a timestamp string. Supports:
+///   - ISO 8601: "2026-07-14T13:00:00Z"
+///   - Relative: "7d" (7 days ago), "24h" (24 hours ago), "30m" (30 minutes ago)
+fn parse_timestamp(s: &str) -> Result<i64> {
+    // Try relative format first: NNd, NNh, NNm.
+    if let Some(rest) = s.strip_suffix('d') {
+        if let Ok(n) = rest.parse::<i64>() {
+            return Ok(chrono::Utc::now().timestamp_millis() - n * 86_400_000);
+        }
+    }
+    if let Some(rest) = s.strip_suffix('h') {
+        if let Ok(n) = rest.parse::<i64>() {
+            return Ok(chrono::Utc::now().timestamp_millis() - n * 3_600_000);
+        }
+    }
+    if let Some(rest) = s.strip_suffix('m') {
+        if let Ok(n) = rest.parse::<i64>() {
+            return Ok(chrono::Utc::now().timestamp_millis() - n * 60_000);
+        }
+    }
+    // Try ISO 8601.
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(s) {
+        return Ok(dt.with_timezone(&chrono::Utc).timestamp_millis());
+    }
+    // Try YYYY-MM-DD HH:MM.
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M") {
+        return Ok(dt.and_utc().timestamp_millis());
+    }
+    // Try YYYY-MM-DD.
+    if let Ok(d) = chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+        return Ok(d.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp_millis());
+    }
+    // Try plain integer (epoch millis).
+    if let Ok(ms) = s.parse::<i64>() {
+        return Ok(ms);
+    }
+    anyhow::bail!(
+        "invalid timestamp: {} (use ISO 8601, relative like '7d', or epoch millis)",
+        s
+    )
 }

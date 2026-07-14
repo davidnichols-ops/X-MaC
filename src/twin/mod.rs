@@ -6,6 +6,7 @@
 // for the full operation mapping.
 
 pub mod app_agent;
+pub mod database;
 pub mod energy;
 pub mod event_stream;
 pub mod fs_graph;
@@ -16,5 +17,6 @@ pub mod model;
 pub mod process;
 pub mod reasoning;
 pub mod software_genome;
+pub mod what_changed;
 
 pub use model::DigitalTwin;
