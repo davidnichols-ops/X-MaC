@@ -154,6 +154,9 @@ impl FixScriptGenerator {
                 | Category::InstalledApp
                 | Category::SystemInfo
                 | Category::LargeFile => {}
+                // New categories from phases 1-18 and twin modules —
+                // default to review for safety.
+                _ => review.push(f),
             }
         }
 
@@ -359,6 +362,15 @@ impl FixScriptGenerator {
             | Category::SystemInfo
             | Category::LargeFile => {
                 s.push_str("# (informational)\n");
+            }
+            // New categories from phases 1-18 and twin modules — emit
+            // the remediation hint if present, otherwise informational.
+            _ => {
+                if let Some(hint) = &f.remediation_hint {
+                    s.push_str(&format!("# {}\n", hint));
+                } else {
+                    s.push_str("# (informational)\n");
+                }
             }
         }
         s.push('\n');
