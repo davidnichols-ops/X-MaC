@@ -7,8 +7,10 @@
 
 pub mod app_agent;
 pub mod energy;
+pub mod event_stream;
 pub mod fs_graph;
 pub mod hardware;
+pub mod knowledge_graph;
 pub mod memory;
 pub mod model;
 pub mod process;

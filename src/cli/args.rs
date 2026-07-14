@@ -199,6 +199,11 @@ pub enum Commands {
     /// reasoning engine. Use subcommands to ask questions, predict problems,
     /// simulate actions, or get recommendations.
     Twin(TwinArgs),
+
+    /// Run the MCP (Model Context Protocol) server. Exposes the Digital Twin
+    /// as a structured environment for AI agents (Claude, GPT, local models).
+    /// The server reads JSON-RPC from stdin and writes to stdout.
+    Mcp,
 }
 
 impl Commands {
@@ -227,6 +232,7 @@ impl Commands {
             Commands::History(_) => crate::core::types::EngineId::All,
             Commands::Completions(_) => crate::core::types::EngineId::All,
             Commands::Twin(_) => crate::core::types::EngineId::All,
+            Commands::Mcp => crate::core::types::EngineId::All,
         }
     }
 }

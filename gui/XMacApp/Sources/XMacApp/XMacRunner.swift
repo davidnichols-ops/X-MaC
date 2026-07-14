@@ -78,7 +78,12 @@ final class XMacRunner: ObservableObject {
     @Published var showActivityBanner: Bool = false
 
     enum ScanMode: String {
-        case dashboard, idle, full, clean, maintain, disk, neural, apps, settings, history, automation, ramBoost, zen, advisor, twin, twinHardware, twinSoftware, twinFilesystem, twinProcesses, twinMemory, twinEnergy, twinApps, twinReasoning, diagnostics, conflict, envmap, depth, quickScan, purge, configView
+        // 10-tab architecture
+        case overview, system, applications, filesystem, activity, optimization, intelligence, timeline, automation, assistant, settings
+        // Legacy / sub-modes
+        case dashboard, idle, full, clean, maintain, disk, neural, apps, history, ramBoost, zen, advisor
+        case twin, twinHardware, twinSoftware, twinFilesystem, twinProcesses, twinMemory, twinEnergy, twinApps, twinReasoning
+        case diagnostics, conflict, envmap, depth, quickScan, purge, configView
     }
 
     private var appSettings: AppSettings?
@@ -295,6 +300,17 @@ final class XMacRunner: ObservableObject {
         guard !isScanning else { return }
         scanMode = .diagnostics
     }
+
+    // 10-tab navigation
+    func openOverview() { scanMode = .overview }
+    func openSystem() { scanMode = .system }
+    func openApplicationsTab() { scanMode = .applications }
+    func openFilesystem() { scanMode = .filesystem }
+    func openActivity() { scanMode = .activity }
+    func openOptimization() { scanMode = .optimization }
+    func openIntelligence() { scanMode = .intelligence }
+    func openTimeline() { scanMode = .timeline }
+    func openAssistant() { scanMode = .assistant }
 
     func openConflict() { scanMode = .conflict }
     func openEnvmap() { scanMode = .envmap }

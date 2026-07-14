@@ -11,8 +11,30 @@ struct ContentView: View {
                 .navigationSplitViewColumnWidth(min: 220, ideal: 240)
         } detail: {
             switch runner.scanMode {
-            case .dashboard, .idle:
-                DashboardView()
+            // 10-tab architecture
+            case .overview, .dashboard, .idle:
+                OverviewView()
+            case .system:
+                TwinDashboardView()
+            case .applications, .apps:
+                AppInventoryView()
+            case .filesystem:
+                FilesystemTabView()
+            case .activity:
+                ActivityTabView()
+            case .optimization:
+                OptimizationTabView()
+            case .intelligence:
+                IntelligenceView()
+            case .timeline:
+                TimelineView()
+            case .automation:
+                AutomationView()
+            case .assistant:
+                AssistantView()
+            case .settings:
+                SettingsView()
+            // Legacy sub-modes
             case .full:
                 FullScanView()
             case .clean:
@@ -29,14 +51,8 @@ struct ContentView: View {
                 DiskView()
             case .neural:
                 NeuralScanView()
-            case .apps:
-                AppInventoryView()
-            case .settings:
-                SettingsView()
             case .history:
                 ScanHistoryView()
-            case .automation:
-                AutomationView()
             case .twin:
                 TwinDashboardView()
             case .twinHardware:
@@ -196,40 +212,113 @@ struct SidebarView: View {
 
             let scanning = runner.isScanning
 
-            NavButton(icon: "rectangle.grid.2x2", label: "Overview", isActive: runner.scanMode == .dashboard || runner.scanMode == .idle, disabled: scanning) {
-                runner.openDashboard()
+            // ════ 10-Tab Architecture ════
+
+            // 1. Overview
+            NavButton(icon: "rectangle.grid.2x2", label: "Overview", isActive: runner.scanMode == .overview || runner.scanMode == .dashboard || runner.scanMode == .idle, disabled: scanning) {
+                runner.openOverview()
             }
-            NavButton(icon: "sparkles", label: "Smart Scan", isActive: runner.scanMode == .full, disabled: scanning) {
-                runner.startFullScan()
+
+            // 2. System
+            NavButton(icon: "cpu.fill", label: "System", isActive: runner.scanMode == .system || runner.scanMode == .twin, disabled: scanning) {
+                runner.openSystem()
             }
-            NavButton(icon: "wand.and.stars", label: "Neural Scan", isActive: runner.scanMode == .neural, disabled: scanning) {
-                runner.startNeuralScan()
+            if runner.scanMode == .system || (runner.scanMode.rawValue.hasPrefix("twin") && runner.scanMode != .twin) {
+                NavButton(icon: "cpu", label: "Hardware", isActive: runner.scanMode == .twinHardware, disabled: scanning, indent: 1) {
+                    runner.openTwinHardware()
+                }
+                NavButton(icon: "shippingbox.fill", label: "Software", isActive: runner.scanMode == .twinSoftware, disabled: scanning, indent: 1) {
+                    runner.openTwinSoftware()
+                }
+                NavButton(icon: "memorychip.fill", label: "Memory", isActive: runner.scanMode == .twinMemory, disabled: scanning, indent: 1) {
+                    runner.openTwinMemory()
+                }
+                NavButton(icon: "bolt.fill", label: "Energy", isActive: runner.scanMode == .twinEnergy, disabled: scanning, indent: 1) {
+                    runner.openTwinEnergy()
+                }
             }
-            NavButton(icon: "trash.circle", label: "Clean", isActive: runner.scanMode == .clean, disabled: scanning) {
-                runner.startCleanScan()
+
+            // 3. Applications
+            NavButton(icon: "app.badge", label: "Applications", isActive: runner.scanMode == .applications || runner.scanMode == .apps, disabled: scanning) {
+                runner.openApplicationsTab()
             }
-            NavButton(icon: "wrench.and.screwdriver", label: "Maintain", isActive: runner.scanMode == .maintain, disabled: scanning) {
-                runner.startMaintainScan()
+
+            // 4. Filesystem
+            NavButton(icon: "internaldrive", label: "Filesystem", isActive: runner.scanMode == .filesystem, disabled: scanning) {
+                runner.openFilesystem()
             }
-            NavButton(icon: "bolt.fill", label: "RAM Boost", isActive: runner.scanMode == .ramBoost, disabled: scanning) {
-                runner.openRamBoost()
+            if runner.scanMode == .filesystem {
+                NavButton(icon: "trash.circle", label: "Clean", isActive: runner.scanMode == .clean, disabled: scanning, indent: 1) {
+                    runner.startCleanScan()
+                }
+                NavButton(icon: "doc.on.doc.fill", label: "Duplicates", isActive: false, disabled: scanning, indent: 1) {
+                    runner.startCleanScan()
+                }
+                NavButton(icon: "checkmark.shield.fill", label: "FS Integrity", isActive: runner.scanMode == .depth, disabled: scanning, indent: 1) {
+                    runner.openDepth()
+                }
             }
-            NavButton(icon: "circle.hexagongrid", label: "Zen Mode", isActive: runner.scanMode == .zen, disabled: scanning) {
-                runner.openZen()
+
+            // 5. Activity
+            NavButton(icon: "chart.bar.fill", label: "Activity", isActive: runner.scanMode == .activity, disabled: scanning) {
+                runner.openActivity()
             }
-            NavButton(icon: "brain.head.profile", label: "AI Advisor", isActive: runner.scanMode == .advisor, disabled: scanning) {
-                runner.openAdvisor()
+            if runner.scanMode == .activity {
+                NavButton(icon: "gearshape.2.fill", label: "Processes", isActive: runner.scanMode == .twinProcesses, disabled: scanning, indent: 1) {
+                    runner.openTwinProcesses()
+                }
+                NavButton(icon: "bolt.fill", label: "RAM Boost", isActive: runner.scanMode == .ramBoost, disabled: scanning, indent: 1) {
+                    runner.openRamBoost()
+                }
             }
-            NavButton(icon: "internaldrive", label: "Disk Usage", isActive: runner.scanMode == .disk, disabled: scanning) {
-                runner.startDiskScan()
+
+            // 6. Optimization
+            NavButton(icon: "wand.and.stars", label: "Optimization", isActive: runner.scanMode == .optimization, disabled: scanning) {
+                runner.openOptimization()
             }
-            NavButton(icon: "app.badge", label: "Applications", isActive: runner.scanMode == .apps, disabled: scanning) {
-                runner.openApps()
+            if runner.scanMode == .optimization {
+                NavButton(icon: "circle.hexagongrid", label: "Zen Mode", isActive: runner.scanMode == .zen, disabled: scanning, indent: 1) {
+                    runner.openZen()
+                }
+                NavButton(icon: "brain.head.profile", label: "AI Advisor", isActive: runner.scanMode == .advisor, disabled: scanning, indent: 1) {
+                    runner.openAdvisor()
+                }
+                NavButton(icon: "lightbulb.fill", label: "Reasoning", isActive: runner.scanMode == .twinReasoning, disabled: scanning, indent: 1) {
+                    runner.openTwinReasoning()
+                }
+                NavButton(icon: "trash.fill", label: "Purge", isActive: runner.scanMode == .purge, disabled: scanning, indent: 1) {
+                    runner.openPurge()
+                }
+            }
+
+            // 7. Intelligence
+            NavButton(icon: "brain.fill", label: "Intelligence", isActive: runner.scanMode == .intelligence, disabled: scanning) {
+                runner.openIntelligence()
+            }
+
+            // 8. Timeline
+            NavButton(icon: "clock.fill", label: "Timeline", isActive: runner.scanMode == .timeline, disabled: scanning) {
+                runner.openTimeline()
+            }
+
+            // 9. Automation
+            NavButton(icon: "gearshape.arrow.triangle.2.circlepath", label: "Automation", isActive: runner.scanMode == .automation, disabled: scanning) {
+                runner.scanMode = .automation
+            }
+
+            // 10. Assistant
+            NavButton(icon: "bubble.left.and.bubble.right.fill", label: "Assistant", isActive: runner.scanMode == .assistant, disabled: scanning) {
+                runner.openAssistant()
             }
 
             Divider().background(XTheme.cardBorder)
 
-            // System Tools section
+            // Diagnostics (power user)
+            NavButton(icon: "stethoscope", label: "Diagnostics", isActive: runner.scanMode == .diagnostics, disabled: scanning) {
+                runner.openDiagnostics()
+            }
+
+            // System tools (power user)
             NavButton(icon: "bolt.circle", label: "Quick Scan", isActive: runner.scanMode == .quickScan, disabled: scanning) {
                 runner.openQuickScan()
             }
@@ -239,54 +328,15 @@ struct SidebarView: View {
             NavButton(icon: "map.fill", label: "Env Map", isActive: runner.scanMode == .envmap, disabled: scanning) {
                 runner.openEnvmap()
             }
-            NavButton(icon: "checkmark.shield.fill", label: "FS Integrity", isActive: runner.scanMode == .depth, disabled: scanning) {
-                runner.openDepth()
-            }
-            NavButton(icon: "trash.fill", label: "Purge", isActive: runner.scanMode == .purge, disabled: scanning) {
-                runner.openPurge()
-            }
             NavButton(icon: "gearshape.fill", label: "Config", isActive: runner.scanMode == .configView, disabled: scanning) {
                 runner.openConfigView()
             }
 
-            Divider().background(XTheme.cardBorder)
-
-            // Digital Twin section
-            NavButton(icon: "brain.fill", label: "Digital Twin", isActive: runner.scanMode == .twin, disabled: scanning) {
-                runner.openTwin()
+            NavButton(icon: "clock.arrow.circlepath", label: "History", isActive: runner.scanMode == .history, disabled: scanning) {
+                runner.openHistory()
             }
-            if runner.scanMode.rawValue.hasPrefix("twin") && runner.scanMode != .twin {
-                NavButton(icon: "cpu.fill", label: "Hardware", isActive: runner.scanMode == .twinHardware, disabled: scanning, indent: 1) {
-                    runner.openTwinHardware()
-                }
-                NavButton(icon: "shippingbox.fill", label: "Software", isActive: runner.scanMode == .twinSoftware, disabled: scanning, indent: 1) {
-                    runner.openTwinSoftware()
-                }
-                NavButton(icon: "folder.fill.badge.gearshape", label: "Filesystem", isActive: runner.scanMode == .twinFilesystem, disabled: scanning, indent: 1) {
-                    runner.openTwinFilesystem()
-                }
-                NavButton(icon: "chart.bar.fill", label: "Processes", isActive: runner.scanMode == .twinProcesses, disabled: scanning, indent: 1) {
-                    runner.openTwinProcesses()
-                }
-                NavButton(icon: "memorychip.fill", label: "Memory", isActive: runner.scanMode == .twinMemory, disabled: scanning, indent: 1) {
-                    runner.openTwinMemory()
-                }
-                NavButton(icon: "bolt.fill", label: "Energy", isActive: runner.scanMode == .twinEnergy, disabled: scanning, indent: 1) {
-                    runner.openTwinEnergy()
-                }
-                NavButton(icon: "app.connected.to.app.below.fill", label: "App Intel", isActive: runner.scanMode == .twinApps, disabled: scanning, indent: 1) {
-                    runner.openTwinApps()
-                }
-                NavButton(icon: "lightbulb.fill", label: "Reasoning", isActive: runner.scanMode == .twinReasoning, disabled: scanning, indent: 1) {
-                    runner.openTwinReasoning()
-                }
-            }
-
-            Divider().background(XTheme.cardBorder)
-
-            // Diagnostics
-            NavButton(icon: "stethoscope", label: "Diagnostics", isActive: runner.scanMode == .diagnostics, disabled: scanning) {
-                runner.openDiagnostics()
+            NavButton(icon: "gearshape", label: "Settings", isActive: runner.scanMode == .settings, disabled: scanning) {
+                runner.openSettings()
             }
 
             Spacer()
@@ -295,16 +345,6 @@ struct SidebarView: View {
                 ScanProgressMini(phase: runner.scanPhase, progress: runner.scanProgress)
             } else if let activity = runner.lastActivity {
                 ActivityMiniIndicator(activity: activity)
-            }
-
-            NavButton(icon: "clock.arrow.circlepath", label: "History", isActive: runner.scanMode == .history, disabled: scanning) {
-                runner.openHistory()
-            }
-            NavButton(icon: "gearshape.2", label: "Automation", isActive: runner.scanMode == .automation, disabled: scanning) {
-                runner.openAutomation()
-            }
-            NavButton(icon: "gearshape", label: "Settings", isActive: runner.scanMode == .settings, disabled: scanning) {
-                runner.openSettings()
             }
         }
         .padding(.horizontal, 12)

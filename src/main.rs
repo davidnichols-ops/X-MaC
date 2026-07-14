@@ -11,6 +11,7 @@ mod config;
 mod core;
 mod engines;
 mod intelligence;
+mod mcp;
 mod twin;
 mod util;
 
@@ -125,6 +126,9 @@ async fn main() -> Result<()> {
         }
         cli::args::Commands::Twin(args) => {
             return run_twin(&cli, args.clone());
+        }
+        cli::args::Commands::Mcp => {
+            return mcp::run_server();
         }
     };
 
