@@ -210,13 +210,17 @@ impl FilesystemGraph {
         // Ops 89-92: cache relationship detection.
         graph.detect_cache_relationships();
 
-        // Ops 93-95: duplicate cluster integration.
-        graph.duplicate_clusters = graph.collect_duplicate_clusters();
+        // Ops 93-95: duplicate cluster integration (limited to top 100 by size
+        // to keep the Digital Twin JSON output manageable for GUI consumption).
+        let mut duplicates = graph.collect_duplicate_clusters();
+        duplicates.sort_by_key(|c| std::cmp::Reverse(c.total_size_bytes));
+        duplicates.truncate(100);
+        graph.duplicate_clusters = duplicates;
 
-        // Ops 96-100: abandoned/orphan file detection.
+        // Ops 96-100: abandoned/orphan file detection (limited to 200 each).
         let (abandoned, orphans) = graph.collect_abandoned_and_orphans();
-        graph.abandoned_files = abandoned;
-        graph.orphan_files = orphans;
+        graph.abandoned_files = abandoned.into_iter().take(200).collect();
+        graph.orphan_files = orphans.into_iter().take(200).collect();
 
         // Total file count + size census (bounded depth for performance).
         let (count, size) = count_files_in_home(HOME_SCAN_MAX_DEPTH);

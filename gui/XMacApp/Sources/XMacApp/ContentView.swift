@@ -244,18 +244,21 @@ struct SidebarView: View {
             }
 
             // 4. Filesystem
-            NavButton(icon: "internaldrive", label: "Filesystem", isActive: runner.scanMode == .filesystem, disabled: scanning) {
+            NavButton(icon: "internaldrive", label: "Filesystem", isActive: runner.scanMode == .filesystem || runner.scanMode == .depth || runner.scanMode == .conflict || runner.scanMode == .envmap, disabled: scanning) {
                 runner.openFilesystem()
             }
-            if runner.scanMode == .filesystem {
+            if runner.scanMode == .filesystem || runner.scanMode == .depth || runner.scanMode == .conflict || runner.scanMode == .envmap {
                 NavButton(icon: "trash.circle", label: "Clean", isActive: runner.scanMode == .clean, disabled: scanning, indent: 1) {
-                    runner.startCleanScan()
-                }
-                NavButton(icon: "doc.on.doc.fill", label: "Duplicates", isActive: false, disabled: scanning, indent: 1) {
                     runner.startCleanScan()
                 }
                 NavButton(icon: "checkmark.shield.fill", label: "FS Integrity", isActive: runner.scanMode == .depth, disabled: scanning, indent: 1) {
                     runner.openDepth()
+                }
+                NavButton(icon: "exclamationmark.arrow.triangle.2.circlepath", label: "Conflicts", isActive: runner.scanMode == .conflict, disabled: scanning, indent: 1) {
+                    runner.openConflict()
+                }
+                NavButton(icon: "map.fill", label: "Env Map", isActive: runner.scanMode == .envmap, disabled: scanning, indent: 1) {
+                    runner.openEnvmap()
                 }
             }
 
@@ -273,10 +276,10 @@ struct SidebarView: View {
             }
 
             // 6. Optimization
-            NavButton(icon: "wand.and.stars", label: "Optimization", isActive: runner.scanMode == .optimization, disabled: scanning) {
+            NavButton(icon: "wand.and.stars", label: "Optimization", isActive: runner.scanMode == .optimization || runner.scanMode == .quickScan || runner.scanMode == .purge || runner.scanMode == .configView || runner.scanMode == .history, disabled: scanning) {
                 runner.openOptimization()
             }
-            if runner.scanMode == .optimization {
+            if runner.scanMode == .optimization || runner.scanMode == .quickScan || runner.scanMode == .purge || runner.scanMode == .configView || runner.scanMode == .history {
                 NavButton(icon: "circle.hexagongrid", label: "Zen Mode", isActive: runner.scanMode == .zen, disabled: scanning, indent: 1) {
                     runner.openZen()
                 }
@@ -286,8 +289,17 @@ struct SidebarView: View {
                 NavButton(icon: "lightbulb.fill", label: "Reasoning", isActive: runner.scanMode == .twinReasoning, disabled: scanning, indent: 1) {
                     runner.openTwinReasoning()
                 }
+                NavButton(icon: "bolt.circle", label: "Quick Scan", isActive: runner.scanMode == .quickScan, disabled: scanning, indent: 1) {
+                    runner.openQuickScan()
+                }
                 NavButton(icon: "trash.fill", label: "Purge", isActive: runner.scanMode == .purge, disabled: scanning, indent: 1) {
                     runner.openPurge()
+                }
+                NavButton(icon: "clock.arrow.circlepath", label: "History", isActive: runner.scanMode == .history, disabled: scanning, indent: 1) {
+                    runner.openHistory()
+                }
+                NavButton(icon: "gearshape.fill", label: "Config", isActive: runner.scanMode == .configView, disabled: scanning, indent: 1) {
+                    runner.openConfigView()
                 }
             }
 
@@ -311,35 +323,17 @@ struct SidebarView: View {
                 runner.openAssistant()
             }
 
-            Divider().background(XTheme.cardBorder)
-
-            // Diagnostics (power user)
-            NavButton(icon: "stethoscope", label: "Diagnostics", isActive: runner.scanMode == .diagnostics, disabled: scanning) {
-                runner.openDiagnostics()
-            }
-
-            // System tools (power user)
-            NavButton(icon: "bolt.circle", label: "Quick Scan", isActive: runner.scanMode == .quickScan, disabled: scanning) {
-                runner.openQuickScan()
-            }
-            NavButton(icon: "exclamationmark.arrow.triangle.2.circlepath", label: "Conflicts", isActive: runner.scanMode == .conflict, disabled: scanning) {
-                runner.openConflict()
-            }
-            NavButton(icon: "map.fill", label: "Env Map", isActive: runner.scanMode == .envmap, disabled: scanning) {
-                runner.openEnvmap()
-            }
-            NavButton(icon: "gearshape.fill", label: "Config", isActive: runner.scanMode == .configView, disabled: scanning) {
-                runner.openConfigView()
-            }
-
-            NavButton(icon: "clock.arrow.circlepath", label: "History", isActive: runner.scanMode == .history, disabled: scanning) {
-                runner.openHistory()
-            }
-            NavButton(icon: "gearshape", label: "Settings", isActive: runner.scanMode == .settings, disabled: scanning) {
-                runner.openSettings()
-            }
-
+            // Settings (gear at bottom, not a tab)
             Spacer()
+
+            HStack(spacing: 4) {
+                NavButton(icon: "stethoscope", label: "Diagnostics", isActive: runner.scanMode == .diagnostics, disabled: scanning) {
+                    runner.openDiagnostics()
+                }
+                NavButton(icon: "gearshape", label: "Settings", isActive: runner.scanMode == .settings, disabled: scanning) {
+                    runner.openSettings()
+                }
+            }
 
             if scanning {
                 ScanProgressMini(phase: runner.scanPhase, progress: runner.scanProgress)
