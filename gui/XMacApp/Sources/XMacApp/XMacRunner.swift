@@ -62,13 +62,23 @@ final class XMacRunner: ObservableObject {
     @Published var twinBenchmark: BenchmarkData?
     @Published var twinMonitoringPlan: MonitoringPlan?
 
+    // Generic scan results for unwired commands
+    @Published var conflictFindings: [Finding] = []
+    @Published var envmapFindings: [Finding] = []
+    @Published var depthFindings: [Finding] = []
+    @Published var quickFindings: [Finding] = []
+    @Published var fullScanFindings: [Finding] = []
+    @Published var purgeResult: String?
+    @Published var configJson: String?
+    @Published var configProfiles: [ConfigProfile] = []
+
     // Universal activity log — tracks all operations across the app
     @Published var activityLog: [ActivityLogEntry] = []
     @Published var lastActivity: ActivityLogEntry? = nil
     @Published var showActivityBanner: Bool = false
 
     enum ScanMode: String {
-        case dashboard, idle, full, clean, maintain, disk, neural, apps, settings, history, automation, ramBoost, zen, advisor, twin, twinHardware, twinSoftware, twinFilesystem, twinProcesses, twinMemory, twinEnergy, twinApps, twinReasoning
+        case dashboard, idle, full, clean, maintain, disk, neural, apps, settings, history, automation, ramBoost, zen, advisor, twin, twinHardware, twinSoftware, twinFilesystem, twinProcesses, twinMemory, twinEnergy, twinApps, twinReasoning, diagnostics, conflict, envmap, depth, quickScan, purge, configView
     }
 
     private var appSettings: AppSettings?
@@ -148,7 +158,7 @@ final class XMacRunner: ObservableObject {
         lastActivity = nil
     }
 
-    private let xmacPath: String = {
+    let xmacPath: String = {
         // Look for the bundled binary first (inside the .app bundle), then
         // fall back to installed locations, then PATH.
         let bundleDir = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/xmac").path
@@ -280,6 +290,85 @@ final class XMacRunner: ObservableObject {
     func openTwinEnergy() { scanMode = .twinEnergy }
     func openTwinApps() { scanMode = .twinApps }
     func openTwinReasoning() { scanMode = .twinReasoning }
+
+    func openDiagnostics() {
+        guard !isScanning else { return }
+        scanMode = .diagnostics
+    }
+
+    func openConflict() { scanMode = .conflict }
+    func openEnvmap() { scanMode = .envmap }
+    func openDepth() { scanMode = .depth }
+    func openQuickScan() { scanMode = .quickScan }
+    func openPurge() { scanMode = .purge }
+    func openConfigView() { scanMode = .configView }
+
+    // MARK: - Missing Command Scans
+
+    func runConflictScan() {
+        conflictFindings = []
+        Task {
+            await runCommand([xmacPath, "--format", "json", "conflict"])
+            conflictFindings = findings
+            scanMode = .conflict
+        }
+    }
+
+    func runEnvmapScan() {
+        envmapFindings = []
+        Task {
+            await runCommand([xmacPath, "--format", "json", "envmap"])
+            envmapFindings = findings
+            scanMode = .envmap
+        }
+    }
+
+    func runDepthScan() {
+        depthFindings = []
+        Task {
+            await runCommand([xmacPath, "--format", "json", "depth"])
+            depthFindings = findings
+            scanMode = .depth
+        }
+    }
+
+    func runQuickScan() {
+        quickFindings = []
+        Task {
+            await runCommand([xmacPath, "--format", "json", "quick"])
+            quickFindings = findings
+            scanMode = .quickScan
+        }
+    }
+
+    func runFullSystemScan() {
+        fullScanFindings = []
+        Task {
+            await runCommand([xmacPath, "--format", "json", "scan"])
+            fullScanFindings = findings
+            scanMode = .full
+        }
+    }
+
+    func runConfigShow() {
+        Task {
+            let result = try? await runProcess([xmacPath, "--format", "json", "config", "show"])
+            if let (stdout, _) = result {
+                configJson = stdout
+            }
+        }
+    }
+
+    func runConfigProfiles() {
+        Task {
+            let result = try? await runProcess([xmacPath, "--format", "json", "config", "profiles"])
+            if let (stdout, _) = result,
+               let data = stdout.data(using: .utf8),
+               let profiles = try? JSONDecoder().decode([ConfigProfile].self, from: data) {
+                configProfiles = profiles
+            }
+        }
+    }
 
     // MARK: - Digital Twin Data Loading
 
@@ -821,7 +910,7 @@ final class XMacRunner: ObservableObject {
         }
     }
 
-    private func runProcess(_ args: [String]) async throws -> (String, String) {
+    func runProcess(_ args: [String]) async throws -> (String, String) {
         var args = args
         if let override = binaryPathOverride, !args.isEmpty, args[0].contains("xmac") {
             let bundlePath = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/xmac").path

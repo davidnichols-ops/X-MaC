@@ -613,38 +613,77 @@ async fn run_optimize(cli: &Cli, args: cli::args::OptimizeArgs) -> Result<()> {
 //  Config command
 // ═══════════════════════════════════════════════════════════════════════
 
-fn run_config(_cli: &Cli, args: &cli::args::ConfigArgs) -> Result<()> {
-    use cli::args::ConfigAction;
+fn run_config(cli: &Cli, args: &cli::args::ConfigArgs) -> Result<()> {
+    use cli::args::{ConfigAction, OutputFormat};
     use config::{
         profiles::{OptimizationProfile, ProfilePreset},
         ConfigManager,
     };
+
+    let json_out = cli.global.format == OutputFormat::Json;
 
     match &args.action {
         ConfigAction::Init => {
             let mgr = ConfigManager::load();
             let path = mgr.path().to_path_buf();
             mgr.ensure_config_file().map_err(|e| anyhow::anyhow!(e))?;
-            eprintln!("Created config file at: {}", path.display());
-            eprintln!("Edit it to customize X-MaC behavior.");
+            if json_out {
+                serde_json::to_writer_pretty(
+                    std::io::stdout(),
+                    &serde_json::json!({
+                        "action": "init",
+                        "path": path.display().to_string(),
+                        "status": "created"
+                    }),
+                )?;
+                println!();
+            } else {
+                eprintln!("Created config file at: {}", path.display());
+                eprintln!("Edit it to customize X-MaC behavior.");
+            }
             Ok(())
         }
         ConfigAction::Show => {
             let mgr = ConfigManager::load();
-            let toml = toml::to_string_pretty(mgr.config()).map_err(|e| anyhow::anyhow!(e))?;
-            println!("{}", toml);
+            if json_out {
+                serde_json::to_writer_pretty(std::io::stdout(), mgr.config())?;
+                println!();
+            } else {
+                let toml = toml::to_string_pretty(mgr.config()).map_err(|e| anyhow::anyhow!(e))?;
+                println!("{}", toml);
+            }
             Ok(())
         }
         ConfigAction::Path => {
-            println!("{}", ConfigManager::default_config_path().display());
+            let path = ConfigManager::default_config_path();
+            if json_out {
+                serde_json::to_writer_pretty(
+                    std::io::stdout(),
+                    &serde_json::json!({
+                        "config_path": path.display().to_string()
+                    }),
+                )?;
+                println!();
+            } else {
+                println!("{}", path.display());
+            }
             Ok(())
         }
         ConfigAction::Profiles => {
-            eprintln!("Available optimization profiles:\n");
-            for preset in ProfilePreset::all() {
-                eprintln!("  {:15} {}", preset.name, preset.description);
+            if json_out {
+                let profiles: Vec<_> = ProfilePreset::all()
+                    .iter()
+                    .map(|p| serde_json::json!({"name": p.name, "description": p.description}))
+                    .collect();
+                serde_json::to_writer_pretty(std::io::stdout(), &profiles)?;
+                println!();
+            } else {
+                eprintln!("Available optimization profiles:\n");
+                for preset in ProfilePreset::all() {
+                    eprintln!("  {:15} {}", preset.name, preset.description);
+                }
+                eprintln!("\nSet with: xmac config set-profile <name>");
             }
-            eprintln!("\nSet with: xmac config set-profile <name>");
             Ok(())
         }
         ConfigAction::SetProfile { name } => {
@@ -661,24 +700,58 @@ fn run_config(_cli: &Cli, args: &cli::args::ConfigArgs) -> Result<()> {
             let mut mgr = ConfigManager::load();
             mgr.set_profile(profile);
             mgr.save().map_err(|e| anyhow::anyhow!(e))?;
-            eprintln!(
-                "Active profile set to: {} ({})",
-                profile.label(),
-                profile.description()
-            );
+            if json_out {
+                serde_json::to_writer_pretty(
+                    std::io::stdout(),
+                    &serde_json::json!({
+                        "action": "set_profile",
+                        "profile": name,
+                        "label": profile.label(),
+                        "description": profile.description(),
+                        "status": "ok"
+                    }),
+                )?;
+                println!();
+            } else {
+                eprintln!(
+                    "Active profile set to: {} ({})",
+                    profile.label(),
+                    profile.description()
+                );
+            }
             Ok(())
         }
         ConfigAction::Set { key, value } => {
             let mut mgr = ConfigManager::load();
             set_config_value(mgr.config_mut(), key, value)?;
             mgr.save().map_err(|e| anyhow::anyhow!(e))?;
-            eprintln!("Set {} = {}", key, value);
+            if json_out {
+                serde_json::to_writer_pretty(
+                    std::io::stdout(),
+                    &serde_json::json!({
+                        "action": "set", "key": key, "value": value, "status": "ok"
+                    }),
+                )?;
+                println!();
+            } else {
+                eprintln!("Set {} = {}", key, value);
+            }
             Ok(())
         }
         ConfigAction::Get { key } => {
             let mgr = ConfigManager::load();
             let val = get_config_value(mgr.config(), key);
-            println!("{}", val);
+            if json_out {
+                serde_json::to_writer_pretty(
+                    std::io::stdout(),
+                    &serde_json::json!({
+                        "key": key, "value": val
+                    }),
+                )?;
+                println!();
+            } else {
+                println!("{}", val);
+            }
             Ok(())
         }
     }
@@ -947,9 +1020,12 @@ async fn run_advisor(_cli: &Cli, args: &cli::args::AdvisorArgs) -> Result<()> {
 //  History command
 // ═══════════════════════════════════════════════════════════════════════
 
-fn run_history(_cli: &Cli, args: &cli::args::HistoryArgs) -> Result<()> {
+fn run_history(cli: &Cli, args: &cli::args::HistoryArgs) -> Result<()> {
     use cleanup::history::{load_history, save_history};
+    use cli::args::OutputFormat;
     use config::ConfigManager;
+
+    let json_out = cli.global.format == OutputFormat::Json;
 
     let mgr = ConfigManager::load();
     let history_path = &mgr.config().history.path;
@@ -957,7 +1033,17 @@ fn run_history(_cli: &Cli, args: &cli::args::HistoryArgs) -> Result<()> {
     if args.clear {
         let empty = cleanup::history::CleanupHistory::new();
         save_history(&empty, history_path).map_err(|e| anyhow::anyhow!(e))?;
-        eprintln!("History cleared.");
+        if json_out {
+            serde_json::to_writer_pretty(
+                std::io::stdout(),
+                &serde_json::json!({
+                    "action": "clear", "status": "ok"
+                }),
+            )?;
+            println!();
+        } else {
+            eprintln!("History cleared.");
+        }
         return Ok(());
     }
 
@@ -966,7 +1052,24 @@ fn run_history(_cli: &Cli, args: &cli::args::HistoryArgs) -> Result<()> {
     if let Some(export_path) = &args.export {
         let json = serde_json::to_string_pretty(&history)?;
         std::fs::write(export_path, json)?;
-        eprintln!("History exported to: {}", export_path.display());
+        if json_out {
+            serde_json::to_writer_pretty(
+                std::io::stdout(),
+                &serde_json::json!({
+                    "action": "export", "path": export_path.display().to_string(), "status": "ok"
+                }),
+            )?;
+            println!();
+        } else {
+            eprintln!("History exported to: {}", export_path.display());
+        }
+        return Ok(());
+    }
+
+    if json_out {
+        // Output full history as JSON
+        serde_json::to_writer_pretty(std::io::stdout(), &history)?;
+        println!();
         return Ok(());
     }
 

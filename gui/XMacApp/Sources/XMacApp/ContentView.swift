@@ -55,6 +55,20 @@ struct ContentView: View {
                 TwinAppIntelligenceView()
             case .twinReasoning:
                 TwinReasoningView()
+            case .diagnostics:
+                DiagnosticsView()
+            case .conflict:
+                ConflictView()
+            case .envmap:
+                EnvMapView()
+            case .depth:
+                DepthView()
+            case .quickScan:
+                QuickScanView()
+            case .purge:
+                PurgeView()
+            case .configView:
+                ConfigView()
             }
         }
         .frame(minWidth: 1100, minHeight: 720)
@@ -215,6 +229,28 @@ struct SidebarView: View {
 
             Divider().background(XTheme.cardBorder)
 
+            // System Tools section
+            NavButton(icon: "bolt.circle", label: "Quick Scan", isActive: runner.scanMode == .quickScan, disabled: scanning) {
+                runner.openQuickScan()
+            }
+            NavButton(icon: "exclamationmark.arrow.triangle.2.circlepath", label: "Conflicts", isActive: runner.scanMode == .conflict, disabled: scanning) {
+                runner.openConflict()
+            }
+            NavButton(icon: "map.fill", label: "Env Map", isActive: runner.scanMode == .envmap, disabled: scanning) {
+                runner.openEnvmap()
+            }
+            NavButton(icon: "checkmark.shield.fill", label: "FS Integrity", isActive: runner.scanMode == .depth, disabled: scanning) {
+                runner.openDepth()
+            }
+            NavButton(icon: "trash.fill", label: "Purge", isActive: runner.scanMode == .purge, disabled: scanning) {
+                runner.openPurge()
+            }
+            NavButton(icon: "gearshape.fill", label: "Config", isActive: runner.scanMode == .configView, disabled: scanning) {
+                runner.openConfigView()
+            }
+
+            Divider().background(XTheme.cardBorder)
+
             // Digital Twin section
             NavButton(icon: "brain.fill", label: "Digital Twin", isActive: runner.scanMode == .twin, disabled: scanning) {
                 runner.openTwin()
@@ -244,6 +280,13 @@ struct SidebarView: View {
                 NavButton(icon: "lightbulb.fill", label: "Reasoning", isActive: runner.scanMode == .twinReasoning, disabled: scanning, indent: 1) {
                     runner.openTwinReasoning()
                 }
+            }
+
+            Divider().background(XTheme.cardBorder)
+
+            // Diagnostics
+            NavButton(icon: "stethoscope", label: "Diagnostics", isActive: runner.scanMode == .diagnostics, disabled: scanning) {
+                runner.openDiagnostics()
             }
 
             Spacer()

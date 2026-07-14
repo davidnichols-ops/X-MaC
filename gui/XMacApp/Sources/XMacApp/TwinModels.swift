@@ -7,6 +7,15 @@ enum XMacError: Error {
     case processFailed(String)
 }
 
+// MARK: - Config Profile
+
+struct ConfigProfile: Codable, Identifiable {
+    let name: String
+    let description: String
+
+    var id: String { name }
+}
+
 // MARK: - Digital Twin Models
 // Swift Codable models matching the Rust `DigitalTwin` JSON output from `xmac twin --action collect`.
 
