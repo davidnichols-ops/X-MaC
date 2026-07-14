@@ -363,6 +363,9 @@ impl ScanReport {
             disk: 0,
         };
         let mut category_map: HashMap<String, u64> = HashMap::new();
+        // op 52: Estimate reclaimable space — sum the size bytes of findings
+        // whose categories represent deletable space, excluding informational
+        // categories (SystemInfo, LargeFile) that do not map to deletable items.
         let mut reclaimable: u64 = 0;
 
         for f in findings {

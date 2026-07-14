@@ -137,6 +137,31 @@ pub struct MemoryPolicy {
     pub enabled: bool,
 }
 
+/// op 178: A plan for managing GPU memory usage — recommendations to
+/// optimize GPU/Metal memory allocation on Apple Silicon.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
+pub struct GPUMemoryPlan {
+    pub gpu_allocated_bytes: u64,
+    pub metal_allocated_bytes: u64,
+    pub recommended_limit_bytes: u64,
+    pub recommendations: Vec<String>,
+    pub overcommitted: bool,
+}
+
+/// op 280: An optimization plan for Apple Silicon unified memory —
+/// recommendations to rebalance the CPU/GPU/ANE shared memory fabric.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
+pub struct UnifiedMemoryPlan {
+    pub is_apple_silicon: bool,
+    pub total_bytes: u64,
+    pub used_bytes: u64,
+    pub shared_pool_bytes: u64,
+    pub recommendations: Vec<String>,
+    pub estimated_savings_bytes: u64,
+}
+
 impl MemoryIntelligence {
     /// Collect memory intelligence.
     pub fn collect() -> Self {
@@ -397,6 +422,86 @@ impl MemoryIntelligence {
             self.leak_candidates.len(),
             self.pressure_level,
         )
+    }
+
+    /// op 178: Manage GPU memory usage — analyze GPU/Metal memory
+    /// allocation and recommend optimizations. On Apple Silicon the GPU and
+    /// Metal share the unified memory fabric; this plan recommends limits
+    /// and actions to keep GPU memory within a healthy budget.
+    #[allow(dead_code)]
+    pub fn manage_gpu_memory(&mut self) -> GPUMemoryPlan {
+        let gpu_allocated = self.unified_memory_model.gpu_allocated_bytes.unwrap_or(0);
+        let metal_allocated = self.unified_memory_model.metal_allocated_bytes.unwrap_or(0);
+        // Recommend a GPU budget of ~25% of total memory.
+        let recommended_limit = self.total_bytes / 4;
+        let overcommitted = (gpu_allocated + metal_allocated) > recommended_limit;
+
+        let mut recommendations = Vec::new();
+        if overcommitted {
+            recommendations.push(
+                "GPU/Metal memory exceeds recommended budget — close GPU-heavy apps.".to_string(),
+            );
+        }
+        if self.pressure_level >= 2 {
+            recommendations
+                .push("Memory pressure elevated — release unused Metal textures.".to_string());
+        }
+        recommendations.push("Monitor GPU memory via Metal device allocations.".to_string());
+
+        GPUMemoryPlan {
+            gpu_allocated_bytes: gpu_allocated,
+            metal_allocated_bytes: metal_allocated,
+            recommended_limit_bytes: recommended_limit,
+            recommendations,
+            overcommitted,
+        }
+    }
+
+    /// op 280: Optimize unified memory usage — create an optimization plan
+    /// for Apple Silicon unified memory. Recommends rebalancing the
+    /// CPU/GPU/ANE shared memory fabric and reclaiming idle allocations.
+    #[allow(dead_code)]
+    pub fn optimize_unified_memory(&mut self) -> UnifiedMemoryPlan {
+        let is_as = self.unified_memory_model.is_apple_silicon;
+        let shared_pool = self.topology.shared_pool_bytes.unwrap_or(0);
+        let mut recommendations = Vec::new();
+        let mut estimated_savings: u64 = 0;
+
+        if is_as {
+            recommendations.push(
+                "Rebalance unified memory across CPU/GPU/ANE based on active workload.".to_string(),
+            );
+            // Reclaiming idle consumers' memory is the main saving.
+            let idle_bytes: u64 = self.inefficient_apps().iter().map(|c| c.memory_bytes).sum();
+            estimated_savings += idle_bytes;
+            if idle_bytes > 0 {
+                recommendations.push(format!("Reclaim {idle_bytes} bytes from idle heavy apps."));
+            }
+            if self.swap_used_bytes > 0 {
+                recommendations.push(
+                    "Reduce swap usage by quitting memory-heavy background apps.".to_string(),
+                );
+            }
+            if self.fragmentation_pct.unwrap_or(0.0) > 30.0 {
+                recommendations.push(
+                    "Memory fragmentation is high — consider restarting memory-heavy apps."
+                        .to_string(),
+                );
+            }
+        } else {
+            recommendations.push(
+                "Unified memory optimization is only applicable to Apple Silicon.".to_string(),
+            );
+        }
+
+        UnifiedMemoryPlan {
+            is_apple_silicon: is_as,
+            total_bytes: self.total_bytes,
+            used_bytes: self.used_bytes,
+            shared_pool_bytes: shared_pool,
+            recommendations,
+            estimated_savings_bytes: estimated_savings,
+        }
     }
 }
 
@@ -770,5 +875,57 @@ mod tests {
         let mi = MemoryIntelligence::collect();
         let s = mi.intelligence_summary();
         assert!(s.contains("Memory:"));
+    }
+
+    #[test]
+    fn test_manage_gpu_memory() {
+        let mut mi = MemoryIntelligence::collect();
+        mi.total_bytes = 16_000_000_000;
+        let plan = mi.manage_gpu_memory();
+        assert_eq!(plan.recommended_limit_bytes, 4_000_000_000);
+        assert!(!plan.recommendations.is_empty());
+    }
+
+    #[test]
+    fn test_manage_gpu_memory_overcommitted() {
+        let mut mi = MemoryIntelligence::collect();
+        mi.total_bytes = 16_000_000_000;
+        mi.unified_memory_model.gpu_allocated_bytes = Some(5_000_000_000);
+        mi.unified_memory_model.metal_allocated_bytes = Some(0);
+        let plan = mi.manage_gpu_memory();
+        assert!(plan.overcommitted);
+        assert!(plan
+            .recommendations
+            .iter()
+            .any(|r| r.contains("exceeds recommended budget")));
+    }
+
+    #[test]
+    fn test_optimize_unified_memory_non_apple_silicon() {
+        let mut mi = MemoryIntelligence::collect();
+        mi.unified_memory_model.is_apple_silicon = false;
+        let plan = mi.optimize_unified_memory();
+        assert!(!plan.is_apple_silicon);
+        assert!(!plan.recommendations.is_empty());
+    }
+
+    #[test]
+    fn test_optimize_unified_memory_apple_silicon() {
+        let mut mi = MemoryIntelligence::collect();
+        mi.unified_memory_model.is_apple_silicon = true;
+        mi.total_bytes = 16_000_000_000;
+        mi.used_bytes = 10_000_000_000;
+        mi.top_consumers = vec![MemoryConsumer {
+            pid: 1,
+            name: "idle_heavy".to_string(),
+            memory_bytes: 500 * 1024 * 1024,
+            is_idle: true,
+            allocation_rate_bytes_per_min: None,
+            efficiency_score: None,
+        }];
+        let plan = mi.optimize_unified_memory();
+        assert!(plan.is_apple_silicon);
+        assert!(plan.estimated_savings_bytes > 0);
+        assert!(!plan.recommendations.is_empty());
     }
 }

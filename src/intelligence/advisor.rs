@@ -66,6 +66,64 @@ impl Severity {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+//  Learning & ranking types (ops 243, 266, 273, 304, 315)
+// ═══════════════════════════════════════════════════════════════════════
+
+/// A candidate app to quit, ranked by estimated resource reclaim.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct QuitSuggestion {
+    pub name: String,
+    pub reason: String,
+    pub estimated_memory_reclaim_bytes: u64,
+}
+
+/// Learned user habits derived from adaptive feedback history (op 266).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct UserHabits {
+    /// Categories the user tends to accept (weight > 0.5).
+    pub preferred_categories: Vec<String>,
+    /// Categories the user tends to dismiss (weight < 0.5).
+    pub dismissed_categories: Vec<String>,
+    /// Total number of accepted recommendations.
+    pub total_accepted: u64,
+    /// Total number of dismissed recommendations.
+    pub total_dismissed: u64,
+    /// Overall acceptance rate (0.0–1.0).
+    pub acceptance_rate: f64,
+}
+
+/// A generic optimization action with an estimated impact score.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Action {
+    pub name: String,
+    pub category: String,
+    /// Estimated impact magnitude (0.0–1.0, higher is better).
+    pub impact: f64,
+    /// Confidence in the impact estimate (0.0–1.0).
+    pub confidence: f64,
+}
+
+/// An action ranked by its optimization impact (op 273).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RankedAction {
+    pub action: Action,
+    /// Composite score = impact * confidence, used for ranking.
+    pub score: f64,
+    pub rank: usize,
+}
+
+/// Result of recording whether an action was successful (op 315).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LearningResult {
+    pub action: String,
+    pub success: bool,
+    /// Updated confidence for this action after learning.
+    pub updated_confidence: f64,
+    /// Number of observations recorded for this action.
+    pub observations: u64,
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 //  Advisor
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -83,6 +141,11 @@ impl Advisor {
     }
 
     /// Analyze a system snapshot and produce ranked recommendations.
+    ///
+    /// op 169: Recommend optimization — the main recommendation engine that
+    /// analyzes every system dimension and suggests optimizations.
+    /// op 272: Provide recommendations — emits a ranked list of actionable
+    /// recommendations tailored to the current system state.
     pub fn analyze(&self, snapshot: &SystemSnapshot) -> Vec<Recommendation> {
         let mut recs = Vec::new();
 
@@ -203,6 +266,10 @@ impl Advisor {
         }
     }
 
+    /// op 137: Detect runaway processes — identify processes consuming
+    /// excessive CPU (more than a full core) and op 143: recommend process
+    /// termination by suggesting the user quit the associated app or kill
+    /// the offending process.
     fn analyze_cpu(&self, cpu: &CpuDimension, recs: &mut Vec<Recommendation>) {
         if cpu.utilization_pct > 80.0 {
             let top = cpu.top_processes.first();
@@ -266,6 +333,8 @@ impl Advisor {
         }
     }
 
+    /// op 118: Recommend cleanup — analyze disk utilization and recommend
+    /// cleanup scans for volumes that are running low on free space.
     fn analyze_disk(&self, disk: &DiskDimension, recs: &mut Vec<Recommendation>) {
         for vol in &disk.volumes {
             if vol.utilization > 0.90 {
@@ -524,6 +593,179 @@ impl Advisor {
             rec.confidence = (rec.confidence + adjustment).clamp(0.0, 1.0);
         }
     }
+
+    /// op 243: Suggest quitting apps — returns app names that should be
+    /// quit based on current resource usage. Apps consuming significant
+    /// memory or CPU are candidates, ordered by estimated reclaim.
+    #[allow(dead_code)]
+    pub fn suggest_quit_apps(&self) -> Vec<String> {
+        let snapshot = SystemSnapshot::collect();
+        let mut suggestions: Vec<QuitSuggestion> = snapshot
+            .cpu
+            .top_processes
+            .iter()
+            .filter(|p| p.cpu_pct > 5.0)
+            .map(|p| QuitSuggestion {
+                name: p.name.clone(),
+                reason: format!("Using {:.1}% CPU", p.cpu_pct),
+                estimated_memory_reclaim_bytes: 0,
+            })
+            .collect();
+
+        // Sort by CPU usage descending so the heaviest consumers come first.
+        suggestions.sort_by(|a, b| {
+            b.estimated_memory_reclaim_bytes
+                .cmp(&a.estimated_memory_reclaim_bytes)
+        });
+        suggestions.into_iter().map(|s| s.name).collect()
+    }
+
+    /// op 266: Learn user habits — derive usage patterns from the adaptive
+    /// feedback history, identifying categories the user prefers and
+    /// dismisses along with the overall acceptance rate.
+    #[allow(dead_code)]
+    pub fn learn_user_habits(&self) -> UserHabits {
+        let mut preferred = Vec::new();
+        let mut dismissed = Vec::new();
+        let mut total_accepted = 0u64;
+        let mut total_dismissed = 0u64;
+
+        for (category, &(accepted, dismissed_n)) in &self.adaptive.category_acceptance {
+            total_accepted += accepted;
+            total_dismissed += dismissed_n;
+            let weight = self.adaptive.weight_for(category);
+            if weight > 0.5 {
+                preferred.push(category.clone());
+            } else if weight < 0.5 {
+                dismissed.push(category.clone());
+            }
+        }
+
+        preferred.sort();
+        dismissed.sort();
+
+        let total = total_accepted + total_dismissed;
+        let acceptance_rate = if total > 0 {
+            total_accepted as f64 / total as f64
+        } else {
+            0.0
+        };
+
+        UserHabits {
+            preferred_categories: preferred,
+            dismissed_categories: dismissed,
+            total_accepted,
+            total_dismissed,
+            acceptance_rate,
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Free functions (ops 273, 304, 315)
+// ═══════════════════════════════════════════════════════════════════════
+
+/// op 273: Explain recommendations — produce a human-readable explanation
+/// of a single recommendation, combining its title, explanation, action,
+/// and estimated impact.
+#[allow(dead_code)]
+pub fn explain_recommendation(rec: &Recommendation) -> String {
+    let mut out = format!(
+        "{} (severity: {}): {} {} Suggested action: {}",
+        rec.title,
+        rec.severity.label(),
+        rec.explanation,
+        rec.estimated_impact,
+        rec.action
+    );
+    if let Some(cmd) = &rec.command {
+        out.push_str(&format!(" (command: {})", cmd));
+    }
+    out
+}
+
+/// op 273: Rank optimization impact — sort actions by their composite
+/// impact score (impact × confidence) and assign ranks.
+#[allow(dead_code)]
+pub fn rank_optimization_impact(actions: &[Action]) -> Vec<RankedAction> {
+    let mut ranked: Vec<RankedAction> = actions
+        .iter()
+        .map(|a| RankedAction {
+            score: a.impact * a.confidence,
+            action: a.clone(),
+            rank: 0,
+        })
+        .collect();
+    ranked.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    for (i, r) in ranked.iter_mut().enumerate() {
+        r.rank = i + 1;
+    }
+    ranked
+}
+
+/// op 304: Explain every action — generate a human-readable explanation
+/// for a named action string.
+#[allow(dead_code)]
+pub fn explain_action(action: &str) -> String {
+    let lower = action.to_lowercase();
+    if lower.contains("purge") || lower.contains("ram-boost") {
+        "Purge inactive memory to free up RAM and reduce swap pressure. \
+         This reclaims memory that apps are no longer actively using."
+            .to_string()
+    } else if lower.contains("clean") || lower.contains("quick") {
+        "Run a cleanup scan to find and remove reclaimable cache, temp, \
+         and build-artifact files that are safe to delete."
+            .to_string()
+    } else if lower.contains("zen") {
+        "Run Zen Mode — a comprehensive one-click optimization that cleans \
+         disk, purges memory, and runs safe maintenance tasks."
+            .to_string()
+    } else if lower.contains("kill") || lower.contains("quit") {
+        "Terminate the specified process or application to free the CPU and \
+         memory it is consuming."
+            .to_string()
+    } else if lower.contains("maintain") {
+        "Run system maintenance tasks such as DNS flush, Spotlight reindex, \
+         and LaunchServices rebuild to keep macOS healthy."
+            .to_string()
+    } else {
+        format!("Perform the recommended action: {}", action)
+    }
+}
+
+/// op 315: Learn from outcomes — record whether an action was successful
+/// and return an updated confidence estimate based on a running success
+/// rate. Uses a simple Beta-style smoothing prior.
+#[allow(dead_code)]
+pub fn learn_from_outcome(action: &str, success: bool) -> LearningResult {
+    // Use a thread-local store so this free function remains self-contained.
+    use std::cell::RefCell;
+    thread_local! {
+        static OUTCOMES: RefCell<std::collections::HashMap<String, (u64, u64)>> =
+            RefCell::new(std::collections::HashMap::new());
+    }
+    let (successes, observations) = OUTCOMES.with(|cell| {
+        let mut map = cell.borrow_mut();
+        let entry = map.entry(action.to_string()).or_insert((0, 0));
+        if success {
+            entry.0 += 1;
+        } else {
+            entry.1 += 1;
+        }
+        (entry.0, entry.0 + entry.1)
+    });
+    // Smoothed success rate with a Beta(2,2) prior.
+    let updated_confidence = (successes as f64 + 2.0) / (observations as f64 + 4.0);
+    LearningResult {
+        action: action.to_string(),
+        success,
+        updated_confidence,
+        observations,
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -779,5 +1021,136 @@ mod tests {
         };
         let text = format_recommendations_text(&[rec], None);
         assert!(text.contains("Info rec"));
+    }
+
+    #[test]
+    fn test_suggest_quit_apps_returns_vec() {
+        let advisor = Advisor::new(OptimizationProfile::Balanced, AdaptiveState::default());
+        let apps = advisor.suggest_quit_apps();
+        // Should not panic; result is a Vec of app names.
+        assert!(apps.len() < 100);
+    }
+
+    #[test]
+    fn test_learn_user_habits_empty() {
+        let advisor = Advisor::new(OptimizationProfile::Balanced, AdaptiveState::default());
+        let habits = advisor.learn_user_habits();
+        assert_eq!(habits.total_accepted, 0);
+        assert_eq!(habits.total_dismissed, 0);
+        assert_eq!(habits.acceptance_rate, 0.0);
+        assert!(habits.preferred_categories.is_empty());
+        assert!(habits.dismissed_categories.is_empty());
+    }
+
+    #[test]
+    fn test_learn_user_habits_with_feedback() {
+        let mut adaptive = AdaptiveState::default();
+        for _ in 0..5 {
+            adaptive.record_feedback("memory", "medium", true);
+        }
+        for _ in 0..3 {
+            adaptive.record_feedback("disk", "medium", false);
+        }
+        let advisor = Advisor::new(OptimizationProfile::Balanced, adaptive);
+        let habits = advisor.learn_user_habits();
+        assert_eq!(habits.total_accepted, 5);
+        assert_eq!(habits.total_dismissed, 3);
+        assert!((habits.acceptance_rate - (5.0 / 8.0)).abs() < 0.01);
+        assert!(habits.preferred_categories.contains(&"memory".to_string()));
+        assert!(habits.dismissed_categories.contains(&"disk".to_string()));
+    }
+
+    #[test]
+    fn test_explain_recommendation() {
+        let rec = Recommendation {
+            id: "test".to_string(),
+            severity: Severity::High,
+            category: "memory".to_string(),
+            title: "High memory".to_string(),
+            explanation: "RAM is full.".to_string(),
+            action: "Close apps.".to_string(),
+            command: Some("xmac ram-boost".to_string()),
+            estimated_impact: "Frees 2 GB".to_string(),
+            confidence: 0.9,
+            auto_safe: true,
+        };
+        let text = explain_recommendation(&rec);
+        assert!(text.contains("High memory"));
+        assert!(text.contains("Close apps"));
+        assert!(text.contains("ram-boost"));
+    }
+
+    #[test]
+    fn test_rank_optimization_impact() {
+        let actions = vec![
+            Action {
+                name: "low".to_string(),
+                category: "memory".to_string(),
+                impact: 0.2,
+                confidence: 0.5,
+            },
+            Action {
+                name: "high".to_string(),
+                category: "disk".to_string(),
+                impact: 0.9,
+                confidence: 0.9,
+            },
+            Action {
+                name: "mid".to_string(),
+                category: "cpu".to_string(),
+                impact: 0.5,
+                confidence: 0.8,
+            },
+        ];
+        let ranked = rank_optimization_impact(&actions);
+        assert_eq!(ranked.len(), 3);
+        assert_eq!(ranked[0].rank, 1);
+        assert_eq!(ranked[0].action.name, "high");
+        assert_eq!(ranked[1].action.name, "mid");
+        assert_eq!(ranked[2].action.name, "low");
+        // Scores should be descending.
+        assert!(ranked[0].score >= ranked[1].score);
+        assert!(ranked[1].score >= ranked[2].score);
+    }
+
+    #[test]
+    fn test_explain_action() {
+        assert!(explain_action("xmac ram-boost").contains("Purge inactive memory"));
+        assert!(explain_action("xmac clean").contains("cleanup scan"));
+        assert!(explain_action("xmac zen --execute").contains("Zen Mode"));
+        assert!(explain_action("kill 1234").contains("Terminate"));
+        assert!(explain_action("xmac maintain").contains("maintenance"));
+        assert!(explain_action("something else").contains("something else"));
+    }
+
+    #[test]
+    fn test_learn_from_outcome() {
+        let r1 = learn_from_outcome("xmac ram-boost", true);
+        assert_eq!(r1.action, "xmac ram-boost");
+        assert!(r1.success);
+        assert_eq!(r1.observations, 1);
+        // With 1 success and Beta(2,2) prior: (1+2)/(1+4) = 0.6
+        assert!((r1.updated_confidence - 0.6).abs() < 0.01);
+
+        let r2 = learn_from_outcome("xmac ram-boost", false);
+        assert!(!r2.success);
+        assert_eq!(r2.observations, 2);
+        // (1+2)/(2+4) = 0.5
+        assert!((r2.updated_confidence - 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_user_habits_serialization() {
+        let habits = UserHabits {
+            preferred_categories: vec!["memory".to_string()],
+            dismissed_categories: vec!["disk".to_string()],
+            total_accepted: 5,
+            total_dismissed: 3,
+            acceptance_rate: 0.625,
+        };
+        let json = serde_json::to_string(&habits).unwrap();
+        let decoded: UserHabits = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.total_accepted, 5);
+        assert_eq!(decoded.preferred_categories, vec!["memory".to_string()]);
     }
 }

@@ -9,7 +9,19 @@ use crate::core::types::{Category, EngineId, EngineStats, Finding, Severity, Tar
 
 use super::scanner::{scan_all, StartupItem, StartupScope};
 
-/// Startup & Background Process Management Engine — scans Login Items,
+/// A background service discovered on the system (op 50).
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct BackgroundService {
+    pub label: String,
+    pub scope: String,
+    pub command: String,
+    pub run_at_load: bool,
+    pub keep_alive: bool,
+    pub disabled: bool,
+}
+
+/// The Startup & Background Process Management Engine — scans Login Items,
 /// LaunchAgents, LaunchDaemons, and background processes.
 ///
 /// Implements Cleaner/Optimizer operations 146-175:
@@ -415,6 +427,79 @@ impl StartupEngine {
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+//  Free functions (ops 50, 144)
+// ═══════════════════════════════════════════════════════════════════════
+
+/// op 50: Inventory background services — list all background services
+/// (LaunchAgents, LaunchDaemons, login items) discovered on the system.
+#[allow(dead_code)]
+pub fn inventory_background_services() -> Vec<BackgroundService> {
+    scan_all()
+        .into_iter()
+        .filter(|item| !item.label.is_empty())
+        .map(|item| BackgroundService {
+            label: item.label,
+            scope: item.scope.as_str().to_string(),
+            command: item.command,
+            run_at_load: item.run_at_load,
+            keep_alive: item.keep_alive,
+            disabled: item.disabled,
+        })
+        .collect()
+}
+
+/// op 144: Restart failed services — attempt to restart a failed launchd
+/// service by its label. On macOS uses `launchctl kickstart`; on Linux
+/// uses `systemctl restart`. Returns an error message on failure.
+#[allow(dead_code)]
+pub fn restart_failed_service(label: &str) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let uid = unsafe { libc::getuid() };
+        let domain = if uid == 0 {
+            format!("system/{}", label)
+        } else {
+            format!("gui/{}/{}", uid, label)
+        };
+        let output = std::process::Command::new("launchctl")
+            .args(["kickstart", "-k", &domain])
+            .output();
+        match output {
+            Ok(o) if o.status.success() => Ok(()),
+            Ok(o) => {
+                let err = String::from_utf8_lossy(&o.stderr).trim().to_string();
+                let msg = if err.is_empty() {
+                    String::from_utf8_lossy(&o.stdout).trim().to_string()
+                } else {
+                    err
+                };
+                Err(format!("launchctl kickstart failed for {}: {}", label, msg))
+            }
+            Err(e) => Err(format!("Failed to run launchctl: {}", e)),
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let output = std::process::Command::new("systemctl")
+            .args(["restart", label])
+            .output();
+        match output {
+            Ok(o) if o.status.success() => Ok(()),
+            Ok(o) => {
+                let err = String::from_utf8_lossy(&o.stderr).trim().to_string();
+                Err(format!("systemctl restart failed for {}: {}", label, err))
+            }
+            Err(e) => Err(format!("Failed to run systemctl: {}", e)),
+        }
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        let _ = label;
+        Err("Restarting services is not supported on this platform".to_string())
+    }
+}
+
 #[async_trait]
 impl Engine for StartupEngine {
     fn id(&self) -> EngineId {
@@ -724,6 +809,23 @@ mod tests {
         let health = StartupEngine::check_daemon_health();
         // We can't guarantee failed daemons exist, but the function should not panic
         assert!(health.len() < 100); // sanity check
+    }
+
+    #[test]
+    fn test_inventory_background_services() {
+        let services = inventory_background_services();
+        // Should not panic; returns a Vec of background services.
+        for s in &services {
+            assert!(!s.label.is_empty());
+            assert!(!s.scope.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_restart_failed_service_nonexistent() {
+        // Restarting a nonexistent service should return an Err, not panic.
+        let result = restart_failed_service("com.xmac.nonexistent.service.label");
+        assert!(result.is_err());
     }
 
     #[tokio::test]

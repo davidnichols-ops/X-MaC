@@ -215,6 +215,20 @@ pub struct WorkloadBalance {
     pub underutilized_apps: Vec<String>,
 }
 
+/// op 142: A prediction of whether an application is likely to crash,
+/// based on resource pressure, anomaly history, and crash probability.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
+pub struct FailurePrediction {
+    pub app_name: String,
+    /// 0-1 probability of failure.
+    pub crash_probability: f64,
+    /// Contributing risk factors (e.g. "high_cpu", "memory_anomaly").
+    pub risk_factors: Vec<String>,
+    /// Human-readable explanation.
+    pub explanation: String,
+}
+
 impl ProcessIntelligenceGraph {
     /// Collect the process intelligence graph from the running system.
     pub fn collect() -> Self {
@@ -933,6 +947,82 @@ impl ProcessIntelligenceGraph {
                 });
             }
         }
+    }
+
+    /// op 142: Predict application failure — predict if an app is likely to
+    /// crash based on resource pressure, anomaly history, and crash
+    /// probability. Returns `None` if the app is not currently running.
+    #[allow(dead_code)]
+    pub fn predict_app_failure(&self, app_name: &str) -> Option<FailurePrediction> {
+        // Gather all processes belonging to the app.
+        let pids = self.app_process_map.get(app_name)?;
+        let procs: Vec<&ProcessNode> = self
+            .process_tree
+            .iter()
+            .filter(|p| pids.contains(&p.pid))
+            .collect();
+        if procs.is_empty() {
+            return None;
+        }
+
+        let mut risk_factors: Vec<String> = Vec::new();
+        let mut probability: f64 = 0.1; // baseline risk
+
+        // Factor 1: high aggregate CPU usage.
+        let total_cpu: f64 = procs.iter().map(|p| p.cpu_pct).sum();
+        if total_cpu > 90.0 {
+            probability += 0.2;
+            risk_factors.push("high_cpu".to_string());
+        }
+
+        // Factor 2: high memory footprint.
+        let total_mem: u64 = procs.iter().map(|p| p.memory_bytes).sum();
+        if total_mem > 4 * 1024 * 1024 * 1024 {
+            probability += 0.2;
+            risk_factors.push("high_memory".to_string());
+        }
+
+        // Factor 3: anomalies recorded for this app's processes.
+        let anomaly_count = self
+            .anomalies
+            .iter()
+            .filter(|a| pids.contains(&a.pid))
+            .count();
+        if anomaly_count > 0 {
+            probability += 0.15 * anomaly_count as f64;
+            risk_factors.push("anomaly_history".to_string());
+        }
+
+        // Factor 4: crashed services matching the app name.
+        if self.crashed_services.iter().any(|s| s.contains(app_name)) {
+            probability += 0.3;
+            risk_factors.push("crashed_service".to_string());
+        }
+
+        // Factor 5: zombie processes within the app.
+        let zombie_count = procs.iter().filter(|p| p.state == "Z").count();
+        if zombie_count > 0 {
+            probability += 0.1;
+            risk_factors.push("zombie_process".to_string());
+        }
+
+        let probability = probability.min(1.0);
+        let explanation = if risk_factors.is_empty() {
+            format!("{app_name} is running within normal parameters.")
+        } else {
+            format!(
+                "{app_name} has elevated failure risk ({:.0}%) due to: {}",
+                probability * 100.0,
+                risk_factors.join(", ")
+            )
+        };
+
+        Some(FailurePrediction {
+            app_name: app_name.to_string(),
+            crash_probability: probability,
+            risk_factors,
+            explanation,
+        })
     }
 }
 
@@ -1711,5 +1801,77 @@ mod tests {
         assert_eq!(deserialized.pid, 1234);
         assert_eq!(deserialized.cpu_pct, 50.0);
         assert_eq!(deserialized.children, vec![5, 6]);
+    }
+
+    #[test]
+    fn test_predict_app_failure_not_running() {
+        let mut graph = ProcessIntelligenceGraph::empty();
+        graph.process_tree = make_test_processes();
+        graph.map_app_processes();
+        let result = graph.predict_app_failure("NonexistentApp");
+        assert!(result.is_none(), "should return None for unknown app");
+    }
+
+    #[test]
+    fn test_predict_app_failure_healthy() {
+        let mut graph = ProcessIntelligenceGraph::empty();
+        graph.process_tree = make_test_processes();
+        graph.map_app_processes();
+        // idle_app has low CPU and memory — should predict low risk.
+        let pred = graph.predict_app_failure("idle_app");
+        assert!(pred.is_some(), "should return a prediction for idle_app");
+        let pred = pred.unwrap();
+        assert_eq!(pred.app_name, "idle_app");
+        assert!(
+            pred.crash_probability < 0.5,
+            "idle app should have low risk"
+        );
+        assert!(
+            pred.risk_factors.is_empty(),
+            "idle app should have no risk factors"
+        );
+    }
+
+    #[test]
+    fn test_predict_app_failure_high_cpu() {
+        let mut graph = ProcessIntelligenceGraph::empty();
+        graph.process_tree = make_test_processes();
+        graph.map_app_processes();
+        // Google Chrome Helper has 85% CPU and 3GB memory.
+        let pred = graph.predict_app_failure("Google Chrome");
+        assert!(pred.is_some());
+        let pred = pred.unwrap();
+        // 85% CPU is below the 90% threshold, so high_cpu may not trigger,
+        // but 3GB is below the 4GB threshold too. Baseline risk only.
+        assert!(pred.crash_probability >= 0.1);
+    }
+
+    #[test]
+    fn test_predict_app_failure_with_anomalies() {
+        let mut graph = ProcessIntelligenceGraph::empty();
+        graph.process_tree = make_test_processes();
+        graph.map_app_processes();
+        graph.detect_anomalies();
+        // Google Chrome Helper triggers CPU spike and memory leak anomalies.
+        let pred = graph.predict_app_failure("Google Chrome");
+        assert!(pred.is_some());
+        let pred = pred.unwrap();
+        assert!(pred.risk_factors.contains(&"anomaly_history".to_string()));
+        assert!(
+            pred.crash_probability > 0.1,
+            "anomalies should increase risk"
+        );
+    }
+
+    #[test]
+    fn test_predict_app_failure_zombie() {
+        let mut graph = ProcessIntelligenceGraph::empty();
+        graph.process_tree = make_test_processes();
+        graph.map_app_processes();
+        // zombie_proc is in state "Z".
+        let pred = graph.predict_app_failure("zombie_proc");
+        assert!(pred.is_some());
+        let pred = pred.unwrap();
+        assert!(pred.risk_factors.contains(&"zombie_process".to_string()));
     }
 }

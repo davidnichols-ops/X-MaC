@@ -320,6 +320,42 @@ impl AppIntelligenceGraph {
     pub fn app_health_score(&self, bundle_id: &str) -> Option<f64> {
         self.health_scores.get(bundle_id).copied()
     }
+
+    /// op 259: Maintain application profiles — update app profiles with the
+    /// latest usage data, health scores, and crash predictions. Refreshes
+    /// the derived `health_scores`, `unused_apps`, and `suspicious_apps`
+    /// aggregates from the per-app nodes.
+    #[allow(dead_code)]
+    pub fn maintain_app_profiles(&mut self) {
+        // Recompute health scores from the latest node state.
+        self.health_scores = self
+            .apps
+            .iter()
+            .map(|a| (a.bundle_id.clone(), a.health_score))
+            .collect();
+
+        // Refresh the unused-apps list.
+        self.unused_apps = self
+            .apps
+            .iter()
+            .filter(|a| a.is_unused)
+            .map(|a| a.name.clone())
+            .collect();
+
+        // Refresh the suspicious-apps list.
+        self.suspicious_apps = self
+            .apps
+            .iter()
+            .filter(|a| a.is_suspicious)
+            .map(|a| a.name.clone())
+            .collect();
+
+        // Update crash predictions for each app based on its current state.
+        for app in &mut self.apps {
+            let prob = estimate_crash_probability(app.is_unused, app.preferences_corrupted);
+            app.crash_probability = Some(prob);
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -727,5 +763,98 @@ mod tests {
         });
         let impact = g.predict_uninstall_impact(&["test.foo".to_string()]);
         assert_eq!(impact, 1_000_000);
+    }
+
+    #[test]
+    fn test_maintain_app_profiles_refreshes_aggregates() {
+        let mut g = AppIntelligenceGraph::collect();
+        g.apps.clear();
+        g.apps.push(AppIntelligenceNode {
+            bundle_id: "com.example.unused".to_string(),
+            name: "UnusedApp".to_string(),
+            version: "1.0".to_string(),
+            purpose: None,
+            behavior: None,
+            dependencies: vec![],
+            files: vec![],
+            permissions: vec![],
+            health_score: 40.0,
+            last_launched_ms: None,
+            is_unused: true,
+            is_suspicious: false,
+            crash_probability: None,
+            preferences_corrupted: false,
+            uninstall_impact_bytes: None,
+        });
+        g.apps.push(AppIntelligenceNode {
+            bundle_id: "com.example.suspicious".to_string(),
+            name: "SuspiciousApp".to_string(),
+            version: "1.0".to_string(),
+            purpose: None,
+            behavior: None,
+            dependencies: vec![],
+            files: vec![],
+            permissions: vec![],
+            health_score: 30.0,
+            last_launched_ms: None,
+            is_unused: false,
+            is_suspicious: true,
+            crash_probability: None,
+            preferences_corrupted: false,
+            uninstall_impact_bytes: None,
+        });
+        // Clear aggregates so we can verify they get repopulated.
+        g.unused_apps.clear();
+        g.suspicious_apps.clear();
+        g.health_scores.clear();
+
+        g.maintain_app_profiles();
+
+        assert!(g.unused_apps.contains(&"UnusedApp".to_string()));
+        assert!(g.suspicious_apps.contains(&"SuspiciousApp".to_string()));
+        assert_eq!(g.health_scores.get("com.example.unused"), Some(&40.0));
+        assert_eq!(g.health_scores.get("com.example.suspicious"), Some(&30.0));
+        // Crash probabilities should now be populated.
+        let unused = g
+            .apps
+            .iter()
+            .find(|a| a.bundle_id == "com.example.unused")
+            .unwrap();
+        assert!(unused.crash_probability.is_some());
+        // Unused + not corrupted → 0.2
+        assert!((unused.crash_probability.unwrap() - 0.2).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_maintain_app_profiles_updates_crash_predictions() {
+        let mut g = AppIntelligenceGraph::collect();
+        g.apps.clear();
+        g.apps.push(AppIntelligenceNode {
+            bundle_id: "com.example.corrupt".to_string(),
+            name: "CorruptApp".to_string(),
+            version: "1.0".to_string(),
+            purpose: None,
+            behavior: None,
+            dependencies: vec![],
+            files: vec![],
+            permissions: vec![],
+            health_score: 50.0,
+            last_launched_ms: None,
+            is_unused: false,
+            is_suspicious: false,
+            crash_probability: Some(0.1),
+            preferences_corrupted: true,
+            uninstall_impact_bytes: None,
+        });
+
+        g.maintain_app_profiles();
+
+        let app = g
+            .apps
+            .iter()
+            .find(|a| a.bundle_id == "com.example.corrupt")
+            .unwrap();
+        // corrupted → 0.1 + 0.4 = 0.5
+        assert!((app.crash_probability.unwrap() - 0.5).abs() < 1e-9);
     }
 }

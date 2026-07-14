@@ -84,6 +84,8 @@ impl MaintainEngine {
     //  Cross-platform / shared tasks
     // ═══════════════════════════════════════════════════════════════════════
 
+    /// op 244: Flush caches — flush the DNS cache (and related system
+    /// caches) to ensure fresh name resolution and remove stale entries.
     async fn task_flush_dns(&self, ctx: &ScanContext) -> (Vec<Finding>, u64) {
         let mut findings = Vec::new();
 
@@ -197,6 +199,9 @@ impl MaintainEngine {
         (findings, 1)
     }
 
+    /// op 178: Rebuild LaunchServices database — re-register apps across
+    /// all domains via `lsregister` so that file associations and app
+    /// metadata are consistent.
     async fn task_rebuild_launchservices(&self, ctx: &ScanContext) -> (Vec<Finding>, u64) {
         let lsregister = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
         let (ok, msg) = Self::run_command(

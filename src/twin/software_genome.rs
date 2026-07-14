@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use crate::cleanup::policy::RiskLevel;
 use crate::engines::envmap::apps as envmap_apps;
 use crate::engines::envmap::discovery as envmap_discovery;
 #[cfg(target_os = "macos")]
@@ -75,9 +76,17 @@ impl SoftwareGenome {
     pub fn collect() -> Self {
         // op 41-45: application inventory
         let applications = collect_applications();
+        // op 42: every executable
+        let executables = collect_executables();
 
-        // op 46-48: framework detection
+        // op 43-48: framework detection
         let frameworks = collect_frameworks();
+
+        // op 44: dynamic libraries
+        let dynamic_libraries = collect_dynamic_libraries();
+
+        // op 45: kernel extensions
+        let kernel_extensions = collect_kernel_extensions();
 
         // op 49-52: launch agents and daemons
         let (launch_agents, launch_daemons) = collect_launchd_items();
@@ -85,8 +94,11 @@ impl SoftwareGenome {
         // op 53: login items and helpers
         let login_items = collect_login_items();
 
-        // op 54-55: plugin detection
+        // op 51-55: plugin detection
         let plugins = collect_plugins();
+
+        // op 52: browser extensions
+        let browser_extensions = collect_browser_extensions();
 
         // op 56: font enumeration
         let fonts = collect_fonts();
@@ -103,7 +115,15 @@ impl SoftwareGenome {
 
         // op 62-64: Docker and VM detection
         let docker_images = collect_docker_images();
+        let containers = collect_containers();
         let virtual_machines = collect_virtual_machines();
+
+        // op 63: system extensions
+        let system_extensions = collect_system_extensions();
+
+        // op 71-72: AI models and datasets
+        let ai_models = collect_ai_models();
+        let datasets = collect_datasets();
 
         // op 65-70: dependency graph
         let dependency_graph = build_dependency_graph(
@@ -116,11 +136,16 @@ impl SoftwareGenome {
 
         // op 80: total component count
         let total_components = applications.len()
+            + executables.len()
             + frameworks.len()
+            + dynamic_libraries.len()
+            + kernel_extensions.len()
+            + system_extensions.len()
             + launch_agents.len()
             + launch_daemons.len()
             + login_items.len()
             + plugins.len()
+            + browser_extensions.len()
             + fonts.len()
             + developer_tools.len()
             + sdks.len()
@@ -129,19 +154,22 @@ impl SoftwareGenome {
             + node_envs.len()
             + rust_toolchains.len()
             + docker_images.len()
-            + virtual_machines.len();
+            + containers.len()
+            + virtual_machines.len()
+            + ai_models.len()
+            + datasets.len();
 
         Self {
             applications,
             frameworks,
-            dynamic_libraries: Vec::new(),
-            kernel_extensions: Vec::new(),
-            system_extensions: Vec::new(),
+            dynamic_libraries,
+            kernel_extensions,
+            system_extensions,
             launch_agents,
             launch_daemons,
             login_items,
             plugins,
-            browser_extensions: Vec::new(),
+            browser_extensions,
             fonts,
             developer_tools,
             sdks,
@@ -150,10 +178,10 @@ impl SoftwareGenome {
             node_envs,
             rust_toolchains,
             docker_images,
-            containers: Vec::new(),
+            containers,
             virtual_machines,
-            ai_models: Vec::new(),
-            datasets: Vec::new(),
+            ai_models,
+            datasets,
             dependency_graph,
             total_components,
         }
@@ -282,6 +310,57 @@ fn installed_app_to_component(app: &envmap_apps::InstalledApp) -> AppComponent {
 }
 
 // ---------------------------------------------------------------------------
+// op 42: Executable inventory
+// ---------------------------------------------------------------------------
+
+/// Directories scanned for standalone executables.
+fn executable_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if cfg!(target_os = "macos") {
+        dirs.push(PathBuf::from("/usr/bin"));
+        dirs.push(PathBuf::from("/usr/local/bin"));
+        dirs.push(PathBuf::from("/opt/homebrew/bin"));
+    } else if cfg!(target_os = "linux") {
+        dirs.push(PathBuf::from("/usr/bin"));
+        dirs.push(PathBuf::from("/usr/local/bin"));
+    }
+    dirs
+}
+
+/// op 42: Inventory every executable — scan `/usr/bin`, `/usr/local/bin`, and
+/// `/opt/homebrew/bin` for executable files.
+#[allow(dead_code)]
+fn collect_executables() -> Vec<SoftwareComponent> {
+    let mut out = Vec::new();
+    for dir in executable_dirs() {
+        if !dir.is_dir() {
+            continue;
+        }
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.is_file() {
+                    continue;
+                }
+                // Only include files that are executable by the owner.
+                let is_exec = std::fs::metadata(&path)
+                    .map(|m| {
+                        use std::os::unix::fs::PermissionsExt;
+                        m.permissions().mode() & 0o100 != 0
+                    })
+                    .unwrap_or(false);
+                if is_exec {
+                    if let Some(c) = component_from_file(&path) {
+                        out.push(c);
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
 // op 46-48: Framework detection
 // ---------------------------------------------------------------------------
 
@@ -294,7 +373,8 @@ fn framework_dirs() -> Vec<PathBuf> {
     ]
 }
 
-/// Scan framework bundle directories for `.framework` bundles. (ops 46-48)
+/// op 43: Inventory frameworks — scan framework bundle directories for
+/// `.framework` bundles. (ops 46-48)
 #[cfg(target_os = "macos")]
 fn collect_frameworks() -> Vec<SoftwareComponent> {
     let mut out = Vec::new();
@@ -326,6 +406,119 @@ fn collect_frameworks() -> Vec<SoftwareComponent> {
 
 #[cfg(not(target_os = "macos"))]
 fn collect_frameworks() -> Vec<SoftwareComponent> {
+    Vec::new()
+}
+
+// ---------------------------------------------------------------------------
+// op 44: Dynamic library inventory
+// ---------------------------------------------------------------------------
+
+/// Directories scanned for dynamic libraries (`.dylib`/`.so`).
+fn dynamic_library_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if cfg!(target_os = "macos") {
+        dirs.push(PathBuf::from("/usr/lib"));
+        dirs.push(PathBuf::from("/usr/local/lib"));
+        dirs.push(PathBuf::from("/opt/homebrew/lib"));
+    } else if cfg!(target_os = "linux") {
+        dirs.push(PathBuf::from("/usr/lib"));
+        dirs.push(PathBuf::from("/usr/local/lib"));
+    }
+    dirs
+}
+
+/// Dynamic-library file extensions recognised on the current platform.
+fn dynamic_library_extensions() -> &'static [&'static str] {
+    if cfg!(target_os = "macos") {
+        &["dylib"]
+    } else {
+        &["so"]
+    }
+}
+
+/// op 44: Inventory dynamic libraries — scan `/usr/lib` and `/usr/local/lib`
+/// for `.dylib` files.
+#[allow(dead_code)]
+fn collect_dynamic_libraries() -> Vec<SoftwareComponent> {
+    let mut out = Vec::new();
+    let exts = dynamic_library_extensions();
+    for dir in dynamic_library_dirs() {
+        if !dir.is_dir() {
+            continue;
+        }
+        for entry in walkdir::WalkDir::new(&dir)
+            .max_depth(1)
+            .follow_links(false)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let is_dylib = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| exts.contains(&e.to_lowercase().as_str()))
+                .unwrap_or(false);
+            if is_dylib {
+                if let Some(c) = component_from_file(path) {
+                    out.push(c);
+                }
+            }
+        }
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
+// op 45: Kernel extension inventory
+// ---------------------------------------------------------------------------
+
+/// Directories scanned for kernel extensions (`.kext` bundles).
+#[cfg(target_os = "macos")]
+fn kernel_extension_dirs() -> Vec<PathBuf> {
+    vec![
+        PathBuf::from("/System/Library/Extensions"),
+        PathBuf::from("/Library/Extensions"),
+    ]
+}
+
+/// op 45: Inventory kernel extensions — scan `/System/Library/Extensions`
+/// and `/Library/Extensions` for `.kext` bundles.
+#[allow(dead_code)]
+#[cfg(target_os = "macos")]
+fn collect_kernel_extensions() -> Vec<SoftwareComponent> {
+    let mut out = Vec::new();
+    for dir in kernel_extension_dirs() {
+        if !dir.is_dir() {
+            continue;
+        }
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.is_dir() {
+                    continue;
+                }
+                if path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| e == "kext")
+                    .unwrap_or(false)
+                {
+                    if let Some(c) = component_from_dir(&path) {
+                        out.push(c);
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+#[cfg(not(target_os = "macos"))]
+#[allow(dead_code)]
+fn collect_kernel_extensions() -> Vec<SoftwareComponent> {
     Vec::new()
 }
 
@@ -410,8 +603,8 @@ fn collect_login_items() -> Vec<SoftwareComponent> {
 // op 54-55: Plugin detection
 // ---------------------------------------------------------------------------
 
-/// Discover application plugin directories via the envmap discovery engine.
-/// (ops 54-55)
+/// op 51: Inventory plugins — discover application plugin directories via
+/// the envmap discovery engine. (ops 54-55)
 fn collect_plugins() -> Vec<SoftwareComponent> {
     let mut out = Vec::new();
     for artefact in envmap_discovery::find_plugins() {
@@ -430,6 +623,73 @@ fn collect_plugins() -> Vec<SoftwareComponent> {
         });
     }
     out
+}
+
+// ---------------------------------------------------------------------------
+// op 52: Browser extension inventory
+// ---------------------------------------------------------------------------
+
+/// Directories scanned for browser extensions (Safari, Chrome, Firefox).
+#[cfg(target_os = "macos")]
+fn browser_extension_dirs() -> Vec<PathBuf> {
+    let home = MacosUtils::home_dir();
+    vec![
+        // Safari extensions (legacy and app extensions live in
+        // ~/Library/Safari/Extensions).
+        home.join("Library/Safari/Extensions"),
+        // Chrome extensions.
+        home.join("Library/Application Support/Google/Chrome/Default/Extensions"),
+        // Firefox extensions (profile-scoped).
+        home.join("Library/Application Support/Firefox/Profiles"),
+    ]
+}
+
+/// op 52: Inventory browser extensions — scan Safari, Chrome, and Firefox
+/// extension directories for installed extensions.
+#[allow(dead_code)]
+#[cfg(target_os = "macos")]
+fn collect_browser_extensions() -> Vec<SoftwareComponent> {
+    let mut out = Vec::new();
+    for dir in browser_extension_dirs() {
+        if !dir.is_dir() {
+            continue;
+        }
+        for entry in walkdir::WalkDir::new(&dir)
+            .max_depth(3)
+            .follow_links(false)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            // Safari extensions end in `.safariextz` or `.appex`; Chrome
+            // extensions are directories with a `manifest.json`; Firefox
+            // extensions are `.xpi` files. We capture bundle-style dirs and
+            // xpi files.
+            let name = match path.file_name().and_then(|n| n.to_str()) {
+                Some(n) => n.to_string(),
+                None => continue,
+            };
+            let is_ext = name.ends_with(".safariextz")
+                || name.ends_with(".appex")
+                || name.ends_with(".xpi")
+                || path.join("manifest.json").exists();
+            if is_ext {
+                if let Some(c) = component_from_dir(path) {
+                    out.push(c);
+                }
+            }
+        }
+    }
+    out
+}
+
+#[cfg(not(target_os = "macos"))]
+#[allow(dead_code)]
+fn collect_browser_extensions() -> Vec<SoftwareComponent> {
+    Vec::new()
 }
 
 // ---------------------------------------------------------------------------
@@ -509,7 +769,8 @@ const DEV_TOOLS: &[&str] = &[
     "gradle",
 ];
 
-/// Detect installed developer tools by probing common executables. (op 57)
+/// op 79: Inventory developer tools — detect installed developer tools by
+/// probing common executables. (op 57)
 fn collect_developer_tools() -> Vec<SoftwareComponent> {
     let mut out = Vec::new();
 
@@ -649,7 +910,8 @@ fn collect_rust_toolchains() -> Vec<SoftwareComponent> {
     out
 }
 
-/// Detect package managers: Homebrew, MacPorts, npm, pip, cargo, etc. (op 60)
+/// op 75: Inventory package managers — detect Homebrew, MacPorts, npm, pip,
+/// cargo, etc. (op 60)
 fn collect_package_managers() -> Vec<SoftwareComponent> {
     let mut out = Vec::new();
     for name in &["brew", "port", "npm", "pip3", "pip", "cargo", "gem", "go"] {
@@ -681,7 +943,8 @@ fn collect_package_managers() -> Vec<SoftwareComponent> {
 // op 61: SDK detection
 // ---------------------------------------------------------------------------
 
-/// Detect installed SDKs: CommandLineTools SDKs and Xcode SDKs. (op 61)
+/// op 77: Inventory SDKs — detect installed SDKs: CommandLineTools SDKs and
+/// Xcode SDKs. (op 61)
 #[cfg(target_os = "macos")]
 fn collect_sdks() -> Vec<SoftwareComponent> {
     let mut out = Vec::new();
@@ -751,7 +1014,8 @@ fn collect_docker_images() -> Vec<SoftwareComponent> {
     out
 }
 
-/// Detect virtual machines by scanning common VM directories. (op 64)
+/// op 74: Inventory virtual machines — detect VMs by scanning common VM
+/// directories. (op 64)
 fn collect_virtual_machines() -> Vec<SoftwareComponent> {
     let mut out = Vec::new();
     let home = MacosUtils::home_dir();
@@ -777,6 +1041,262 @@ fn collect_virtual_machines() -> Vec<SoftwareComponent> {
         }
     }
     out
+}
+
+// ---------------------------------------------------------------------------
+// op 63: System extension inventory
+// ---------------------------------------------------------------------------
+
+/// op 63: Inventory system extensions — use `systemextensionsctl list` on
+/// macOS to find installed system extensions.
+#[allow(dead_code)]
+#[cfg(target_os = "macos")]
+fn collect_system_extensions() -> Vec<SoftwareComponent> {
+    let output = std::process::Command::new("systemextensionsctl")
+        .arg("list")
+        .output();
+    let mut out = Vec::new();
+    if let Ok(out_bytes) = output {
+        if out_bytes.status.success() {
+            let text = String::from_utf8_lossy(&out_bytes.stdout);
+            for line in text.lines() {
+                let line = line.trim();
+                if line.is_empty() || line.starts_with("---')") {
+                    continue;
+                }
+                // Lines look like:
+                //   `-- com.example.ext (1.0) [activated]
+                // We extract the bundle id and version when possible.
+                let stripped = line.trim_start_matches(['-', ' ', '`']);
+                let parts: Vec<&str> = stripped.split_whitespace().collect();
+                if parts.len() < 2 {
+                    continue;
+                }
+                let name = parts[0].to_string();
+                let version = parts
+                    .get(1)
+                    .map(|v| v.trim_matches(|c: char| c == '(' || c == ')').to_string());
+                out.push(SoftwareComponent {
+                    name,
+                    version,
+                    path: String::new(),
+                    size_bytes: 0,
+                });
+            }
+        }
+    }
+    out
+}
+
+#[cfg(not(target_os = "macos"))]
+#[allow(dead_code)]
+fn collect_system_extensions() -> Vec<SoftwareComponent> {
+    Vec::new()
+}
+
+// ---------------------------------------------------------------------------
+// op 73: Container inventory
+// ---------------------------------------------------------------------------
+
+/// op 73: Inventory containers — use `docker ps -a` if available to list
+/// all containers (running and stopped).
+#[allow(dead_code)]
+fn collect_containers() -> Vec<SoftwareComponent> {
+    let output = std::process::Command::new("docker")
+        .args([
+            "ps",
+            "-a",
+            "--format",
+            "{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.ID}}",
+        ])
+        .output();
+    let mut out = Vec::new();
+    if let Ok(out_bytes) = output {
+        if out_bytes.status.success() {
+            let text = String::from_utf8_lossy(&out_bytes.stdout);
+            for line in text.lines() {
+                let line = line.trim();
+                if line.is_empty() {
+                    continue;
+                }
+                let parts: Vec<&str> = line.split('\t').collect();
+                let name = parts.first().map(|s| s.to_string()).unwrap_or_default();
+                let version = parts.get(1).map(|s| s.to_string());
+                let id = parts.get(3).map(|s| s.to_string());
+                out.push(SoftwareComponent {
+                    name,
+                    version: version.or(id),
+                    path: String::new(),
+                    size_bytes: 0,
+                });
+            }
+        }
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
+// op 71: AI model inventory
+// ---------------------------------------------------------------------------
+
+/// File extensions recognised as AI/ML model artefacts.
+const AI_MODEL_EXTENSIONS: &[&str] = &[
+    "mlmodel",
+    "mlmodelc",
+    "onnx",
+    "pb",
+    "pt",
+    "pth",
+    "safetensors",
+];
+
+/// Directories scanned for AI/ML models.
+fn ai_model_dirs() -> Vec<PathBuf> {
+    let home = MacosUtils::home_dir();
+    // Common model storage locations.
+    vec![
+        home.join("Models"),
+        home.join("ml-models"),
+        home.join("Library/Application Support/CoreML"),
+        // Hugging Face cache.
+        home.join(".cache/huggingface"),
+    ]
+}
+
+/// op 71: Inventory AI models — scan for CoreML models (`.mlmodel`,
+/// `.mlmodelc`), ONNX models, and TensorFlow/PyTorch models.
+#[allow(dead_code)]
+fn collect_ai_models() -> Vec<SoftwareComponent> {
+    let mut out = Vec::new();
+    for dir in ai_model_dirs() {
+        if !dir.is_dir() {
+            continue;
+        }
+        for entry in walkdir::WalkDir::new(&dir)
+            .max_depth(3)
+            .follow_links(false)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            let path = entry.path();
+            let is_model = if path.is_file() {
+                path.extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| AI_MODEL_EXTENSIONS.contains(&e.to_lowercase().as_str()))
+                    .unwrap_or(false)
+            } else if path.is_dir() {
+                // Compiled CoreML model bundles end in `.mlmodelc`.
+                path.extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| e == "mlmodelc")
+                    .unwrap_or(false)
+            } else {
+                false
+            };
+            if is_model {
+                if path.is_dir() {
+                    if let Some(c) = component_from_dir(path) {
+                        out.push(c);
+                    }
+                } else if let Some(c) = component_from_file(path) {
+                    out.push(c);
+                }
+            }
+        }
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
+// op 72: Dataset inventory
+// ---------------------------------------------------------------------------
+
+/// Directories scanned for common ML/data datasets.
+fn dataset_dirs() -> Vec<PathBuf> {
+    let home = MacosUtils::home_dir();
+    vec![
+        home.join("Datasets"),
+        home.join("data"),
+        home.join("ml-data"),
+    ]
+}
+
+/// op 72: Inventory datasets — scan for common dataset directories
+/// (`~/Datasets`, `~/data`, `~/ml-data`).
+#[allow(dead_code)]
+fn collect_datasets() -> Vec<SoftwareComponent> {
+    let mut out = Vec::new();
+    for dir in dataset_dirs() {
+        if !dir.is_dir() {
+            continue;
+        }
+        // Each immediate subdirectory is treated as a dataset.
+        let mut found_sub = false;
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    if let Some(c) = component_from_dir(&path) {
+                        out.push(c);
+                        found_sub = true;
+                    }
+                }
+            }
+        }
+        // If the directory itself has no subdirectories, record it as a
+        // single dataset.
+        if !found_sub {
+            if let Some(c) = component_from_dir(&dir) {
+                out.push(c);
+            }
+        }
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
+// op 289: Software risk estimation
+// ---------------------------------------------------------------------------
+
+/// op 289: Estimate software risk — estimate the security/maintenance risk of
+/// a software component (outdated, unsigned, abandoned).
+///
+/// Heuristics:
+/// - A component with no version and no path is opaque (high risk).
+/// - A component with no version cannot be verified as current (medium risk).
+/// - A component with no local path cannot be audited (medium risk).
+/// - A zero-byte component with a version is likely a stub (low risk).
+/// - Otherwise the component is considered safe.
+#[allow(dead_code)]
+fn estimate_software_risk(component: &SoftwareComponent) -> RiskLevel {
+    // No version information: we cannot verify it is current.
+    let has_version = component
+        .version
+        .as_ref()
+        .map(|v| !v.is_empty())
+        .unwrap_or(false);
+    // No path: the component is not backed by a local file (e.g. a container
+    // or remote image), so we cannot inspect it directly.
+    let has_path = !component.path.is_empty();
+
+    if !has_version && !has_path {
+        // Completely opaque component — highest risk.
+        return RiskLevel::High;
+    }
+    if !has_version {
+        // Unknown version: cannot confirm it is patched.
+        return RiskLevel::Medium;
+    }
+    if !has_path {
+        // No local artefact to audit.
+        return RiskLevel::Medium;
+    }
+    // Heuristic: a zero-byte component with a version is likely a stub or
+    // abandoned artefact.
+    if component.size_bytes == 0 {
+        return RiskLevel::Low;
+    }
+    RiskLevel::Safe
 }
 
 // ---------------------------------------------------------------------------
@@ -844,13 +1364,21 @@ mod tests {
     fn collect_returns_non_negative_total() {
         let genome = SoftwareGenome::collect();
         // total_components is a sum of vec lengths, so it must be >= 0 and
-        // consistent with the individual vectors.
+        // consistent with the individual vectors.  Note: `executables` is
+        // counted in total_components but not stored as a struct field, so
+        // we account for it separately.
+        let executables_count = collect_executables().len();
         let expected = genome.applications.len()
+            + executables_count
             + genome.frameworks.len()
+            + genome.dynamic_libraries.len()
+            + genome.kernel_extensions.len()
+            + genome.system_extensions.len()
             + genome.launch_agents.len()
             + genome.launch_daemons.len()
             + genome.login_items.len()
             + genome.plugins.len()
+            + genome.browser_extensions.len()
             + genome.fonts.len()
             + genome.developer_tools.len()
             + genome.sdks.len()
@@ -859,7 +1387,10 @@ mod tests {
             + genome.node_envs.len()
             + genome.rust_toolchains.len()
             + genome.docker_images.len()
-            + genome.virtual_machines.len();
+            + genome.containers.len()
+            + genome.virtual_machines.len()
+            + genome.ai_models.len()
+            + genome.datasets.len();
         assert_eq!(genome.total_components, expected);
     }
 
@@ -1124,5 +1655,146 @@ mod tests {
         assert!(FONT_EXTENSIONS.contains(&"otf"));
         assert!(FONT_EXTENSIONS.contains(&"ttc"));
         assert!(!FONT_EXTENSIONS.contains(&"woff"));
+    }
+
+    #[test]
+    fn collect_executables_returns_vec() {
+        let exes = collect_executables();
+        for exe in &exes {
+            assert!(!exe.name.is_empty());
+        }
+    }
+
+    #[test]
+    fn collect_dynamic_libraries_returns_vec() {
+        let libs = collect_dynamic_libraries();
+        for lib in &libs {
+            let ext = Path::new(&lib.path)
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("");
+            assert!(dynamic_library_extensions().contains(&ext.to_lowercase().as_str()));
+        }
+    }
+
+    #[test]
+    fn collect_kernel_extensions_returns_vec() {
+        let _kexts = collect_kernel_extensions();
+    }
+
+    #[test]
+    fn collect_browser_extensions_returns_vec() {
+        let _exts = collect_browser_extensions();
+    }
+
+    #[test]
+    fn collect_system_extensions_returns_vec() {
+        let _exts = collect_system_extensions();
+    }
+
+    #[test]
+    fn collect_containers_returns_vec() {
+        // Docker may not be installed; the function must still return a vec.
+        let _containers = collect_containers();
+    }
+
+    #[test]
+    fn collect_ai_models_returns_vec() {
+        let _models = collect_ai_models();
+    }
+
+    #[test]
+    fn collect_datasets_returns_vec() {
+        let _datasets = collect_datasets();
+    }
+
+    #[test]
+    fn ai_model_extensions_contains_coreml_and_onnx() {
+        assert!(AI_MODEL_EXTENSIONS.contains(&"mlmodel"));
+        assert!(AI_MODEL_EXTENSIONS.contains(&"mlmodelc"));
+        assert!(AI_MODEL_EXTENSIONS.contains(&"onnx"));
+    }
+
+    #[test]
+    fn executable_dirs_non_empty_on_supported_platforms() {
+        let dirs = executable_dirs();
+        if cfg!(target_os = "macos") || cfg!(target_os = "linux") {
+            assert!(!dirs.is_empty());
+        }
+    }
+
+    #[test]
+    fn dynamic_library_dirs_non_empty_on_supported_platforms() {
+        let dirs = dynamic_library_dirs();
+        if cfg!(target_os = "macos") || cfg!(target_os = "linux") {
+            assert!(!dirs.is_empty());
+        }
+    }
+
+    #[test]
+    fn dataset_dirs_contains_expected_paths() {
+        let dirs = dataset_dirs();
+        let names: Vec<String> = dirs
+            .iter()
+            .filter_map(|d| d.file_name().map(|n| n.to_string_lossy().to_string()))
+            .collect();
+        assert!(names.iter().any(|n| n == "Datasets"));
+        assert!(names.iter().any(|n| n == "data"));
+        assert!(names.iter().any(|n| n == "ml-data"));
+    }
+
+    #[test]
+    fn estimate_software_risk_safe_for_versioned_local_component() {
+        let component = SoftwareComponent {
+            name: "Test".to_string(),
+            version: Some("1.0".to_string()),
+            path: "/usr/bin/test".to_string(),
+            size_bytes: 1024,
+        };
+        assert_eq!(estimate_software_risk(&component), RiskLevel::Safe);
+    }
+
+    #[test]
+    fn estimate_software_risk_high_for_opaque_component() {
+        let component = SoftwareComponent {
+            name: "Ghost".to_string(),
+            version: None,
+            path: String::new(),
+            size_bytes: 0,
+        };
+        assert_eq!(estimate_software_risk(&component), RiskLevel::High);
+    }
+
+    #[test]
+    fn estimate_software_risk_medium_for_missing_version() {
+        let component = SoftwareComponent {
+            name: "Unknown".to_string(),
+            version: None,
+            path: "/usr/bin/unknown".to_string(),
+            size_bytes: 512,
+        };
+        assert_eq!(estimate_software_risk(&component), RiskLevel::Medium);
+    }
+
+    #[test]
+    fn estimate_software_risk_medium_for_missing_path() {
+        let component = SoftwareComponent {
+            name: "Container".to_string(),
+            version: Some("latest".to_string()),
+            path: String::new(),
+            size_bytes: 0,
+        };
+        assert_eq!(estimate_software_risk(&component), RiskLevel::Medium);
+    }
+
+    #[test]
+    fn estimate_software_risk_low_for_zero_byte_stub() {
+        let component = SoftwareComponent {
+            name: "Stub".to_string(),
+            version: Some("0.1".to_string()),
+            path: "/usr/bin/stub".to_string(),
+            size_bytes: 0,
+        };
+        assert_eq!(estimate_software_risk(&component), RiskLevel::Low);
     }
 }

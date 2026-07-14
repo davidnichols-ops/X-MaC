@@ -40,6 +40,9 @@ impl Engine for ConflictEngine {
         Ok(())
     }
 
+    /// op 76: Identify conflicting software — scan for PATH, environment,
+    /// and port conflicts that indicate overlapping or conflicting
+    /// software installations.
     async fn scan(&self, ctx: Arc<ScanContext>) -> std::result::Result<EngineStats, EngineError> {
         let start = Instant::now();
         let mut items_scanned = 0u64;

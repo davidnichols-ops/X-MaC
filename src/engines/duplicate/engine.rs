@@ -1,5 +1,7 @@
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fs::Metadata;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
@@ -692,6 +694,538 @@ impl Engine for DuplicateEngine {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Free-function operations (ops 82, 84, 88, 90, 91, 98, 99, 107, 108, 109,
+// 110). These are standalone helpers that operate on the duplicate-detection
+// data structures without requiring a `DuplicateEngine` instance.
+// ---------------------------------------------------------------------------
+
+/// Compute the Levenshtein edit distance between two strings.
+fn levenshtein(a: &str, b: &str) -> usize {
+    let a_chars: Vec<char> = a.chars().collect();
+    let b_chars: Vec<char> = b.chars().collect();
+    let m = a_chars.len();
+    let n = b_chars.len();
+
+    if m == 0 {
+        return n;
+    }
+    if n == 0 {
+        return m;
+    }
+
+    let mut prev = (0..=n).collect::<Vec<usize>>();
+    let mut curr = vec![0usize; n + 1];
+
+    for i in 1..=m {
+        curr[0] = i;
+        for j in 1..=n {
+            let cost = if a_chars[i - 1] == b_chars[j - 1] {
+                0
+            } else {
+                1
+            };
+            curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+
+    prev[n]
+}
+
+/// op 82: Compare filenames — returns a normalized similarity score (0.0–1.0)
+/// based on the Levenshtein distance between the file stems. A score of 1.0
+/// means identical filenames; 0.0 means completely different.
+#[allow(dead_code)]
+pub fn compare_filenames(a: &Path, b: &Path) -> f64 {
+    let name_a = a.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+    let name_b = b.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+
+    if name_a.is_empty() && name_b.is_empty() {
+        return 1.0;
+    }
+    let max_len = name_a.chars().count().max(name_b.chars().count());
+    if max_len == 0 {
+        return 1.0;
+    }
+
+    let dist = levenshtein(name_a, name_b);
+    1.0 - (dist as f64 / max_len as f64)
+}
+
+/// op 84: Generate hashes — computes a full BLAKE3 hash of a file and returns
+/// the hex-encoded hash string. Returns `None` if the file cannot be read.
+#[allow(dead_code)]
+pub fn generate_hash(path: &Path) -> Option<String> {
+    let data = std::fs::read(path).ok()?;
+    Some(blake3::hash(&data).to_hex().to_string())
+}
+
+/// Result of comparing two files' metadata (op 88).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
+pub struct MetadataComparison {
+    /// Whether the two files have identical sizes.
+    pub size_match: bool,
+    /// Absolute difference in size (bytes).
+    pub size_diff: u64,
+    /// Whether the two files have identical modification times.
+    pub modified_match: bool,
+    /// Absolute difference in modification time (seconds).
+    pub modified_diff_secs: u64,
+    /// Whether the two files have identical permissions.
+    pub permissions_match: bool,
+}
+
+/// op 88: Compare metadata — compares file sizes, modification times, and
+/// permissions between two `Metadata` values.
+#[allow(dead_code)]
+pub fn compare_metadata(a: &Metadata, b: &Metadata) -> MetadataComparison {
+    let size_a = a.len();
+    let size_b = b.len();
+
+    let mod_a = a
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let mod_b = b
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    MetadataComparison {
+        size_match: size_a == size_b,
+        size_diff: size_a.abs_diff(size_b),
+        modified_match: mod_a == mod_b,
+        modified_diff_secs: mod_a.abs_diff(mod_b),
+        permissions_match: a.permissions() == b.permissions(),
+    }
+}
+
+/// A pair of files that are likely renamed copies of each other (op 90).
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct RenamedDuplicate {
+    /// The path considered the "original".
+    pub original: PathBuf,
+    /// The path considered the renamed copy.
+    pub renamed: PathBuf,
+    /// Filename similarity score (0.0–1.0).
+    pub similarity: f64,
+}
+
+/// op 90: Detect renamed duplicates — identifies files in a cluster that are
+/// likely renamed copies. All files in a `DuplicateCluster` share the same
+/// BLAKE3 hash, so pairs with similar (but not identical) filenames are
+/// considered renamed duplicates.
+#[allow(dead_code)]
+pub fn detect_renamed_duplicates(cluster: &DuplicateCluster) -> Vec<RenamedDuplicate> {
+    let files = &cluster.files;
+    let mut result = Vec::new();
+
+    for i in 0..files.len() {
+        for j in (i + 1)..files.len() {
+            if files[i].file_name == files[j].file_name {
+                continue;
+            }
+            let sim = compare_filenames(&files[i].path, &files[j].path);
+            if sim > 0.5 {
+                result.push(RenamedDuplicate {
+                    original: files[i].path.clone(),
+                    renamed: files[j].path.clone(),
+                    similarity: sim,
+                });
+            }
+        }
+    }
+
+    result
+}
+
+/// A folder that appears to be a copy of another folder (op 91).
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct CopiedFolder {
+    /// The folder considered the source.
+    pub source: PathBuf,
+    /// Folders that appear to be copies of the source.
+    pub copies: Vec<PathBuf>,
+    /// Structural similarity score (0.0–1.0).
+    pub similarity: f64,
+}
+
+/// Compute a structural signature for a directory by hashing the sorted list
+/// of file hashes it contains (recursively). Two folders with the same
+/// signature contain identical file content.
+fn folder_signature(dir: &Path) -> String {
+    let mut hashes: Vec<String> = Vec::new();
+    for entry in WalkDir::new(dir).min_depth(1) {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        if entry.file_type().is_file() {
+            if let Some(h) = generate_hash(entry.path()) {
+                hashes.push(h);
+            }
+        }
+    }
+    hashes.sort();
+    let combined = hashes.join(",");
+    blake3::hash(combined.as_bytes()).to_hex().to_string()
+}
+
+/// op 91: Detect copied folders — identifies immediate subdirectories of
+/// `path` that appear to be copies of each other by comparing their file
+/// structure and content hashes.
+#[allow(dead_code)]
+pub fn detect_copied_folders(path: &Path) -> Vec<CopiedFolder> {
+    let mut groups: HashMap<String, Vec<PathBuf>> = HashMap::new();
+
+    let entries = match std::fs::read_dir(path) {
+        Ok(e) => e,
+        Err(_) => return Vec::new(),
+    };
+
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if !p.is_dir() {
+            continue;
+        }
+        let sig = folder_signature(&p);
+        groups.entry(sig).or_default().push(p);
+    }
+
+    groups
+        .into_iter()
+        .filter(|(_, dirs)| dirs.len() > 1)
+        .map(|(_, dirs)| CopiedFolder {
+            source: dirs[0].clone(),
+            copies: dirs[1..].to_vec(),
+            similarity: 1.0,
+        })
+        .collect()
+}
+
+/// op 98: Detect blurry images — uses the image file's byte-level variance
+/// as a proxy for sharpness. High variance indicates a sharp image; low
+/// variance indicates a blurry image. Returns `Some(true)` if the image is
+/// likely blurry, `Some(false)` if sharp, or `None` if it cannot be
+/// determined.
+#[allow(dead_code)]
+pub fn detect_blurry_images(path: &Path) -> Option<bool> {
+    let data = std::fs::read(path).ok()?;
+    if data.is_empty() {
+        return None;
+    }
+
+    // Skip metadata headers (first 256 bytes) and sample pixel-region bytes.
+    let start = 256.min(data.len());
+    let region = &data[start..];
+    if region.is_empty() {
+        return None;
+    }
+
+    let target_samples = 1024usize;
+    let step = (region.len() / target_samples).max(1);
+    let mut samples: Vec<f64> = Vec::with_capacity(target_samples);
+    let mut i = 0;
+    while i < region.len() && samples.len() < target_samples {
+        samples.push(region[i] as f64);
+        i += step;
+    }
+
+    if samples.is_empty() {
+        return None;
+    }
+
+    let mean = samples.iter().sum::<f64>() / samples.len() as f64;
+    let variance = samples.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / samples.len() as f64;
+
+    // Low variance => few details => likely blurry.
+    Some(variance < 100.0)
+}
+
+/// A confidence ranking for a duplicate cluster (op 99).
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct ConfidenceRank {
+    /// Confidence score (0.0–1.0).
+    pub score: f64,
+    /// Categorical label derived from the score.
+    pub label: ConfidenceLabel,
+}
+
+/// Categorical confidence labels (op 99).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum ConfidenceLabel {
+    /// High confidence (score >= 0.8).
+    High,
+    /// Medium confidence (0.5 <= score < 0.8).
+    Medium,
+    /// Low confidence (score < 0.5).
+    Low,
+}
+
+/// op 99: Rank duplicate confidence — ranks how confident we are that the
+/// files in a cluster are true duplicates, based on hash match, filename
+/// similarity, and metadata similarity.
+#[allow(dead_code)]
+pub fn rank_confidence(cluster: &DuplicateCluster) -> ConfidenceRank {
+    // Hash match contributes the most weight.
+    let hash_score = if cluster.hash.is_some() && !cluster.similar {
+        0.6
+    } else {
+        0.3
+    };
+
+    // Average pairwise filename similarity.
+    let files = &cluster.files;
+    let mut name_sim = 0.0f64;
+    let mut name_count = 0usize;
+    for i in 0..files.len() {
+        for j in (i + 1)..files.len() {
+            name_sim += compare_filenames(&files[i].path, &files[j].path);
+            name_count += 1;
+        }
+    }
+    let name_score = if name_count > 0 {
+        (name_sim / name_count as f64) * 0.2
+    } else {
+        0.0
+    };
+
+    // Average pairwise metadata similarity.
+    let mut meta_score = 0.0f64;
+    let mut meta_count = 0usize;
+    for i in 0..files.len() {
+        for j in (i + 1)..files.len() {
+            if let (Some(ma), Some(mb)) = (
+                std::fs::metadata(&files[i].path).ok(),
+                std::fs::metadata(&files[j].path).ok(),
+            ) {
+                let cmp = compare_metadata(&ma, &mb);
+                let mut s = 0.0f64;
+                if cmp.size_match {
+                    s += 0.5;
+                }
+                if cmp.modified_match {
+                    s += 0.3;
+                }
+                if cmp.permissions_match {
+                    s += 0.2;
+                }
+                meta_score += s;
+                meta_count += 1;
+            }
+        }
+    }
+    let meta_score = if meta_count > 0 {
+        (meta_score / meta_count as f64) * 0.2
+    } else {
+        0.0
+    };
+
+    let score = (hash_score + name_score + meta_score).min(1.0);
+    let label = if score >= 0.8 {
+        ConfidenceLabel::High
+    } else if score >= 0.5 {
+        ConfidenceLabel::Medium
+    } else {
+        ConfidenceLabel::Low
+    };
+
+    ConfidenceRank { score, label }
+}
+
+/// A duplicate found within a nested directory structure (op 107).
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct RecursiveDuplicate {
+    /// The shared BLAKE3 hash.
+    pub hash: String,
+    /// Paths of all files sharing this hash.
+    pub paths: Vec<PathBuf>,
+    /// Maximum nesting depth among the duplicate paths.
+    pub depth: usize,
+}
+
+/// op 107: Detect recursive duplication — finds duplicate content within
+/// nested directory structures by walking `path` recursively and grouping
+/// files by their BLAKE3 hash.
+#[allow(dead_code)]
+pub fn detect_recursive_duplication(path: &Path) -> Vec<RecursiveDuplicate> {
+    let mut hash_groups: HashMap<String, Vec<(PathBuf, usize)>> = HashMap::new();
+
+    for entry in WalkDir::new(path).min_depth(1) {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let depth = entry.depth();
+        if let Some(h) = generate_hash(entry.path()) {
+            hash_groups
+                .entry(h)
+                .or_default()
+                .push((entry.path().to_path_buf(), depth));
+        }
+    }
+
+    hash_groups
+        .into_iter()
+        .filter(|(_, entries)| entries.len() > 1)
+        .map(|(hash, entries)| {
+            let depth = entries.iter().map(|(_, d)| *d).max().unwrap_or(0);
+            let paths = entries.into_iter().map(|(p, _)| p).collect();
+            RecursiveDuplicate { hash, paths, depth }
+        })
+        .collect()
+}
+
+/// A summary report of duplicate detection results (op 108).
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct DuplicateReport {
+    /// Number of duplicate clusters.
+    pub cluster_count: usize,
+    /// Total reclaimable space in bytes.
+    pub total_reclaimable_bytes: u64,
+    /// Total number of files across all clusters.
+    pub total_files: usize,
+    /// Human-readable recommendations.
+    pub recommendations: Vec<String>,
+}
+
+/// op 108: Generate duplicate reports — creates a summary report with total
+/// reclaimable space, cluster count, and recommendations.
+#[allow(dead_code)]
+pub fn generate_report(clusters: &[DuplicateCluster]) -> DuplicateReport {
+    let cluster_count = clusters.len();
+    let total_reclaimable_bytes = clusters.iter().map(|c| c.reclaimable_bytes()).sum();
+    let total_files: usize = clusters.iter().map(|c| c.files.len()).sum();
+
+    let mut recommendations = Vec::new();
+    if total_reclaimable_bytes > 0 {
+        recommendations.push(format!(
+            "Reclaim {} by deleting duplicate files.",
+            crate::util::disk::format_bytes(total_reclaimable_bytes)
+        ));
+    }
+    if clusters.iter().any(|c| c.files.iter().any(|f| f.is_image)) {
+        recommendations
+            .push("Review duplicate images — keep the highest-resolution copy.".to_string());
+    }
+    if clusters.iter().any(|c| c.similar) {
+        recommendations
+            .push("Similar (not identical) images detected — review before deleting.".to_string());
+    }
+    if recommendations.is_empty() {
+        recommendations.push("No duplicates found — nothing to clean up.".to_string());
+    }
+
+    DuplicateReport {
+        cluster_count,
+        total_reclaimable_bytes,
+        total_files,
+        recommendations,
+    }
+}
+
+/// op 109: Ignore duplicate whitelist — returns `true` if `path` matches any
+/// entry in the user-configured `whitelist`. A match occurs when the path
+/// starts with a whitelist entry or contains it as a substring.
+#[allow(dead_code)]
+pub fn is_whitelisted(path: &Path, whitelist: &[PathBuf]) -> bool {
+    let path_str = path.to_string_lossy();
+    whitelist
+        .iter()
+        .any(|w| path.starts_with(w) || path_str.contains(w.to_string_lossy().as_ref()))
+}
+
+/// A single record in the scan database (op 110).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
+pub struct ScanRecord {
+    /// BLAKE3 hash of the file.
+    pub hash: String,
+    /// File size in bytes.
+    pub size: u64,
+    /// Modification time as Unix timestamp (seconds).
+    pub modified: u64,
+}
+
+/// op 110: Maintain scan database — stores previous scan results so that
+/// unchanged files (same size and mtime) can skip re-hashing on subsequent
+/// scans. The database can be saved to and loaded from a JSON file.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[allow(dead_code)]
+pub struct ScanDatabase {
+    /// Map of file path to its scan record.
+    pub entries: HashMap<PathBuf, ScanRecord>,
+}
+
+impl ScanDatabase {
+    /// Create a new empty scan database.
+    #[allow(dead_code)]
+    pub fn new() -> Self {
+        Self {
+            entries: HashMap::new(),
+        }
+    }
+
+    /// Record (or update) a file's scan result.
+    #[allow(dead_code)]
+    pub fn record(&mut self, path: PathBuf, hash: String, size: u64, modified: u64) {
+        self.entries.insert(
+            path,
+            ScanRecord {
+                hash,
+                size,
+                modified,
+            },
+        );
+    }
+
+    /// Returns `true` if the file at `path` is unchanged since the last scan
+    /// (matching size and modification time).
+    #[allow(dead_code)]
+    pub fn is_unchanged(&self, path: &Path, size: u64, modified: u64) -> bool {
+        self.entries
+            .get(path)
+            .map(|r| r.size == size && r.modified == modified)
+            .unwrap_or(false)
+    }
+
+    /// Returns the cached hash for a file, if present.
+    #[allow(dead_code)]
+    pub fn hash_for(&self, path: &Path) -> Option<&str> {
+        self.entries.get(path).map(|r| r.hash.as_str())
+    }
+
+    /// Save the scan database to a JSON file.
+    #[allow(dead_code)]
+    pub fn save(&self, path: &Path) -> std::io::Result<()> {
+        let json = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
+        std::fs::write(path, json)
+    }
+
+    /// Load a scan database from a JSON file.
+    #[allow(dead_code)]
+    pub fn load(path: &Path) -> std::io::Result<Self> {
+        let data = std::fs::read_to_string(path)?;
+        serde_json::from_str(&data)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1057,5 +1591,330 @@ mod tests {
 
         let clusters = DuplicateEngine::find_similar_images(&files, 8);
         assert!(clusters.is_empty());
+    }
+
+    // --- Tests for the new free-function operations ---
+
+    fn make_file_entry(path: &str, size: u64, modified: u64, hash: Option<&str>) -> FileEntry {
+        FileEntry {
+            path: PathBuf::from(path),
+            size,
+            modified,
+            file_name: PathBuf::from(path)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default(),
+            blake3_hash: hash.map(|h| h.to_string()),
+            partial_hash: None,
+            image_fingerprint: None,
+            is_screenshot: false,
+            is_image: false,
+        }
+    }
+
+    #[test]
+    fn test_compare_filenames_identical() {
+        let a = PathBuf::from("/docs/report.txt");
+        let b = PathBuf::from("/other/report.pdf");
+        // Same stem "report" => similarity 1.0
+        assert!((compare_filenames(&a, &b) - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_compare_filenames_similar() {
+        let a = PathBuf::from("/docs/report.txt");
+        let b = PathBuf::from("/docs/reports.txt");
+        let sim = compare_filenames(&a, &b);
+        // "report" vs "reports" — 1 edit out of 7 chars => ~0.857
+        assert!(sim > 0.8 && sim < 1.0);
+    }
+
+    #[test]
+    fn test_compare_filenames_different() {
+        let a = PathBuf::from("/docs/report.txt");
+        let b = PathBuf::from("/photos/vacation.jpg");
+        let sim = compare_filenames(&a, &b);
+        assert!(sim < 0.5);
+    }
+
+    #[test]
+    fn test_generate_hash_identical_files() {
+        let tmp = TempDir::new().unwrap();
+        let p1 = tmp.path().join("a.txt");
+        let p2 = tmp.path().join("b.txt");
+        std::fs::write(&p1, b"hello hash").unwrap();
+        std::fs::write(&p2, b"hello hash").unwrap();
+
+        let h1 = generate_hash(&p1).unwrap();
+        let h2 = generate_hash(&p2).unwrap();
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn test_generate_hash_missing_file() {
+        assert!(generate_hash(&PathBuf::from("/nonexistent/path/file.txt")).is_none());
+    }
+
+    #[test]
+    fn test_compare_metadata_identical_files() {
+        let tmp = TempDir::new().unwrap();
+        let p1 = tmp.path().join("a.txt");
+        let p2 = tmp.path().join("b.txt");
+        std::fs::write(&p1, b"same content").unwrap();
+        std::fs::write(&p2, b"same content").unwrap();
+
+        let m1 = std::fs::metadata(&p1).unwrap();
+        let m2 = std::fs::metadata(&p2).unwrap();
+
+        let cmp = compare_metadata(&m1, &m2);
+        assert!(cmp.size_match);
+        assert_eq!(cmp.size_diff, 0);
+        assert!(cmp.permissions_match);
+    }
+
+    #[test]
+    fn test_compare_metadata_different_sizes() {
+        let tmp = TempDir::new().unwrap();
+        let p1 = tmp.path().join("a.txt");
+        let p2 = tmp.path().join("b.txt");
+        std::fs::write(&p1, b"short").unwrap();
+        std::fs::write(&p2, b"much longer content").unwrap();
+
+        let m1 = std::fs::metadata(&p1).unwrap();
+        let m2 = std::fs::metadata(&p2).unwrap();
+
+        let cmp = compare_metadata(&m1, &m2);
+        assert!(!cmp.size_match);
+        assert!(cmp.size_diff > 0);
+    }
+
+    #[test]
+    fn test_detect_renamed_duplicates_finds_similar_names() {
+        let files = vec![
+            make_file_entry("/docs/report.txt", 100, 100, Some("abc")),
+            make_file_entry("/docs/reports.txt", 100, 100, Some("abc")),
+        ];
+        let cluster = DuplicateCluster::from_files(files);
+
+        let renamed = detect_renamed_duplicates(&cluster);
+        assert_eq!(renamed.len(), 1);
+        assert!(renamed[0].similarity > 0.5);
+    }
+
+    #[test]
+    fn test_detect_renamed_duplicates_ignores_identical_names() {
+        let files = vec![
+            make_file_entry("/a/report.txt", 100, 100, Some("abc")),
+            make_file_entry("/b/report.txt", 100, 100, Some("abc")),
+        ];
+        let cluster = DuplicateCluster::from_files(files);
+
+        let renamed = detect_renamed_duplicates(&cluster);
+        // Same filename => not a renamed duplicate
+        assert!(renamed.is_empty());
+    }
+
+    #[test]
+    fn test_detect_copied_folders_finds_identical_structure() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_path_buf();
+
+        let folder_a = root.join("project_a");
+        let folder_b = root.join("project_b");
+        std::fs::create_dir_all(&folder_a).unwrap();
+        std::fs::create_dir_all(&folder_b).unwrap();
+
+        // Identical content in both folders
+        std::fs::write(folder_a.join("readme.txt"), b"readme").unwrap();
+        std::fs::write(folder_b.join("readme.txt"), b"readme").unwrap();
+        std::fs::write(folder_a.join("code.rs"), b"fn main() {}").unwrap();
+        std::fs::write(folder_b.join("code.rs"), b"fn main() {}").unwrap();
+
+        let copies = detect_copied_folders(&root);
+        assert_eq!(copies.len(), 1);
+        assert_eq!(copies[0].copies.len(), 1);
+    }
+
+    #[test]
+    fn test_detect_copied_folders_ignores_unique_folders() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_path_buf();
+
+        let folder_a = root.join("unique_a");
+        let folder_b = root.join("unique_b");
+        std::fs::create_dir_all(&folder_a).unwrap();
+        std::fs::create_dir_all(&folder_b).unwrap();
+        std::fs::write(folder_a.join("a.txt"), b"content a").unwrap();
+        std::fs::write(folder_b.join("b.txt"), b"different content b").unwrap();
+
+        let copies = detect_copied_folders(&root);
+        assert!(copies.is_empty());
+    }
+
+    #[test]
+    fn test_detect_blurry_images_low_variance_is_blurry() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("blurry.png");
+        // Uniform bytes after the 256-byte header => low variance => blurry
+        let data = vec![128u8; 10_000];
+        std::fs::write(&path, &data).unwrap();
+
+        let blurry = detect_blurry_images(&path);
+        assert_eq!(blurry, Some(true));
+    }
+
+    #[test]
+    fn test_detect_blurry_images_high_variance_is_sharp() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("sharp.png");
+        // High-variance byte pattern => sharp
+        let data: Vec<u8> = (0..10_000).map(|i| (i % 256) as u8).collect();
+        std::fs::write(&path, &data).unwrap();
+
+        let blurry = detect_blurry_images(&path);
+        assert_eq!(blurry, Some(false));
+    }
+
+    #[test]
+    fn test_detect_blurry_images_missing_file() {
+        assert!(detect_blurry_images(&PathBuf::from("/nonexistent.png")).is_none());
+    }
+
+    #[test]
+    fn test_rank_confidence_high_for_identical() {
+        let tmp = TempDir::new().unwrap();
+        let p1 = tmp.path().join("report.txt");
+        let p2 = tmp.path().join("report.txt");
+        std::fs::write(&p1, b"content").unwrap();
+        std::fs::write(&p2, b"content").unwrap();
+
+        let files = vec![
+            make_file_entry(p1.to_str().unwrap(), 7, 100, Some("abc")),
+            make_file_entry(p2.to_str().unwrap(), 7, 100, Some("abc")),
+        ];
+        let cluster = DuplicateCluster::from_files(files);
+
+        let rank = rank_confidence(&cluster);
+        assert!(rank.score >= 0.8);
+        assert_eq!(rank.label, ConfidenceLabel::High);
+    }
+
+    #[test]
+    fn test_rank_confidence_label_ranges() {
+        // Similar (non-identical) cluster with no hash => lower confidence
+        let files = vec![
+            make_file_entry("/a/vacation.jpg", 100, 100, None),
+            make_file_entry("/b/trip.jpg", 100, 100, None),
+        ];
+        let mut cluster = DuplicateCluster::from_files(files);
+        cluster.similar = true;
+        cluster.select_deletion_candidates();
+
+        let rank = rank_confidence(&cluster);
+        assert!(rank.score < 1.0);
+    }
+
+    #[test]
+    fn test_detect_recursive_duplication_finds_nested_duplicates() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_path_buf();
+
+        let sub = root.join("nested/deep");
+        std::fs::create_dir_all(&sub).unwrap();
+
+        let content = b"duplicate content in nested structure";
+        std::fs::write(root.join("top.txt"), content).unwrap();
+        std::fs::write(sub.join("bottom.txt"), content).unwrap();
+
+        let dups = detect_recursive_duplication(&root);
+        assert_eq!(dups.len(), 1);
+        assert_eq!(dups[0].paths.len(), 2);
+        assert!(dups[0].depth >= 2);
+    }
+
+    #[test]
+    fn test_detect_recursive_duplication_no_duplicates() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_path_buf();
+
+        std::fs::write(root.join("a.txt"), b"unique a").unwrap();
+        std::fs::write(root.join("b.txt"), b"unique b").unwrap();
+
+        let dups = detect_recursive_duplication(&root);
+        assert!(dups.is_empty());
+    }
+
+    #[test]
+    fn test_generate_report_with_clusters() {
+        let files = vec![
+            make_file_entry("/keep.txt", 500, 200, Some("abc")),
+            make_file_entry("/del.txt", 500, 100, Some("abc")),
+        ];
+        let clusters = DuplicateEngine::build_clusters(vec![files]);
+
+        let report = generate_report(&clusters);
+        assert_eq!(report.cluster_count, 1);
+        assert_eq!(report.total_files, 2);
+        assert_eq!(report.total_reclaimable_bytes, 500);
+        assert!(!report.recommendations.is_empty());
+    }
+
+    #[test]
+    fn test_generate_report_empty() {
+        let report = generate_report(&[]);
+        assert_eq!(report.cluster_count, 0);
+        assert_eq!(report.total_reclaimable_bytes, 0);
+        assert!(!report.recommendations.is_empty());
+    }
+
+    #[test]
+    fn test_is_whitelisted_free_function_matches_prefix() {
+        let whitelist = vec![PathBuf::from("/Users/test/.git")];
+        assert!(is_whitelisted(
+            &PathBuf::from("/Users/test/.git/config"),
+            &whitelist
+        ));
+    }
+
+    #[test]
+    fn test_is_whitelisted_free_function_no_match() {
+        let whitelist = vec![PathBuf::from("/Users/test/.git")];
+        assert!(!is_whitelisted(
+            &PathBuf::from("/Users/test/Downloads/file.txt"),
+            &whitelist
+        ));
+    }
+
+    #[test]
+    fn test_scan_database_record_and_lookup() {
+        let mut db = ScanDatabase::new();
+        db.record(PathBuf::from("/a.txt"), "abc123".to_string(), 100, 1000);
+
+        assert!(db.is_unchanged(&PathBuf::from("/a.txt"), 100, 1000));
+        assert!(!db.is_unchanged(&PathBuf::from("/a.txt"), 200, 1000));
+        assert_eq!(db.hash_for(&PathBuf::from("/a.txt")), Some("abc123"));
+        assert_eq!(db.hash_for(&PathBuf::from("/missing.txt")), None);
+    }
+
+    #[test]
+    fn test_scan_database_save_and_load() {
+        let tmp = TempDir::new().unwrap();
+        let db_path = tmp.path().join("scan_db.json");
+
+        let mut db = ScanDatabase::new();
+        db.record(PathBuf::from("/a.txt"), "hash_a".to_string(), 100, 1000);
+        db.record(PathBuf::from("/b.txt"), "hash_b".to_string(), 200, 2000);
+        db.save(&db_path).unwrap();
+
+        let loaded = ScanDatabase::load(&db_path).unwrap();
+        assert_eq!(loaded.entries.len(), 2);
+        assert!(loaded.is_unchanged(&PathBuf::from("/a.txt"), 100, 1000));
+        assert_eq!(loaded.hash_for(&PathBuf::from("/b.txt")), Some("hash_b"));
+    }
+
+    #[test]
+    fn test_scan_database_default_is_empty() {
+        let db = ScanDatabase::default();
+        assert!(db.entries.is_empty());
     }
 }

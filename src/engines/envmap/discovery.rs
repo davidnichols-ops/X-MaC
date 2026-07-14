@@ -509,6 +509,134 @@ fn find_library_subdir(subdir: &str, kind: &'static str, suffix: &str) -> Vec<Ap
     out
 }
 
+/// Recursively compute the size of a directory in bytes.
+#[allow(dead_code)]
+fn dir_size(path: &std::path::Path) -> u64 {
+    let mut total: u64 = 0;
+    for entry in std::fs::read_dir(path).into_iter().flatten().flatten() {
+        let p = entry.path();
+        if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            total += dir_size(&p);
+        } else {
+            total += entry.metadata().map(|m| m.len()).unwrap_or(0);
+        }
+    }
+    total
+}
+
+/// One detected broken installation (op 244): an app bundle whose executable
+/// is missing, whose bundle structure is incomplete, or which contains broken
+/// symlinks.
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct BrokenInstallation {
+    /// Path to the (supposed) app bundle.
+    pub bundle_path: PathBuf,
+    /// Bundle identifier when one could be inferred.
+    pub bundle_id: Option<String>,
+    /// Human-readable description of what is broken.
+    pub reason: &'static str,
+}
+
+/// op 244: Detect broken installations — find apps with missing executables,
+/// broken symlinks, or incomplete bundles. Scans every default app directory.
+#[allow(dead_code)]
+pub fn detect_broken_installations() -> Vec<BrokenInstallation> {
+    use crate::engines::envmap::apps::{default_app_dirs, enumerate_apps_in};
+    let mut out = Vec::new();
+    for dir in default_app_dirs() {
+        if !dir.is_dir() {
+            continue;
+        }
+        for app in enumerate_apps_in(&dir, 4) {
+            check_bundle(&app.bundle_path, app.bundle_id.as_deref(), &mut out);
+        }
+        // Also scan for incomplete bundles (directories ending in .app that
+        // failed to parse, i.e. missing Info.plist).
+        for entry in walkdir::WalkDir::new(&dir)
+            .max_depth(4)
+            .follow_links(false)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            if !entry.file_type().is_dir() {
+                continue;
+            }
+            let path = entry.path();
+            let is_app = path
+                .file_name()
+                .map(|n| n.to_string_lossy().ends_with(".app"))
+                .unwrap_or(false);
+            if !is_app {
+                continue;
+            }
+            let info_plist = path.join("Contents/Info.plist");
+            if !info_plist.is_file() {
+                out.push(BrokenInstallation {
+                    bundle_path: path.to_path_buf(),
+                    bundle_id: None,
+                    reason: "missing Info.plist",
+                });
+            }
+        }
+    }
+    out
+}
+
+/// Inspect a single parsed app bundle for broken executables / symlinks.
+fn check_bundle(
+    bundle_path: &std::path::Path,
+    bundle_id: Option<&str>,
+    out: &mut Vec<BrokenInstallation>,
+) {
+    // Look up the executable name from the plist (re-parse to keep this
+    // helper self-contained).
+    let info_plist = bundle_path.join("Contents/Info.plist");
+    let exec_name: Option<String> = if info_plist.is_file() {
+        if let Ok(values) = plist::from_file::<_, plist::Dictionary>(&info_plist) {
+            values
+                .get("CFBundleExecutable")
+                .and_then(|v| v.as_string())
+                .map(|s| s.to_string())
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    if let Some(name) = exec_name {
+        let exec = bundle_path.join("Contents/MacOS").join(&name);
+        if !exec.exists() {
+            out.push(BrokenInstallation {
+                bundle_path: bundle_path.to_path_buf(),
+                bundle_id: bundle_id.map(|s| s.to_string()),
+                reason: "missing executable",
+            });
+        }
+    }
+
+    // Scan for broken symlinks anywhere inside the bundle.
+    for entry in walkdir::WalkDir::new(bundle_path)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
+        if entry.file_type().is_symlink() {
+            let target = entry.path();
+            if std::fs::symlink_metadata(target).is_ok() && std::fs::metadata(target).is_err() {
+                out.push(BrokenInstallation {
+                    bundle_path: bundle_path.to_path_buf(),
+                    bundle_id: bundle_id.map(|s| s.to_string()),
+                    reason: "broken symlink",
+                });
+                // One broken symlink is enough to flag the bundle.
+                break;
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -637,5 +765,51 @@ mod tests {
     fn find_login_helpers_runs_without_panic() {
         let helpers = find_login_helpers();
         assert!(helpers.iter().all(|a| a.kind == "login_helper"));
+    }
+
+    // ---- op 244: detect_broken_installations ----------------------------
+
+    #[test]
+    fn detect_broken_installations_runs_without_panic() {
+        let broken = detect_broken_installations();
+        // Every entry must have a non-empty reason and bundle path.
+        assert!(broken
+            .iter()
+            .all(|b| !b.reason.is_empty() && !b.bundle_path.as_os_str().is_empty()));
+    }
+
+    #[test]
+    fn check_bundle_flags_missing_executable() {
+        use std::fs;
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        let app = tmp.path().join("Broken.app");
+        fs::create_dir_all(app.join("Contents/MacOS")).unwrap();
+        // Info.plist references an executable that does not exist.
+        let plist = r#"<plist version="1.0"><dict>
+            <key>CFBundleExecutable</key><string>Missing</string>
+            <key>CFBundleIdentifier</key><string>com.example.broken</string>
+        </dict></plist>"#;
+        fs::write(app.join("Contents/Info.plist"), plist).unwrap();
+        let mut out = Vec::new();
+        check_bundle(&app, Some("com.example.broken"), &mut out);
+        assert!(out.iter().any(|b| b.reason == "missing executable"));
+    }
+
+    #[test]
+    fn check_bundle_ok_when_executable_present() {
+        use std::fs;
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        let app = tmp.path().join("Good.app");
+        fs::create_dir_all(app.join("Contents/MacOS")).unwrap();
+        let plist = r#"<plist version="1.0"><dict>
+            <key>CFBundleExecutable</key><string>Good</string>
+        </dict></plist>"#;
+        fs::write(app.join("Contents/Info.plist"), plist).unwrap();
+        fs::write(app.join("Contents/MacOS/Good"), "#!/bin/sh").unwrap();
+        let mut out = Vec::new();
+        check_bundle(&app, None, &mut out);
+        assert!(out.is_empty(), "expected no broken findings, got {:?}", out);
     }
 }

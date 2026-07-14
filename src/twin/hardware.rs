@@ -101,6 +101,39 @@ pub struct PowerState {
     pub low_power_mode: bool,
 }
 
+/// op 278: A comprehensive machine profile for comparison and benchmarking.
+/// Aggregates the key hardware dimensions (SoC, CPU, GPU, ANE, memory,
+/// storage, battery, thermal) into a single comparable summary.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
+pub struct MachineProfile {
+    pub model_identifier: String,
+    pub soc_generation: String,
+    pub total_logical_cores: usize,
+    pub performance_cores: usize,
+    pub efficiency_cores: usize,
+    pub gpu_core_count: usize,
+    pub ane_core_count: usize,
+    pub total_memory_bytes: u64,
+    pub total_storage_bytes: u64,
+    pub has_battery: bool,
+    pub battery_cycle_count: u64,
+    pub thermal_pressure: String,
+    pub fingerprint: String,
+}
+
+/// op 281: A process identified as likely using the Neural Engine (ANE).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
+pub struct ANEWorkload {
+    pub pid: u32,
+    pub name: String,
+    /// Heuristic confidence (0-1) that this process is using the ANE.
+    pub confidence: f64,
+    /// Reason for the classification (e.g. "CoreML model loaded").
+    pub reason: String,
+}
+
 impl HardwareProfile {
     /// Collect hardware profile via system_profiler, sysctl, and ioreg.
     pub fn collect() -> Self {
@@ -149,6 +182,46 @@ impl HardwareProfile {
         // Generate hardware fingerprint from collected attributes (op 38-40).
         profile.fingerprint = generate_hardware_fingerprint(&profile);
         profile
+    }
+
+    /// op 278: Build machine profile — create a comprehensive machine
+    /// profile for comparison and benchmarking. Aggregates the key hardware
+    /// dimensions into a single comparable summary.
+    #[allow(dead_code)]
+    pub fn build_machine_profile(&self) -> MachineProfile {
+        let total_storage_bytes: u64 = self.storage.iter().map(|d| d.capacity_bytes).sum();
+        let has_battery = self.battery.is_some();
+        let battery_cycle_count = self.battery.as_ref().map(|b| b.cycle_count).unwrap_or(0);
+        MachineProfile {
+            model_identifier: self.model_identifier.clone(),
+            soc_generation: self.soc_generation.clone(),
+            total_logical_cores: self.cpu_cores.total_logical_cores,
+            performance_cores: self.cpu_cores.performance_cores,
+            efficiency_cores: self.cpu_cores.efficiency_cores,
+            gpu_core_count: self.gpu.core_count,
+            ane_core_count: self.neural_engine.core_count,
+            total_memory_bytes: self.memory.total_bytes,
+            total_storage_bytes,
+            has_battery,
+            battery_cycle_count,
+            thermal_pressure: self.thermal.thermal_pressure.clone(),
+            fingerprint: self.fingerprint.clone(),
+        }
+    }
+
+    /// op 281: Analyze Neural Engine workloads — identify processes likely
+    /// using the ANE (ML apps, CoreML models, vision frameworks). Uses a
+    /// heuristic based on process names and known ML-related frameworks.
+    #[allow(dead_code)]
+    pub fn analyze_ane_workloads(&self) -> Vec<ANEWorkload> {
+        #[cfg(target_os = "macos")]
+        {
+            analyze_ane_workloads_macos()
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            Vec::new()
+        }
     }
 }
 
@@ -585,6 +658,61 @@ fn collect_battery_hardware(
     })
 }
 
+/// op 281: Identify processes likely using the Neural Engine on macOS.
+/// Scans `ps` output for ML/AI-related process names and CoreML model
+/// processes, returning a list of candidate ANE workloads with heuristic
+/// confidence scores.
+#[cfg(target_os = "macos")]
+fn analyze_ane_workloads_macos() -> Vec<ANEWorkload> {
+    use std::process::Command as PCommand;
+    let out = PCommand::new("ps")
+        .args(["-axo", "pid=,comm="])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+        .unwrap_or_default();
+
+    let mut workloads = Vec::new();
+    for line in out.lines() {
+        let mut parts = line.split_whitespace();
+        let pid: u32 = match parts.next().and_then(|s| s.parse().ok()) {
+            Some(p) => p,
+            None => continue,
+        };
+        let name = parts.collect::<Vec<_>>().join(" ");
+        if name.is_empty() {
+            continue;
+        }
+        let lower = name.to_lowercase();
+        // Heuristic classification by process name keywords.
+        let (confidence, reason) = if lower.contains("coreml") || lower.contains("coremlcompiler") {
+            (0.95, "CoreML model process".to_string())
+        } else if lower.contains("vision") && lower.contains("framework") {
+            (0.8, "Vision framework process".to_string())
+        } else if lower.contains("coremlmodel") || lower.contains("mlmodel") {
+            (0.9, "ML model loaded".to_string())
+        } else if lower.contains("tensor") && lower.contains("flow") {
+            (0.7, "TensorFlow process".to_string())
+        } else if lower.contains("pytorch") {
+            (0.7, "PyTorch process".to_string())
+        } else if lower.contains("onnx") {
+            (0.65, "ONNX runtime process".to_string())
+        } else if lower.contains("ane") || lower.contains("neuralengine") {
+            (0.85, "Neural Engine process".to_string())
+        } else if lower.contains("siri") || lower.contains("spotlight") {
+            (0.5, "ML-assisted system process".to_string())
+        } else {
+            continue;
+        };
+        workloads.push(ANEWorkload {
+            pid,
+            name,
+            confidence,
+            reason,
+        });
+    }
+    workloads
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 //  Unit tests
 // ═══════════════════════════════════════════════════════════════════════
@@ -807,6 +935,182 @@ mod tests {
         #[cfg(target_os = "macos")]
         {
             assert!(parse_diskutil_info("nonexistent-disk").is_none());
+        }
+    }
+
+    #[test]
+    fn test_build_machine_profile() {
+        let profile = HardwareProfile {
+            model_identifier: "Mac14,2".to_string(),
+            soc_generation: "Apple Silicon".to_string(),
+            cpu_cores: CpuTopology {
+                total_logical_cores: 8,
+                performance_cores: 4,
+                efficiency_cores: 4,
+            },
+            gpu: GpuInfo {
+                core_count: 10,
+                utilization_pct: None,
+            },
+            neural_engine: NeuralEngineInfo {
+                core_count: 16,
+                utilization_pct: None,
+            },
+            memory: HardwareMemory {
+                total_bytes: 17_179_869_184,
+                bandwidth_gbps: None,
+            },
+            storage: vec![StorageDevice {
+                name: "Apple SSD".to_string(),
+                capacity_bytes: 500_000_000_000,
+                is_ssd: true,
+                smart_health: None,
+            }],
+            battery: Some(BatteryHardware {
+                model: "Unknown".to_string(),
+                chemistry: "Lithium".to_string(),
+                cycle_count: 42,
+                design_capacity_mah: None,
+                current_capacity_mah: None,
+            }),
+            thermal: ThermalInfo {
+                cpu_temp_c: None,
+                gpu_temp_c: None,
+                fan_speeds_rpm: Vec::new(),
+                thermal_pressure: "Nominal".to_string(),
+            },
+            peripherals: Peripherals {
+                usb_devices: Vec::new(),
+                thunderbolt_devices: Vec::new(),
+                bluetooth_devices: Vec::new(),
+                external_displays: Vec::new(),
+                audio_devices: Vec::new(),
+                network_interfaces: Vec::new(),
+            },
+            power_state: PowerState {
+                is_on_battery: false,
+                is_charging: false,
+                sleep_state: "Active".to_string(),
+                low_power_mode: false,
+            },
+            fingerprint: "abc123".to_string(),
+        };
+        let mp = profile.build_machine_profile();
+        assert_eq!(mp.model_identifier, "Mac14,2");
+        assert_eq!(mp.total_logical_cores, 8);
+        assert_eq!(mp.gpu_core_count, 10);
+        assert_eq!(mp.ane_core_count, 16);
+        assert_eq!(mp.total_memory_bytes, 17_179_869_184);
+        assert_eq!(mp.total_storage_bytes, 500_000_000_000);
+        assert!(mp.has_battery);
+        assert_eq!(mp.battery_cycle_count, 42);
+        assert_eq!(mp.thermal_pressure, "Nominal");
+        assert_eq!(mp.fingerprint, "abc123");
+    }
+
+    #[test]
+    fn test_build_machine_profile_no_battery() {
+        let profile = HardwareProfile {
+            model_identifier: "Mac14,2".to_string(),
+            soc_generation: "Apple Silicon".to_string(),
+            cpu_cores: CpuTopology {
+                total_logical_cores: 8,
+                performance_cores: 4,
+                efficiency_cores: 4,
+            },
+            gpu: GpuInfo {
+                core_count: 10,
+                utilization_pct: None,
+            },
+            neural_engine: NeuralEngineInfo {
+                core_count: 16,
+                utilization_pct: None,
+            },
+            memory: HardwareMemory {
+                total_bytes: 17_179_869_184,
+                bandwidth_gbps: None,
+            },
+            storage: Vec::new(),
+            battery: None,
+            thermal: ThermalInfo {
+                cpu_temp_c: None,
+                gpu_temp_c: None,
+                fan_speeds_rpm: Vec::new(),
+                thermal_pressure: "Nominal".to_string(),
+            },
+            peripherals: Peripherals {
+                usb_devices: Vec::new(),
+                thunderbolt_devices: Vec::new(),
+                bluetooth_devices: Vec::new(),
+                external_displays: Vec::new(),
+                audio_devices: Vec::new(),
+                network_interfaces: Vec::new(),
+            },
+            power_state: PowerState {
+                is_on_battery: false,
+                is_charging: false,
+                sleep_state: "Active".to_string(),
+                low_power_mode: false,
+            },
+            fingerprint: String::new(),
+        };
+        let mp = profile.build_machine_profile();
+        assert!(!mp.has_battery);
+        assert_eq!(mp.battery_cycle_count, 0);
+        assert_eq!(mp.total_storage_bytes, 0);
+    }
+
+    #[test]
+    fn test_analyze_ane_workloads_does_not_panic() {
+        let profile = HardwareProfile {
+            model_identifier: "Mac14,2".to_string(),
+            soc_generation: "Apple Silicon".to_string(),
+            cpu_cores: CpuTopology {
+                total_logical_cores: 8,
+                performance_cores: 4,
+                efficiency_cores: 4,
+            },
+            gpu: GpuInfo {
+                core_count: 10,
+                utilization_pct: None,
+            },
+            neural_engine: NeuralEngineInfo {
+                core_count: 16,
+                utilization_pct: None,
+            },
+            memory: HardwareMemory {
+                total_bytes: 17_179_869_184,
+                bandwidth_gbps: None,
+            },
+            storage: Vec::new(),
+            battery: None,
+            thermal: ThermalInfo {
+                cpu_temp_c: None,
+                gpu_temp_c: None,
+                fan_speeds_rpm: Vec::new(),
+                thermal_pressure: "Nominal".to_string(),
+            },
+            peripherals: Peripherals {
+                usb_devices: Vec::new(),
+                thunderbolt_devices: Vec::new(),
+                bluetooth_devices: Vec::new(),
+                external_displays: Vec::new(),
+                audio_devices: Vec::new(),
+                network_interfaces: Vec::new(),
+            },
+            power_state: PowerState {
+                is_on_battery: false,
+                is_charging: false,
+                sleep_state: "Active".to_string(),
+                low_power_mode: false,
+            },
+            fingerprint: String::new(),
+        };
+        let workloads = profile.analyze_ane_workloads();
+        // Should not panic; contents depend on the running system.
+        for w in &workloads {
+            assert!(w.confidence >= 0.0 && w.confidence <= 1.0);
+            assert!(!w.name.is_empty());
         }
     }
 }

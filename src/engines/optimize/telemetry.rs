@@ -258,7 +258,9 @@ pub struct ProcessTelemetry {
 }
 
 impl ProcessTelemetry {
-    /// Collect telemetry for all processes.
+    /// op 169: Identify memory-heavy applications — collect telemetry for
+    /// all processes, ordered by resident size (RSS) so the heaviest
+    /// memory consumers are surfaced first.
     pub fn collect_all() -> Vec<ProcessTelemetry> {
         #[cfg(target_os = "macos")]
         {

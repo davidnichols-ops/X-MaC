@@ -56,6 +56,9 @@ pub fn build_candidates(findings: &[Finding], policy: &CleanupPolicy) -> Vec<Cle
     candidates
 }
 
+/// op 312: Test before execution — apply preflight validation checks to a
+/// candidate before any destructive action is taken. Verifies protected
+/// paths, blocked categories, symlink safety, and writability.
 fn apply_preflight(candidate: &mut CleanupCandidate, policy: &CleanupPolicy) {
     if policy.is_protected(&candidate.path) {
         candidate.blocked = true;

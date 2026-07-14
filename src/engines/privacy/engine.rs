@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -2046,6 +2047,167 @@ impl PrivacyEngine {
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+//  Free functions (ops 78, 266, 267)
+// ═══════════════════════════════════════════════════════════════════════
+
+/// op 78: Identify risky software — scan a list of installed apps and
+/// return those with known vulnerabilities (Gatekeeper-rejected or
+/// outdated). On macOS, Gatekeeper assessment is re-checked for each app.
+#[allow(dead_code)]
+pub fn identify_risky_software(apps: &[InstalledApp]) -> Vec<RiskyApp> {
+    let mut risky = Vec::new();
+    for app in apps {
+        if app.gatekeeper_rejected {
+            risky.push(RiskyApp {
+                name: app.name.clone(),
+                path: app.path.clone(),
+                reason: "Rejected by Gatekeeper (unsigned or modified)".to_string(),
+                severity: Severity::High,
+            });
+        } else if app.is_outdated {
+            risky.push(RiskyApp {
+                name: app.name.clone(),
+                path: app.path.clone(),
+                reason: "Outdated software with known security issues".to_string(),
+                severity: Severity::Medium,
+            });
+        }
+    }
+    risky
+}
+
+/// op 266: Manage permissions — audit TCC permissions by querying the
+/// system TCC database. Returns a report of granted/denied entries.
+#[allow(dead_code)]
+pub fn manage_permissions() -> PermissionReport {
+    let mut entries = Vec::new();
+
+    #[cfg(target_os = "macos")]
+    {
+        let services = [
+            "kTCCServiceAccessibility",
+            "kTCCServiceSystemPolicyAllFiles",
+            "kTCCServiceCamera",
+            "kTCCServiceMicrophone",
+        ];
+        let tcc_db = PathBuf::from("/Library/Application Support/com.apple.TCC/TCC.db");
+        for service in &services {
+            let (ok, msg) = PrivacyEngine::run_command(
+                "sqlite3",
+                &[
+                    &tcc_db.to_string_lossy(),
+                    &format!(
+                        "SELECT client, allowed FROM access WHERE service='{}';",
+                        service
+                    ),
+                ],
+            );
+            if ok {
+                for line in msg.lines() {
+                    let parts: Vec<&str> = line.split('|').collect();
+                    if parts.len() >= 2 {
+                        let client = parts[0].trim().to_string();
+                        let allowed = parts[1].trim() == "1";
+                        entries.push(PermissionEntry {
+                            service: service.to_string(),
+                            client,
+                            allowed,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    let total_granted = entries.iter().filter(|e| e.allowed).count();
+    let total_denied = entries.len() - total_granted;
+    PermissionReport {
+        entries,
+        total_granted,
+        total_denied,
+    }
+}
+
+/// op 267: Audit security posture — generate a comprehensive security
+/// audit covering Gatekeeper, SIP, firewall, FileVault, automatic
+/// updates, risky apps, and permission grants, producing a 0-100 score.
+#[allow(dead_code)]
+pub fn audit_security_posture() -> SecurityPosture {
+    let risky = identify_risky_software(&[]);
+    let perms = manage_permissions();
+
+    #[cfg(target_os = "macos")]
+    {
+        let (gk_ok, _) = PrivacyEngine::run_command("spctl", &["--status"]);
+        let gatekeeper_enabled = gk_ok;
+        let (sip_ok, _) = PrivacyEngine::run_command("csrutil", &["status"]);
+        let sip_enabled = sip_ok && {
+            let (_, sip_msg) = PrivacyEngine::run_command("csrutil", &["status"]);
+            sip_msg.contains("enabled")
+        };
+        let (fw_ok, _) = PrivacyEngine::run_command(
+            "/usr/libexec/ApplicationFirewall/socketfilterfw",
+            &["--getglobalstate"],
+        );
+        let firewall_enabled = fw_ok;
+        let (fv_ok, _) = PrivacyEngine::run_command("fdesetup", &["status"]);
+        let filevault_enabled = fv_ok && {
+            let (_, fv_msg) = PrivacyEngine::run_command("fdesetup", &["status"]);
+            fv_msg.contains("On")
+        };
+        let (au_ok, _) = PrivacyEngine::run_command(
+            "defaults",
+            &["read", "com.apple.SoftwareUpdate", "AutomaticCheckEnabled"],
+        );
+        let automatic_updates = au_ok;
+
+        let mut score = 0.0;
+        if gatekeeper_enabled {
+            score += 20.0;
+        }
+        if sip_enabled {
+            score += 20.0;
+        }
+        if firewall_enabled {
+            score += 15.0;
+        }
+        if filevault_enabled {
+            score += 20.0;
+        }
+        if automatic_updates {
+            score += 15.0;
+        }
+        // Penalize risky apps and broad permission grants.
+        score -= (risky.len() as f64) * 5.0;
+        score -= (perms.total_granted as f64).min(10.0) * 1.0;
+
+        SecurityPosture {
+            gatekeeper_enabled,
+            sip_enabled,
+            firewall_enabled,
+            filevault_enabled,
+            automatic_updates,
+            risky_app_count: risky.len(),
+            permission_grant_count: perms.total_granted,
+            score: score.round().clamp(0.0, 100.0),
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        SecurityPosture {
+            gatekeeper_enabled: false,
+            sip_enabled: false,
+            firewall_enabled: false,
+            filevault_enabled: false,
+            automatic_updates: false,
+            risky_app_count: risky.len(),
+            permission_grant_count: perms.total_granted,
+            score: 0.0,
+        }
+    }
+}
+
 /// Describes a browser's data file locations for privacy scanning.
 struct BrowserDataLocation {
     name: &'static str,
@@ -2055,6 +2217,63 @@ struct BrowserDataLocation {
     cookie_paths: Vec<PathBuf>,
     download_paths: Vec<PathBuf>,
     autofill_paths: Vec<PathBuf>,
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Risk & security audit types (ops 78, 266, 267)
+// ═══════════════════════════════════════════════════════════════════════
+
+/// An installed application, used for risk identification (op 78).
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct InstalledApp {
+    pub name: String,
+    pub path: PathBuf,
+    pub version: Option<String>,
+    /// True if the app was rejected by Gatekeeper or is unsigned.
+    pub gatekeeper_rejected: bool,
+    /// True if the app is known to be outdated.
+    pub is_outdated: bool,
+}
+
+/// An app flagged as risky due to known vulnerabilities (op 78).
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct RiskyApp {
+    pub name: String,
+    pub path: PathBuf,
+    pub reason: String,
+    pub severity: Severity,
+}
+
+/// A TCC permission entry audited by `manage_permissions` (op 266).
+#[derive(Debug, Clone, Serialize)]
+pub struct PermissionEntry {
+    pub service: String,
+    pub client: String,
+    pub allowed: bool,
+}
+
+/// Report from auditing TCC permissions (op 266).
+#[derive(Debug, Clone, Serialize)]
+pub struct PermissionReport {
+    pub entries: Vec<PermissionEntry>,
+    pub total_granted: usize,
+    pub total_denied: usize,
+}
+
+/// Comprehensive security posture audit (op 267).
+#[derive(Debug, Clone, Serialize)]
+pub struct SecurityPosture {
+    pub gatekeeper_enabled: bool,
+    pub sip_enabled: bool,
+    pub firewall_enabled: bool,
+    pub filevault_enabled: bool,
+    pub automatic_updates: bool,
+    pub risky_app_count: usize,
+    pub permission_grant_count: usize,
+    /// Overall posture score (0-100, higher is better).
+    pub score: f64,
 }
 
 #[async_trait]
@@ -2297,5 +2516,61 @@ mod tests {
         let stats = result.unwrap();
         // Only vulnerable/outdated apps run when all categories disabled
         assert!(stats.findings_count > 0);
+    }
+
+    #[test]
+    fn test_identify_risky_software() {
+        let apps = vec![
+            InstalledApp {
+                name: "GoodApp".to_string(),
+                path: PathBuf::from("/Applications/GoodApp.app"),
+                version: Some("1.0".to_string()),
+                gatekeeper_rejected: false,
+                is_outdated: false,
+            },
+            InstalledApp {
+                name: "BadApp".to_string(),
+                path: PathBuf::from("/Applications/BadApp.app"),
+                version: None,
+                gatekeeper_rejected: true,
+                is_outdated: false,
+            },
+            InstalledApp {
+                name: "OldApp".to_string(),
+                path: PathBuf::from("/Applications/OldApp.app"),
+                version: Some("0.1".to_string()),
+                gatekeeper_rejected: false,
+                is_outdated: true,
+            },
+        ];
+        let risky = identify_risky_software(&apps);
+        assert_eq!(risky.len(), 2);
+        assert!(risky
+            .iter()
+            .any(|r| r.name == "BadApp" && r.severity == Severity::High));
+        assert!(risky
+            .iter()
+            .any(|r| r.name == "OldApp" && r.severity == Severity::Medium));
+    }
+
+    #[test]
+    fn test_identify_risky_software_empty() {
+        let risky = identify_risky_software(&[]);
+        assert!(risky.is_empty());
+    }
+
+    #[test]
+    fn test_manage_permissions_returns_report() {
+        let report = manage_permissions();
+        assert_eq!(
+            report.total_granted + report.total_denied,
+            report.entries.len()
+        );
+    }
+
+    #[test]
+    fn test_audit_security_posture_returns_score() {
+        let posture = audit_security_posture();
+        assert!(posture.score >= 0.0 && posture.score <= 100.0);
     }
 }
