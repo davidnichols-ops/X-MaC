@@ -31,10 +31,10 @@ impl Engine for PrivacyEngine {
         Ok(())
     }
 
-    async fn scan(&self, ctx: Arc<ScanContext>) -> Result<EngineStats, EngineError> {
+    async fn scan(&self, _ctx: Arc<ScanContext>) -> Result<EngineStats, EngineError> {
         let start = std::time::Instant::now();
-        let mut items_scanned = 0u64;
-        let mut findings_count = 0u64;
+        let items_scanned = 0u64;
+        let findings_count = 0u64;
 
         // TODO: implement privacy scanning (ops 206-235)
         // 1. Detect browser history/cookies/autofill data

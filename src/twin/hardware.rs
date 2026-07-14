@@ -250,7 +250,9 @@ fn collect_storage_devices() -> Vec<StorageDevice> {
     Vec::new()
 }
 
-fn collect_battery_hardware(battery: &crate::intelligence::system_awareness::BatteryDimension) -> Option<BatteryHardware> {
+fn collect_battery_hardware(
+    battery: &crate::intelligence::system_awareness::BatteryDimension,
+) -> Option<BatteryHardware> {
     if !battery.is_present {
         return None;
     }

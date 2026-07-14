@@ -46,12 +46,7 @@ impl DigitalTwin {
         let energy = EnergyTwin::collect();
         let applications = AppIntelligenceGraph::collect();
 
-        let health_score = compute_twin_health_score(
-            &hardware,
-            &memory,
-            &energy,
-            &processes,
-        );
+        let health_score = compute_twin_health_score(&hardware, &memory, &energy, &processes);
 
         let timestamp_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
