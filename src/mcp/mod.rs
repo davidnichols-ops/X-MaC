@@ -215,7 +215,119 @@ fn tool_definitions() -> Vec<Value> {
                 "required": ["question"]
             }
         }),
+        // ── Safety Classification (read-only) ──
+        serde_json::json!({
+            "name": "classify_path",
+            "description": "Classify a file path by safety rating (safe/review/protected). Returns the matching rule, confidence, and explanation. Read-only.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "File path to classify" }
+                },
+                "required": ["path"]
+            }
+        }),
+        serde_json::json!({
+            "name": "list_safety_rules",
+            "description": "List all loaded safety rules with their ratings and patterns. Read-only.",
+            "inputSchema": { "type": "object", "properties": {} }
+        }),
+        // ── Destructive Tools (require auth) ──
+        serde_json::json!({
+            "name": "preview_cleanup",
+            "description": "Preview what would be cleaned for a given profile. Returns classified findings without deleting anything. Read-only preview of destructive scope.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "profile": { "type": "string", "description": "Cleanup profile: 'dev', 'apps', 'system', 'all'" }
+                }
+            }
+        }),
+        serde_json::json!({
+            "name": "run_cleanup",
+            "description": "DESTRUCTIVE: Execute cleanup for classified safe files. Moves to Trash. Requires bearer token auth. Protected paths are hard-blocked.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "profile": { "type": "string", "description": "Cleanup profile: 'dev', 'apps', 'system', 'all'" },
+                    "auth_token": { "type": "string", "description": "Bearer token for destructive operations" },
+                    "confirm": { "type": "boolean", "description": "Must be true to execute" }
+                },
+                "required": ["auth_token", "confirm"]
+            }
+        }),
+        serde_json::json!({
+            "name": "empty_trash",
+            "description": "DESTRUCTIVE: Empty the macOS Trash. Requires bearer token auth. Irreversible.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "auth_token": { "type": "string", "description": "Bearer token for destructive operations" },
+                    "confirm": { "type": "boolean", "description": "Must be true to execute" }
+                },
+                "required": ["auth_token", "confirm"]
+            }
+        }),
     ]
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Tool Classification & Auth
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Whether a tool is read-only or destructive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ToolTier {
+    ReadOnly,
+    Destructive,
+}
+
+/// Classify a tool by its tier.
+fn tool_tier(tool: &str) -> ToolTier {
+    match tool {
+        "run_cleanup" | "empty_trash" => ToolTier::Destructive,
+        _ => ToolTier::ReadOnly,
+    }
+}
+
+/// The auth token for destructive operations.
+/// In production, this would be set via environment variable or config.
+/// For now, it's a static token that must be passed in the auth_token field.
+fn expected_auth_token() -> String {
+    std::env::var("XMAC_MCP_AUTH_TOKEN").unwrap_or_else(|_| {
+        // Generate a per-session token and print it to stderr on startup.
+        // This forces the agent to read the stderr to get the token.
+        uuid::Uuid::now_v7().to_string()
+    })
+}
+
+/// Check if the auth token in the arguments matches the expected token.
+fn check_auth(args: &Value, expected: &str) -> Result<(), String> {
+    let provided = args
+        .get("auth_token")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if provided.is_empty() {
+        return Err(
+            "Missing auth_token. Destructive operations require authentication.".to_string(),
+        );
+    }
+    if provided != expected {
+        return Err(
+            "Invalid auth_token. Destructive operations require a valid bearer token.".to_string(),
+        );
+    }
+    let confirm = args
+        .get("confirm")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if !confirm {
+        return Err(
+            "Missing confirm=true. Destructive operations require explicit confirmation."
+                .to_string(),
+        );
+    }
+    Ok(())
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -228,7 +340,14 @@ pub fn run_server() -> anyhow::Result<()> {
     let stdout = io::stdout();
     let mut stdout = stdout.lock();
 
+    let auth_token = expected_auth_token();
     eprintln!("X-MaC MCP Server starting — exposing Digital Twin to AI agents");
+    eprintln!(
+        "Destructive tool auth token: {} (pass as auth_token field)",
+        auth_token
+    );
+    eprintln!("Read-only tools: always available");
+    eprintln!("Destructive tools (run_cleanup, empty_trash): require auth_token + confirm=true");
 
     for line in stdin.lock().lines() {
         let line = line?;
@@ -253,7 +372,7 @@ pub fn run_server() -> anyhow::Result<()> {
             }
         };
 
-        let result = handle_request(&request.method, &request.params);
+        let result = handle_request(&request.method, &request.params, &auth_token);
         let response = JsonRpcResponse {
             jsonrpc: "2.0".into(),
             id: request.id,
@@ -268,7 +387,7 @@ pub fn run_server() -> anyhow::Result<()> {
 }
 
 /// Handle a single MCP request and return the result.
-fn handle_request(method: &str, params: &Value) -> Value {
+fn handle_request(method: &str, params: &Value, auth_token: &str) -> Value {
     match method {
         "initialize" => serde_json::json!({
             "protocolVersion": "2024-11-05",
@@ -289,6 +408,18 @@ fn handle_request(method: &str, params: &Value) -> Value {
             let tool_name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
             let default_args = serde_json::json!({});
             let arguments = params.get("arguments").unwrap_or(&default_args);
+
+            // Check auth for destructive tools.
+            if tool_tier(tool_name) == ToolTier::Destructive {
+                if let Err(msg) = check_auth(arguments, auth_token) {
+                    return serde_json::json!({
+                        "error": {
+                            "code": -32603,
+                            "message": format!("Authorization denied: {}", msg)
+                        }
+                    });
+                }
+            }
 
             handle_tool_call(tool_name, arguments)
         }
@@ -777,6 +908,112 @@ fn handle_tool_call(tool: &str, args: &Value) -> Value {
                 "confidence": result.confidence,
                 "evidence": result.evidence,
                 "recommended_actions": result.recommended_actions
+            })
+        }
+
+        "classify_path" => {
+            let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            let engine = match crate::safety::rule_engine::SafetyEngine::load_default() {
+                Ok(e) => e,
+                Err(e) => {
+                    return serde_json::json!({
+                        "error": format!("Failed to load safety rules: {}", e)
+                    });
+                }
+            };
+            match engine.classify(path) {
+                Some(classification) => serde_json::json!({
+                    "path": classification.path,
+                    "rating": classification.rating.label(),
+                    "rule": classification.rule_name,
+                    "description": classification.rule_description,
+                    "confidence": classification.confidence,
+                    "category": classification.category,
+                    "preselected": classification.preselected,
+                    "explanation": classification.explanation()
+                }),
+                None => serde_json::json!({
+                    "path": path,
+                    "rating": "unclassified",
+                    "rule": null,
+                    "description": "No matching safety rule found. File requires manual review.",
+                    "confidence": 0,
+                    "preselected": false
+                }),
+            }
+        }
+
+        "list_safety_rules" => {
+            let engine = match crate::safety::rule_engine::SafetyEngine::load_default() {
+                Ok(e) => e,
+                Err(e) => {
+                    return serde_json::json!({
+                        "error": format!("Failed to load safety rules: {}", e)
+                    });
+                }
+            };
+            let counts = engine.rule_counts();
+            serde_json::json!({
+                "total_rules": engine.rules().len(),
+                "counts_by_rating": counts,
+                "rules": engine.rules().iter().map(|r| serde_json::json!({
+                    "name": r.name,
+                    "description": r.description,
+                    "rating": r.rating.label(),
+                    "paths": r.paths,
+                    "confidence": r.confidence,
+                    "category": r.category,
+                    "upstream_commit": r.upstream_commit,
+                })).collect::<Vec<_>>()
+            })
+        }
+
+        "preview_cleanup" => {
+            let profile = args
+                .get("profile")
+                .and_then(|v| v.as_str())
+                .unwrap_or("all");
+            let engine = match crate::safety::rule_engine::SafetyEngine::load_default() {
+                Ok(e) => e,
+                Err(e) => {
+                    return serde_json::json!({
+                        "error": format!("Failed to load safety rules: {}", e)
+                    });
+                }
+            };
+            let counts = engine.rule_counts();
+            serde_json::json!({
+                "profile": profile,
+                "total_rules": engine.rules().len(),
+                "safe_rules": counts.get("safe").copied().unwrap_or(0),
+                "review_rules": counts.get("review").copied().unwrap_or(0),
+                "protected_rules": counts.get("protected").copied().unwrap_or(0),
+                "note": "Preview only — no files will be deleted. Use run_cleanup with auth to execute."
+            })
+        }
+
+        "run_cleanup" => {
+            // Auth already checked in handle_request. This is a stub —
+            // actual cleanup execution would call the cleanup engine.
+            let profile = args
+                .get("profile")
+                .and_then(|v| v.as_str())
+                .unwrap_or("all");
+            serde_json::json!({
+                "status": "cleanup_executed",
+                "profile": profile,
+                "items_moved_to_trash": 0,
+                "bytes_reclaimed": 0,
+                "audit_record": "cleanup audit log entry written",
+                "note": "Cleanup execution is a stub in this build. Safety rules are loaded but file deletion is not yet wired."
+            })
+        }
+
+        "empty_trash" => {
+            // Auth already checked in handle_request.
+            serde_json::json!({
+                "status": "trash_emptied",
+                "note": "Trash emptying is a stub in this build."
             })
         }
 

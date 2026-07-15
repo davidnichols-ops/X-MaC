@@ -62,6 +62,11 @@ final class XMacRunner: ObservableObject {
     @Published var twinBenchmark: BenchmarkData?
     @Published var twinMonitoringPlan: MonitoringPlan?
 
+    // What Changed? data
+    @Published var whatChanged: WhatChangedReport?
+    @Published var whatChangedLoading = false
+    @Published var whatChangedError: String?
+
     // Generic scan results for unwired commands
     @Published var conflictFindings: [Finding] = []
     @Published var envmapFindings: [Finding] = []
@@ -84,6 +89,7 @@ final class XMacRunner: ObservableObject {
         case dashboard, idle, full, clean, maintain, disk, neural, apps, history, ramBoost, zen, advisor
         case twin, twinHardware, twinSoftware, twinFilesystem, twinProcesses, twinMemory, twinEnergy, twinApps, twinReasoning
         case diagnostics, conflict, envmap, depth, quickScan, purge, configView
+        case whatChanged
     }
 
     private var appSettings: AppSettings?
@@ -513,6 +519,32 @@ final class XMacRunner: ObservableObject {
                 return try JSONDecoder().decode(MonitoringPlan.self, from: data)
             }
             if case .success(let r) = result { self.twinMonitoringPlan = r }
+        }
+    }
+
+    // MARK: - What Changed?
+
+    func queryWhatChanged(since: String) {
+        whatChanged = nil
+        whatChangedError = nil
+        whatChangedLoading = true
+        Task {
+            let result = await trackOperation("What Changed?") { () async throws -> WhatChangedReport in
+                let args = [self.xmacPath, "--format", "json", "twin", "--action", "what-changed", "--since", since]
+                let (stdout, _) = try await self.runProcess(args)
+                guard let data = stdout.data(using: .utf8) else {
+                    throw XMacError.invalidOutput("twin what-changed: no data")
+                }
+                return try JSONDecoder().decode(WhatChangedReport.self, from: data)
+            }
+            switch result {
+            case .success(let report):
+                self.whatChanged = report
+                self.whatChangedLoading = false
+            case .failure(let err):
+                self.whatChangedError = err.localizedDescription
+                self.whatChangedLoading = false
+            }
         }
     }
 

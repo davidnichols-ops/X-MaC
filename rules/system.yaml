@@ -1,0 +1,93 @@
+# X-MaC Safety Rules — System Protected Roots
+# These paths are hard-blocked from deletion regardless of any other rule.
+# No model, user, or agent can override these.
+
+- name: keychain
+  description: "Credential store — never removable by any caller"
+  rating: protected
+  paths:
+    - "~/Library/Keychains/**"
+  confidence: 100
+  category: system
+
+- name: system_directory
+  description: "System directory — critical for macOS operation"
+  rating: protected
+  paths:
+    - "/System/**"
+    - "/usr/**"
+    - "/bin/**"
+    - "/sbin/**"
+    - "/private/etc/**"
+  confidence: 100
+  category: system
+
+- name: ssh_keys
+  description: "SSH private keys — never removable"
+  rating: protected
+  paths:
+    - "~/.ssh/**"
+  confidence: 100
+  category: system
+
+- name: user_documents
+  description: "User documents — require explicit review"
+  rating: review
+  paths:
+    - "~/Documents/**"
+    - "~/Desktop/**"
+    - "~/Downloads/**"
+  confidence: 50
+  category: system
+
+- name: user_library_preferences
+  description: "Application preferences — removing resets app settings"
+  rating: protected
+  paths:
+    - "~/Library/Preferences/**"
+  confidence: 100
+  category: system
+
+- name: mail_data
+  description: "Mail database and attachments — removing loses email"
+  rating: protected
+  paths:
+    - "~/Library/Mail/**"
+  confidence: 100
+  category: system
+
+- name: photos_library
+  description: "Photos library — removing loses photos"
+  rating: protected
+  paths:
+    - "~/Pictures/Photos Library.photoslibrary/**"
+  confidence: 100
+  category: system
+
+- name: calendar_contacts
+  description: "Calendar and Contacts databases"
+  rating: protected
+  paths:
+    - "~/Library/Calendars/**"
+    - "~/Library/AddressBook/**"
+  confidence: 100
+  category: system
+
+- name: browser_profiles
+  description: "Browser profiles — hold bookmarks, history, saved passwords"
+  rating: review
+  paths:
+    - "~/Library/Application Support/Google/Chrome/Default/**"
+    - "~/Library/Application Support/Firefox/Profiles/**"
+    - "~/Library/Safari/**"
+  confidence: 60
+  category: system
+
+- name: time_machine
+  description: "Time Machine backups — never removable by cleanup"
+  rating: protected
+  paths:
+    - "/Volumes/Backups/**"
+    - "/Volumes/.MobileBackups/**"
+  confidence: 100
+  category: system

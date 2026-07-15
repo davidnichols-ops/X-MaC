@@ -27,7 +27,9 @@ struct ContentView: View {
             case .intelligence:
                 IntelligenceView()
             case .timeline:
-                TimelineView()
+                TimelineTabView()
+            case .whatChanged:
+                WhatChangedView()
             case .automation:
                 AutomationView()
             case .assistant:

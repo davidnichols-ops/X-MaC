@@ -19,25 +19,90 @@ pub struct CleanupCandidate {
     pub preflight_errors: Vec<String>,
     pub preflight_warnings: Vec<String>,
     pub blocked: bool,
+    /// Safety rating from the rule engine (safe/review/protected).
+    pub safety_rating: Option<String>,
+    /// Human-readable explanation of why this is safe/risky.
+    pub safety_explanation: Option<String>,
+    /// The rule that matched (if any).
+    pub safety_rule: Option<String>,
+    /// Confidence 0-100.
+    pub safety_confidence: Option<u8>,
 }
 
 impl CleanupCandidate {
     pub fn is_executable(&self) -> bool {
-        !self.blocked && self.preflight_errors.is_empty() && self.action != CleanupAction::Blocked
+        !self.blocked
+            && self.preflight_errors.is_empty()
+            && self.action != CleanupAction::Blocked
+            && self.safety_rating.as_deref() != Some("protected")
+    }
+}
+
+/// Enrich findings with safety classifications from the rule engine.
+/// This should be called before `build_candidates` so the safety info
+/// is available in both the findings (for GUI display) and the candidates
+/// (for execution decisions).
+#[allow(dead_code)]
+pub fn enrich_with_safety(findings: &mut [Finding]) {
+    let engine = match crate::safety::rule_engine::SafetyEngine::load_default() {
+        Ok(e) => e,
+        Err(_) => return, // No rules available — skip enrichment.
+    };
+
+    for finding in findings.iter_mut() {
+        if let Target::Path(ref path) = finding.target {
+            if let Some(classification) = engine.classify(&path.to_string_lossy()) {
+                finding.safety_rating = Some(classification.rating.label().to_string());
+                finding.safety_rule = Some(classification.rule_name.clone());
+                finding.safety_explanation = Some(classification.explanation());
+                finding.safety_confidence = Some(classification.confidence);
+            }
+        }
     }
 }
 
 /// Build a list of cleanup candidates from findings, applying policy and
-/// preflight validation.
+/// preflight validation. Also applies safety classifications from the
+/// rule engine to block protected paths and provide explanations.
 pub fn build_candidates(findings: &[Finding], policy: &CleanupPolicy) -> Vec<CleanupCandidate> {
+    // Load safety engine for classification.
+    let safety_engine = crate::safety::rule_engine::SafetyEngine::load_default().ok();
+
     let mut candidates = Vec::new();
     for finding in findings {
         let path = match &finding.target {
             Target::Path(p) => p.clone(),
             _ => continue,
         };
-        let action = policy.action_for(&finding.category);
+
+        // Get safety classification — prefer finding's existing one, else classify.
+        let classification = if finding.safety_rating.is_some() {
+            // Already enriched.
+            None
+        } else if let Some(ref engine) = safety_engine {
+            engine.classify(&path.to_string_lossy())
+        } else {
+            None
+        };
+
+        // Determine action: safety rating overrides policy for protected.
+        let action = if classification
+            .as_ref()
+            .map(|c| c.rating.is_protected())
+            .unwrap_or(false)
+            || finding.safety_rating.as_deref() == Some("protected")
+        {
+            CleanupAction::Blocked
+        } else {
+            policy.action_for(&finding.category)
+        };
+
         let risk = super::policy::risk_for_category(&finding.category);
+        let reason = finding
+            .safety_explanation
+            .clone()
+            .unwrap_or_else(|| finding.description.clone());
+
         let mut candidate = CleanupCandidate {
             finding_id: finding.id.clone(),
             path,
@@ -45,10 +110,26 @@ pub fn build_candidates(findings: &[Finding], policy: &CleanupPolicy) -> Vec<Cle
             size_bytes: finding.size_bytes.unwrap_or(0),
             action,
             risk,
-            reason: finding.description.clone(),
+            reason,
             preflight_errors: Vec::new(),
             preflight_warnings: Vec::new(),
             blocked: false,
+            safety_rating: finding.safety_rating.clone().or_else(|| {
+                classification
+                    .as_ref()
+                    .map(|c| c.rating.label().to_string())
+            }),
+            safety_explanation: finding
+                .safety_explanation
+                .clone()
+                .or_else(|| classification.as_ref().map(|c| c.explanation())),
+            safety_rule: finding
+                .safety_rule
+                .clone()
+                .or_else(|| classification.as_ref().map(|c| c.rule_name.clone())),
+            safety_confidence: finding
+                .safety_confidence
+                .or_else(|| classification.as_ref().map(|c| c.confidence)),
         };
         apply_preflight(&mut candidate, policy);
         candidates.push(candidate);

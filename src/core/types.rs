@@ -217,6 +217,20 @@ pub struct Finding {
     pub remediation_hint: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size_bytes: Option<u64>,
+    /// Safety classification from the rule engine (safe/review/protected).
+    /// Populated by the safety engine during preflight. None means unclassified.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub safety_rating: Option<String>,
+    /// Human-readable explanation of why this file is safe/risky to remove.
+    /// Includes the rule name, confidence, and description.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub safety_explanation: Option<String>,
+    /// The safety rule that matched this finding (if any).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub safety_rule: Option<String>,
+    /// Confidence score 0-100 from the safety rule.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub safety_confidence: Option<u8>,
 }
 
 impl Finding {
@@ -240,6 +254,10 @@ impl Finding {
             discovered_at: SystemTime::now(),
             remediation_hint: None,
             size_bytes: None,
+            safety_rating: None,
+            safety_explanation: None,
+            safety_rule: None,
+            safety_confidence: None,
         }
     }
 
@@ -255,6 +273,22 @@ impl Finding {
 
     pub fn with_metadata(mut self, key: impl Into<String>, value: serde_json::Value) -> Self {
         self.metadata.insert(key.into(), value);
+        self
+    }
+
+    /// Attach a safety classification to this finding.
+    #[allow(dead_code)]
+    pub fn with_safety(
+        mut self,
+        rating: &str,
+        rule_name: &str,
+        explanation: &str,
+        confidence: u8,
+    ) -> Self {
+        self.safety_rating = Some(rating.to_string());
+        self.safety_rule = Some(rule_name.to_string());
+        self.safety_explanation = Some(explanation.to_string());
+        self.safety_confidence = Some(confidence);
         self
     }
 }

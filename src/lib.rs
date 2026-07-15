@@ -4,6 +4,7 @@ pub mod config;
 pub mod core;
 pub mod engines;
 pub mod intelligence;
+pub mod safety;
 pub mod twin;
 pub mod util;
 

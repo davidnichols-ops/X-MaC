@@ -12,6 +12,7 @@ mod core;
 mod engines;
 mod intelligence;
 mod mcp;
+mod safety;
 mod twin;
 mod util;
 

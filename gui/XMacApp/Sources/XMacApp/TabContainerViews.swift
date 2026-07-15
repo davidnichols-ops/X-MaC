@@ -197,3 +197,61 @@ struct OptimizationTabView: View {
         .background(XTheme.voidGradient)
     }
 }
+
+// MARK: - Timeline Tab View
+// Combines Event Timeline and What Changed? into one tab
+
+struct TimelineTabView: View {
+    @EnvironmentObject var runner: XMacRunner
+    @State private var selectedSubTab: SubTab = .events
+
+    enum SubTab: String, CaseIterable, Identifiable {
+        case events = "Event Timeline"
+        case whatChanged = "What Changed?"
+        var id: String { rawValue }
+        var icon: String {
+            switch self {
+            case .events: return "timeline"
+            case .whatChanged: return "arrow.triangle.2.circlepath"
+            }
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Sub-tab picker
+            HStack(spacing: 4) {
+                ForEach(SubTab.allCases) { tab in
+                    Button(action: { selectedSubTab = tab }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: tab.icon)
+                                .font(.system(size: 11))
+                            Text(tab.rawValue)
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(selectedSubTab == tab ? XTheme.accent.opacity(0.2) : Color.clear)
+                        .foregroundStyle(selectedSubTab == tab ? XTheme.accent : XTheme.textSecondary)
+                        .cornerRadius(6)
+                    }
+                    .buttonStyle(.plain)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 10)
+
+            Divider().background(XTheme.cardBorder)
+
+            // Content
+            switch selectedSubTab {
+            case .events:
+                TimelineView()
+            case .whatChanged:
+                WhatChangedView()
+            }
+        }
+        .background(XTheme.voidGradient)
+    }
+}
