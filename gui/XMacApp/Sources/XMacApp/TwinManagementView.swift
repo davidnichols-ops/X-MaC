@@ -5,6 +5,7 @@ import SwiftUI
 
 struct TwinManagementView: View {
     @EnvironmentObject var runner: XMacRunner
+    @EnvironmentObject var router: AppRouter
     @State private var durationOption: DurationOption = .thirtySeconds
     @State private var showingInitConfirmation = false
     @State private var showingCompactConfirmation = false
@@ -263,7 +264,7 @@ struct TwinManagementView: View {
                     .foregroundStyle(XTheme.textSecondary)
 
                 Button {
-                    runner.scanMode = .whatChanged
+                    router.navigate(to: .historyWhatChanged)
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "arrow.triangle.2.circlepath")

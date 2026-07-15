@@ -1,4 +1,4 @@
-# X-MaC Digital Twin — Operations Manifest
+# X-MaC — Operations Manifest
 
 630 technical operations mapped to X-MaC engine/module locations.
 Each op has: ID, name, target engine/module, status (existing/extend/new), and implementation notes.

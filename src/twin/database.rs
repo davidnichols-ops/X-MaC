@@ -1,4 +1,4 @@
-// X-MaC Digital Twin Database — persistent event-sourced storage
+// X-MaC Database — persistent event-sourced storage
 //
 // The SQLite database is the source of truth. The KnowledgeGraph is a
 // materialized view built from events. This enables temporal queries:

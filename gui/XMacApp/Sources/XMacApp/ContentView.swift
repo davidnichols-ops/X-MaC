@@ -63,48 +63,61 @@ struct ContentView: View {
         case .home:
             HomeView()
 
-        case .exploreSystem:
-            systemDetailView
+        // Digital Twin — first-class section
+        case .twinDashboard:
+            TwinDashboardView()
+        case .twinHardware:
+            TwinHardwareView()
+        case .twinSoftware:
+            TwinSoftwareView()
+        case .twinFilesystem:
+            TwinFilesystemView()
+        case .twinProcesses:
+            TwinProcessView()
+        case .twinMemory:
+            TwinMemoryView()
+        case .twinEnergy:
+            TwinEnergyView()
+        case .twinApps:
+            TwinAppIntelligenceView()
+        case .twinReasoning:
+            TwinReasoningView()
+        case .twinManagement:
+            TwinManagementView()
 
+        // Explore — non-twin system views
         case .exploreApplications:
             AppInventoryView()
-
-        case .exploreFilesystem:
-            filesystemDetailView
-
+        case .exploreDisk:
+            DiskView()
         case .exploreActivity:
             activityDetailView
 
+        // Improve
         case .improveQuickScan:
             QuickScanView()
-
         case .improveClean:
             CleanView()
-
         case .improveNeuralScan:
             NeuralScanView()
-
         case .improveZenMode:
             ZenView()
-
         case .improveAIAdvisor:
             AdvisorView()
 
+        // History
         case .historyWhatChanged:
             WhatChangedView()
-
         case .historyScanHistory:
             ScanHistoryView()
 
+        // Control
         case .controlAutomation:
             AutomationView()
-
         case .controlSafety:
             SafetyView()
-
         case .controlDiagnostics:
             DiagnosticsView()
-
         case .controlSettings:
             SettingsView()
         }
@@ -113,48 +126,10 @@ struct ContentView: View {
     // MARK: - Sub-destination routing
 
     @ViewBuilder
-    private var systemDetailView: some View {
-        switch router.selectedSubDestination?.id {
-        case "hardware":
-            TwinHardwareView()
-        case "software":
-            TwinSoftwareView()
-        case "memory":
-            TwinMemoryView()
-        case "energy":
-            TwinEnergyView()
-        default:
-            TwinDashboardView()
-        }
-    }
-
-    @ViewBuilder
-    private var filesystemDetailView: some View {
-        switch router.selectedSubDestination?.id {
-        case "disk":
-            DiskView()
-        case "clean":
-            CleanView()
-        case "integrity":
-            DepthView()
-        case "safety":
-            SafetyView()
-        default:
-            DiskView()
-        }
-    }
-
-    @ViewBuilder
     private var activityDetailView: some View {
         switch router.selectedSubDestination?.id {
-        case "processes":
-            TwinProcessView()
-        case "memory":
-            TwinMemoryView()
         case "ramboost":
             RamBoostView()
-        case "energy":
-            TwinEnergyView()
         default:
             TwinProcessView()
         }

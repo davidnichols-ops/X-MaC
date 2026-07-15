@@ -4,6 +4,7 @@ import SwiftUI
 
 struct TwinDashboardView: View {
     @EnvironmentObject var runner: XMacRunner
+    @EnvironmentObject var router: AppRouter
 
     var body: some View {
         ScrollView {
@@ -164,7 +165,7 @@ struct TwinDashboardView: View {
                             }
                         }
                         if twin.processes.anomalies.count > 5 {
-                            Button("View all \(twin.processes.anomalies.count)") { runner.openTwinProcesses() }
+                            Button("View all \(twin.processes.anomalies.count)") { router.navigate(to: .twinProcesses) }
                                 .buttonStyle(.borderless)
                                 .font(.system(size: 11))
                                 .tint(XTheme.accent)
@@ -238,19 +239,9 @@ struct TwinDashboardView: View {
         }
     }
 
-    private func twinNavCard(icon: String, title: String, subtitle: String, destination: XMacRunner.ScanMode) -> some View {
+    private func twinNavCard(icon: String, title: String, subtitle: String, destination: NavigationDestination) -> some View {
         Button {
-            switch destination {
-            case .twinHardware: runner.openTwinHardware()
-            case .twinSoftware: runner.openTwinSoftware()
-            case .twinFilesystem: runner.openTwinFilesystem()
-            case .twinProcesses: runner.openTwinProcesses()
-            case .twinMemory: runner.openTwinMemory()
-            case .twinEnergy: runner.openTwinEnergy()
-            case .twinApps: runner.openTwinApps()
-            case .twinReasoning: runner.openTwinReasoning()
-            default: break
-            }
+            router.navigate(to: destination)
         } label: {
             XCard {
                 HStack(spacing: 12) {

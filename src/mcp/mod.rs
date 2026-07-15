@@ -395,7 +395,7 @@ fn handle_request(method: &str, params: &Value, auth_token: &str) -> Value {
                 "tools": {}
             },
             "serverInfo": {
-                "name": "xmac-digital-twin",
+                "name": "xmac",
                 "version": "2.1.1"
             }
         }),

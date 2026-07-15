@@ -86,13 +86,7 @@ final class XMacRunner: ObservableObject {
     @Published var showActivityBanner: Bool = false
 
     enum ScanMode: String {
-        // 10-tab architecture
-        case overview, system, applications, filesystem, activity, optimization, intelligence, timeline, automation, assistant, settings
-        // Legacy / sub-modes
-        case dashboard, idle, full, clean, maintain, disk, neural, apps, history, ramBoost, zen, advisor
-        case twin, twinHardware, twinSoftware, twinFilesystem, twinProcesses, twinMemory, twinEnergy, twinApps, twinReasoning
-        case diagnostics, conflict, envmap, depth, quickScan, purge, configView
-        case whatChanged
+        case idle, full, clean, maintain, disk, neural, zen, advisor
     }
 
     private var appSettings: AppSettings?
@@ -260,114 +254,21 @@ final class XMacRunner: ObservableObject {
         }
     }
 
-    func openDashboard() {
-        guard !isScanning else { return }
-        scanMode = .dashboard
-    }
+    // MARK: - Digital Twin
 
-    func openSettings() {
-        guard !isScanning else { return }
-        scanMode = .settings
-    }
-
-    func openHistory() {
-        guard !isScanning else { return }
-        scanMode = .history
-    }
-
-    func openApps() {
-        guard !isScanning else { return }
-        scanMode = .apps
-    }
-
-    func openAutomation() {
-        guard !isScanning else { return }
-        scanMode = .automation
-    }
-
-    func openRamBoost() {
-        guard !isScanning else { return }
-        scanMode = .ramBoost
-    }
-
-    func openZen() {
-        guard !isScanning else { return }
-        scanMode = .zen
-    }
-
-    func openAdvisor() {
-        guard !isScanning else { return }
-        scanMode = .advisor
-    }
-
-    // MARK: - Digital Twin Navigation
-
-    func openTwin() {
-        guard !isScanning else { return }
-        scanMode = .twin
+    func collectTwinIfNeeded() {
         if digitalTwin == nil && !twinLoading {
             collectTwin()
         }
     }
 
-    func openTwinHardware() { scanMode = .twinHardware }
-    func openTwinSoftware() { scanMode = .twinSoftware }
-    func openTwinFilesystem() { scanMode = .twinFilesystem }
-    func openTwinProcesses() { scanMode = .twinProcesses }
-    func openTwinMemory() { scanMode = .twinMemory }
-    func openTwinEnergy() { scanMode = .twinEnergy }
-    func openTwinApps() { scanMode = .twinApps }
-    func openTwinReasoning() { scanMode = .twinReasoning }
-
-    func openDiagnostics() {
-        guard !isScanning else { return }
-        scanMode = .diagnostics
-    }
-
-    // 10-tab navigation
-    func openOverview() { scanMode = .overview }
-    func openSystem() { scanMode = .system }
-    func openApplicationsTab() { scanMode = .applications }
-    func openFilesystem() { scanMode = .filesystem }
-    func openActivity() { scanMode = .activity }
-    func openOptimization() { scanMode = .optimization }
-    func openIntelligence() { scanMode = .intelligence }
-    func openTimeline() { scanMode = .timeline }
-    func openAssistant() { scanMode = .assistant }
-
-    func openConflict() { scanMode = .conflict }
-    func openEnvmap() { scanMode = .envmap }
-    func openDepth() { scanMode = .depth }
-    func openQuickScan() { scanMode = .quickScan }
-    func openPurge() { scanMode = .purge }
-    func openConfigView() { scanMode = .configView }
-
-    // MARK: - Missing Command Scans
-
-    func runConflictScan() {
-        conflictFindings = []
-        Task {
-            await runCommand([xmacPath, "--format", "json", "conflict"])
-            conflictFindings = findings
-            scanMode = .conflict
-        }
-    }
-
-    func runEnvmapScan() {
-        envmapFindings = []
-        Task {
-            await runCommand([xmacPath, "--format", "json", "envmap"])
-            envmapFindings = findings
-            scanMode = .envmap
-        }
-    }
+    // MARK: - Scan Commands (for detail views)
 
     func runDepthScan() {
         depthFindings = []
         Task {
             await runCommand([xmacPath, "--format", "json", "depth"])
             depthFindings = findings
-            scanMode = .depth
         }
     }
 
@@ -376,18 +277,10 @@ final class XMacRunner: ObservableObject {
         Task {
             await runCommand([xmacPath, "--format", "json", "quick"])
             quickFindings = findings
-            scanMode = .quickScan
         }
     }
 
-    func runFullSystemScan() {
-        fullScanFindings = []
-        Task {
-            await runCommand([xmacPath, "--format", "json", "scan"])
-            fullScanFindings = findings
-            scanMode = .full
-        }
-    }
+    // MARK: - Config
 
     func runConfigShow() {
         Task {

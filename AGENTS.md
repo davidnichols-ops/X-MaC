@@ -1,4 +1,4 @@
-# X-MaC Digital Twin — Agent & Contributor Guide
+# X-MaC — Agent & Contributor Guide
 
 ## Build & Test Commands
 

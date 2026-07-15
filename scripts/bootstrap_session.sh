@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# X-MaC Digital Twin — Session Bootstrap
+# X-MaC — Session Bootstrap
 #
 # Run this at the start of a Devin session to:
 # 1. Verify you're on the correct branch (not main)
@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-echo "=== X-MaC Digital Twin — Session Bootstrap ==="
+echo "=== X-MaC — Session Bootstrap ==="
 echo ""
 
 # 1. Check branch

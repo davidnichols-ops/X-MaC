@@ -2,12 +2,13 @@ import SwiftUI
 
 // MARK: - NavigationDestination
 //
-// Replaces the 35-case ScanMode enum with a clean, hierarchical navigation model.
-// Five primary sections, each with clearly named destinations.
-// Labels describe user outcomes, not internal engine names.
+// 6-section navigation model with a dedicated Digital Twin control panel.
+// The Digital Twin section surfaces all 10 twin dimensions as first-class
+// destinations — no longer buried under Explore > System.
 
 enum NavigationSection: String, CaseIterable, Identifiable {
     case home
+    case twin
     case explore
     case improve
     case history
@@ -18,6 +19,7 @@ enum NavigationSection: String, CaseIterable, Identifiable {
     var label: String {
         switch self {
         case .home: return "Home"
+        case .twin: return "Digital Twin"
         case .explore: return "Explore"
         case .improve: return "Improve"
         case .history: return "History"
@@ -28,6 +30,7 @@ enum NavigationSection: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .home: return "house.fill"
+        case .twin: return "circle.hexagongrid.fill"
         case .explore: return "rectangle.expand.vertical"
         case .improve: return "wand.and.stars"
         case .history: return "clock.fill"
@@ -38,7 +41,8 @@ enum NavigationSection: String, CaseIterable, Identifiable {
     var destinations: [NavigationDestination] {
         switch self {
         case .home: return [.home]
-        case .explore: return [.exploreSystem, .exploreApplications, .exploreFilesystem, .exploreActivity]
+        case .twin: return [.twinDashboard, .twinHardware, .twinSoftware, .twinFilesystem, .twinProcesses, .twinMemory, .twinEnergy, .twinApps, .twinReasoning, .twinManagement]
+        case .explore: return [.exploreApplications, .exploreDisk, .exploreActivity]
         case .improve: return [.improveQuickScan, .improveClean, .improveNeuralScan, .improveZenMode, .improveAIAdvisor]
         case .history: return [.historyWhatChanged, .historyScanHistory]
         case .control: return [.controlAutomation, .controlSafety, .controlDiagnostics, .controlSettings]
@@ -50,11 +54,22 @@ enum NavigationDestination: String, CaseIterable, Identifiable, Hashable {
     // Home
     case home
 
-    // Explore
-    case exploreSystem       // Digital Twin: hardware, software, memory, energy
-    case exploreApplications // App inventory
-    case exploreFilesystem   // Disk, clean, depth, safety
-    case exploreActivity     // Processes, memory, RAM boost, energy
+    // Digital Twin — first-class section with all 10 twin dimensions
+    case twinDashboard     // Overview: health scores, trust, anomalies
+    case twinHardware      // CPU, GPU, Neural Engine, Memory, Storage, Battery
+    case twinSoftware      // Software Genome: apps, frameworks, dylibs, kexts
+    case twinFilesystem    // Filesystem Graph: size, duplicates, orphans, growth
+    case twinProcesses     // Process Intelligence: tree, anomalies, bottlenecks
+    case twinMemory        // Memory Intelligence: pressure, swap, leaks
+    case twinEnergy        // Energy Twin: battery, consumers, thermal, wake
+    case twinApps          // App Intelligence: health, crash probability, unused
+    case twinReasoning     // Reasoning Engine: ask, predict, simulate, recommend
+    case twinManagement    // Twin DB lifecycle, observers, compaction
+
+    // Explore — non-twin system views
+    case exploreApplications // App inventory (installed apps, sizes)
+    case exploreDisk         // Disk usage (large files, directory breakdown)
+    case exploreActivity     // Live activity: processes, RAM boost
 
     // Improve
     case improveQuickScan    // Quick composite scan
@@ -80,17 +95,31 @@ enum NavigationDestination: String, CaseIterable, Identifiable, Hashable {
     var label: String {
         switch self {
         case .home: return "Home"
-        case .exploreSystem: return "System"
+        // Digital Twin
+        case .twinDashboard: return "Dashboard"
+        case .twinHardware: return "Hardware"
+        case .twinSoftware: return "Software"
+        case .twinFilesystem: return "Filesystem"
+        case .twinProcesses: return "Processes"
+        case .twinMemory: return "Memory"
+        case .twinEnergy: return "Energy"
+        case .twinApps: return "Apps"
+        case .twinReasoning: return "Reasoning"
+        case .twinManagement: return "Management"
+        // Explore
         case .exploreApplications: return "Applications"
-        case .exploreFilesystem: return "Filesystem"
+        case .exploreDisk: return "Disk Usage"
         case .exploreActivity: return "Activity"
+        // Improve
         case .improveQuickScan: return "Quick Scan"
         case .improveClean: return "Clean"
         case .improveNeuralScan: return "Neural Scan"
         case .improveZenMode: return "Zen Mode"
         case .improveAIAdvisor: return "AI Advisor"
+        // History
         case .historyWhatChanged: return "What Changed?"
         case .historyScanHistory: return "Scan History"
+        // Control
         case .controlAutomation: return "Automation"
         case .controlSafety: return "Safety"
         case .controlDiagnostics: return "Diagnostics"
@@ -101,17 +130,31 @@ enum NavigationDestination: String, CaseIterable, Identifiable, Hashable {
     var icon: String {
         switch self {
         case .home: return "house.fill"
-        case .exploreSystem: return "cpu.fill"
+        // Digital Twin
+        case .twinDashboard: return "circle.hexagongrid.fill"
+        case .twinHardware: return "cpu.fill"
+        case .twinSoftware: return "shippingbox.fill"
+        case .twinFilesystem: return "internaldrive"
+        case .twinProcesses: return "gearshape.2.fill"
+        case .twinMemory: return "memorychip.fill"
+        case .twinEnergy: return "bolt.fill"
+        case .twinApps: return "app.badge"
+        case .twinReasoning: return "lightbulb.fill"
+        case .twinManagement: return "externaldrive.connected.to.line.below"
+        // Explore
         case .exploreApplications: return "app.badge"
-        case .exploreFilesystem: return "internaldrive"
+        case .exploreDisk: return "internaldrive"
         case .exploreActivity: return "chart.bar.fill"
+        // Improve
         case .improveQuickScan: return "bolt.circle"
         case .improveClean: return "trash.circle"
         case .improveNeuralScan: return "brain"
         case .improveZenMode: return "circle.hexagongrid"
         case .improveAIAdvisor: return "brain.head.profile"
+        // History
         case .historyWhatChanged: return "arrow.triangle.2.circlepath"
         case .historyScanHistory: return "clock.arrow.circlepath"
+        // Control
         case .controlAutomation: return "gearshape.arrow.triangle.2.circlepath"
         case .controlSafety: return "shield.lefthalf.filled"
         case .controlDiagnostics: return "stethoscope"
@@ -122,37 +165,24 @@ enum NavigationDestination: String, CaseIterable, Identifiable, Hashable {
     var section: NavigationSection {
         switch self {
         case .home: return .home
-        case .exploreSystem, .exploreApplications, .exploreFilesystem, .exploreActivity: return .explore
+        case .twinDashboard, .twinHardware, .twinSoftware, .twinFilesystem,
+             .twinProcesses, .twinMemory, .twinEnergy, .twinApps,
+             .twinReasoning, .twinManagement: return .twin
+        case .exploreApplications, .exploreDisk, .exploreActivity: return .explore
         case .improveQuickScan, .improveClean, .improveNeuralScan, .improveZenMode, .improveAIAdvisor: return .improve
         case .historyWhatChanged, .historyScanHistory: return .history
         case .controlAutomation, .controlSafety, .controlDiagnostics, .controlSettings: return .control
         }
     }
 
-    // MARK: - Sub-destinations for tabs that have them
+    // MARK: - Sub-destinations (only for Explore > Activity)
 
     var subDestinations: [SubDestination]? {
         switch self {
-        case .exploreSystem:
-            return [
-                SubDestination(id: "hardware", label: "Hardware", icon: "cpu"),
-                SubDestination(id: "software", label: "Software", icon: "shippingbox.fill"),
-                SubDestination(id: "memory", label: "Memory", icon: "memorychip.fill"),
-                SubDestination(id: "energy", label: "Energy", icon: "bolt.fill"),
-            ]
-        case .exploreFilesystem:
-            return [
-                SubDestination(id: "disk", label: "Disk Usage", icon: "internaldrive"),
-                SubDestination(id: "clean", label: "Clean", icon: "trash.circle"),
-                SubDestination(id: "integrity", label: "Integrity", icon: "checkmark.shield"),
-                SubDestination(id: "safety", label: "Safety", icon: "shield.lefthalf.filled"),
-            ]
         case .exploreActivity:
             return [
                 SubDestination(id: "processes", label: "Processes", icon: "gearshape.2.fill"),
-                SubDestination(id: "memory", label: "Memory", icon: "memorychip.fill"),
                 SubDestination(id: "ramboost", label: "RAM Boost", icon: "bolt.fill"),
-                SubDestination(id: "energy", label: "Energy", icon: "flame.fill"),
             ]
         default:
             return nil
@@ -169,7 +199,6 @@ struct SubDestination: Hashable, Identifiable {
 // MARK: - AppRouter
 //
 // Single source of truth for navigation state.
-// Replaces the scanMode property on XMacRunner.
 
 @MainActor
 final class AppRouter: ObservableObject {
@@ -190,6 +219,7 @@ final class AppRouter: ObservableObject {
 
     // Convenience methods
     func goHome() { navigate(to: .home) }
+    func goTwinDashboard() { navigate(to: .twinDashboard) }
     func goQuickScan() { navigate(to: .improveQuickScan) }
     func goClean() { navigate(to: .improveClean) }
     func goNeuralScan() { navigate(to: .improveNeuralScan) }

@@ -1,4 +1,4 @@
-// X-MaC Digital Twin - twin module
+// X-MaC - twin module
 //
 // This module implements the macOS Digital Twin: a live computational model
 // of the Mac's hardware, software, filesystem, processes, memory, energy,

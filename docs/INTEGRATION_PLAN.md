@@ -1,4 +1,4 @@
-# X-MaC Digital Twin — Integration Plan
+# X-MaC — Integration Plan
 
 ## Overview
 

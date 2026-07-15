@@ -74,7 +74,7 @@ struct XMacApp: App {
                 Button("Home") { router.goHome() }
                     .keyboardShortcut("1", modifiers: [.command])
 
-                Button("Explore — System") { router.navigate(to: .exploreSystem) }
+                Button("Digital Twin — Dashboard") { router.navigate(to: .twinDashboard) }
                     .keyboardShortcut("2", modifiers: [.command])
 
                 Button("Improve — Clean") { router.navigate(to: .improveClean) }
