@@ -4,8 +4,8 @@ import Combine
 // MARK: - Stderr logging helper
 
 private func logStderr(_ message: String) {
-    message.withCString { cstr in
-        fputs(cstr, stderr)
+    message.withCString { cstr -> Void in
+        _ = fputs(cstr, stderr)
     }
 }
 

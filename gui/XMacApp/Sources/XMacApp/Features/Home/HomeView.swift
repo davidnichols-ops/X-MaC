@@ -59,8 +59,8 @@ struct HomeView: View {
         guard !hasLoadedTwin else { return }
         hasLoadedTwin = true
         loadTask = Task {
-            await runner.collectTwin()
-            await runner.queryWhatChanged(since: "24h")
+            runner.collectTwin()
+            runner.queryWhatChanged(since: "24h")
         }
     }
 

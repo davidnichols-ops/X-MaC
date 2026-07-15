@@ -111,7 +111,7 @@ struct RamBoostView: View {
             refreshTimer?.invalidate()
             refreshTimer = nil
         }
-        .onChange(of: autoRefresh) { enabled in
+        .onChange(of: autoRefresh) { _, enabled in
             if enabled {
                 refreshTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { _ in
                     Task { await runner.runOptimize(topN: 15) }
