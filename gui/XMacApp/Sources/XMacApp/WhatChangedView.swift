@@ -127,7 +127,7 @@ struct WhatChangedView: View {
             .padding(20)
         }
         .background(XTheme.voidGradient)
-        .onAppear {
+        .task {
             if runner.whatChanged == nil && !runner.whatChangedLoading {
                 runner.queryWhatChanged(since: sinceOption.rawValue)
             }

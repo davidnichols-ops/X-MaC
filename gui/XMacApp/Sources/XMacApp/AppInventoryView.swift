@@ -95,7 +95,7 @@ struct AppInventoryView: View {
             }
         }
         .background(XTheme.voidGradient)
-        .onAppear { if apps.isEmpty && !isLoading { scan() } }
+        .task { if apps.isEmpty && !isLoading { scan() } }
     }
 
     // MARK: - Header
@@ -176,7 +176,15 @@ struct AppInventoryView: View {
 
     private var appList: some View {
         VStack(spacing: 0) {
-            if isLoading && apps.isEmpty {
+            if let err = errorMessage {
+                Spacer()
+                XErrorState(
+                    summary: "Failed to scan applications",
+                    detail: err,
+                    retryAction: { errorMessage = nil; scan() }
+                )
+                Spacer()
+            } else if isLoading && apps.isEmpty {
                 Spacer()
                 VStack(spacing: 12) {
                     ProgressView()

@@ -98,6 +98,13 @@ final class XMacRunner: ObservableObject {
     private var binaryPathObserver: NSObjectProtocol?
     private var currentProcess: Process?
 
+    deinit {
+        if let observer = binaryPathObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        currentScanTask?.cancel()
+    }
+
     func configure(settings: AppSettings, profiles: ProfileStore) {
         appSettings = settings
         profileStore = profiles

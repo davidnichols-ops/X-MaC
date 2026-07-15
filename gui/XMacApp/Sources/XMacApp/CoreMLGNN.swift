@@ -6,10 +6,32 @@ struct TimeoutError: Error {}
 /// Non-isolated: model loading and inference are intentionally run off the
 /// main actor so a hung CoreML prediction cannot freeze the UI. The result is
 /// returned to the main-actor caller for UI updates.
+///
+/// Thread safety: shared state (model, labelMap, reverseLabelMap) is protected
+/// by an NSLock to prevent race conditions on concurrent predict() calls.
 final class CoreMLGNNManager {
-    private var model: MLModel?
-    private var labelMap: [String: Int] = [:]
-    private var reverseLabelMap: [Int: String] = [:]
+    private let stateLock = NSLock()
+    private var _model: MLModel?
+    private var _labelMap: [String: Int] = [:]
+    private var _reverseLabelMap: [Int: String] = [:]
+
+    private var model: MLModel? {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return _model
+    }
+
+    private var labelMap: [String: Int] {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return _labelMap
+    }
+
+    private var reverseLabelMap: [Int: String] {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return _reverseLabelMap
+    }
 
     init() {
         loadLabelMap()
@@ -22,12 +44,19 @@ final class CoreMLGNNManager {
             print("[CoreMLGNN] label_map.json not found in bundle")
             return
         }
-        labelMap = json
-        reverseLabelMap = Dictionary(uniqueKeysWithValues: json.map { ($0.value, $0.key) })
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        _labelMap = json
+        _reverseLabelMap = Dictionary(uniqueKeysWithValues: json.map { ($0.value, $0.key) })
     }
 
     private func loadModel() -> MLModel? {
-        if let m = model { return m }
+        stateLock.lock()
+        if let m = _model {
+            stateLock.unlock()
+            return m
+        }
+        stateLock.unlock()
 
         // Try loading compiled model from cache first
         let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
@@ -39,7 +68,9 @@ final class CoreMLGNNManager {
             do {
                 let m = try MLModel(contentsOf: compiledCacheURL)
                 print("[CoreMLGNN] Compiled model loaded from cache.")
-                model = m
+                stateLock.lock()
+                _model = m
+                stateLock.unlock()
                 return m
             } catch {
                 print("[CoreMLGNN] Cached model failed, recompiling...")
@@ -64,7 +95,9 @@ final class CoreMLGNNManager {
 
             let m = try MLModel(contentsOf: compiledCacheURL)
             print("[CoreMLGNN] Model compiled and loaded.")
-            model = m
+            stateLock.lock()
+            _model = m
+            stateLock.unlock()
             return m
         } catch {
             print("[CoreMLGNN] Compilation failed: \(error)")
