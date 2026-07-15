@@ -765,7 +765,7 @@ struct TwinEnergyView: View {
                 XCard {
                     VStack(alignment: .leading, spacing: 8) {
                         XSectionHeader(title: "Energy Consumers", icon: "bolt.fill", count: energy.energy_consumers.count)
-                        ForEach(energy.energy_consumers.sorted { $0.power_mw > $1.power_mw }.prefix(20)) { c in
+                        ForEach(energy.energy_consumers.sorted { $0.energy_impact > $1.energy_impact }.prefix(20)) { c in
                             HStack(spacing: 8) {
                                 Image(systemName: "bolt.fill")
                                     .foregroundStyle(XTheme.medium)
@@ -777,7 +777,7 @@ struct TwinEnergyView: View {
                                     .font(.system(size: 10))
                                     .foregroundStyle(XTheme.textTertiary)
                                 Spacer()
-                                Text(String(format: "%.0f mW", c.power_mw))
+                                Text(String(format: "%.0f/100", c.energy_impact))
                                     .font(.system(size: 11, design: .monospaced))
                                     .foregroundStyle(XTheme.medium)
                             }

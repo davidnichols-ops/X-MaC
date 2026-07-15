@@ -353,7 +353,7 @@ struct IntelligenceView: View {
                     if !twin.energy.energy_consumers.isEmpty {
                         entitySection("Energy Consumers", icon: "bolt.fill", color: XTheme.danger) {
                             ForEach(Array(twin.energy.energy_consumers.prefix(10))) { consumer in
-                                entityRow(consumer.name, "\(Int(consumer.power_mw)) impact", "energy")
+                                entityRow(consumer.name, "\(Int(consumer.energy_impact)) impact", "energy")
                             }
                         }
                     }
@@ -571,12 +571,12 @@ struct TimelineView: View {
                 }
 
                 // Energy offenders
-                ForEach(Array(twin.energy.energy_consumers.filter { $0.power_mw > 50 }.prefix(5))) { consumer in
+                ForEach(Array(twin.energy.energy_consumers.filter { $0.energy_impact > 50 }.prefix(5))) { consumer in
                     eventRow(
                         icon: "bolt.fill",
                         color: XTheme.danger,
                         title: "Energy Consumer: \(consumer.name)",
-                        description: "Energy impact: \(Int(consumer.power_mw))/100 (\(consumer.category))",
+                        description: "Energy impact: \(Int(consumer.energy_impact))/100 (\(consumer.category))",
                         category: "energy"
                     )
                 }
@@ -596,7 +596,7 @@ struct TimelineView: View {
         let leaks = twin.memory.leak_candidates.count
         let storage = (twin.filesystem.exhaustion_forecast_days.map { $0 < 60 ? 1 : 0 } ?? 0)
         let suspicious = twin.applications.suspicious_apps.count
-        let energy = twin.energy.energy_consumers.filter { $0.power_mw > 50 }.count
+        let energy = twin.energy.energy_consumers.filter { $0.energy_impact > 50 }.count
         return anomalies + leaks + storage + suspicious + energy
     }
 

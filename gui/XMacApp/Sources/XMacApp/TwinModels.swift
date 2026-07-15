@@ -291,11 +291,12 @@ struct BatteryModel: Codable {
 }
 
 struct EnergyConsumer: Codable, Identifiable {
+    let pid: UInt32
     let name: String
-    let power_mw: Double
+    let energy_impact: Double
     let category: String
 
-    var id: String { name }
+    var id: UInt32 { pid }
 }
 
 struct WakeEvent: Codable, Identifiable {
