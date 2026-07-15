@@ -193,7 +193,7 @@ struct ScoreCard: View {
 
                 ZStack {
                     Circle()
-                        .stroke(Color.gray.opacity(0.2), lineWidth: 4)
+                        .stroke(XTheme.color.textTertiary.opacity(0.2), lineWidth: 4)
                     Circle()
                         .trim(from: 0, to: score / 100)
                         .stroke(color, style: StrokeStyle(lineWidth: 4, lineCap: .round))
@@ -729,7 +729,7 @@ struct AssistantView: View {
             VStack(alignment: msg.isUser ? .trailing : .leading, spacing: 4) {
                 Text(msg.content)
                     .font(.system(size: 13))
-                    .foregroundStyle(msg.isUser ? Color.white : XTheme.textPrimary)
+                    .foregroundStyle(msg.isUser ? XTheme.color.textPrimary : XTheme.color.textPrimary)
                     .padding(12)
                     .background(msg.isUser ? XTheme.accent : XTheme.cardBorder.opacity(0.5))
                     .cornerRadius(12)

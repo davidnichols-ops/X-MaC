@@ -6,6 +6,8 @@ import SwiftUI
 struct TwinManagementView: View {
     @EnvironmentObject var runner: XMacRunner
     @State private var durationOption: DurationOption = .thirtySeconds
+    @State private var showingInitConfirmation = false
+    @State private var showingCompactConfirmation = false
 
     enum DurationOption: String, CaseIterable, Identifiable {
         case tenSeconds = "10s"
@@ -74,7 +76,7 @@ struct TwinManagementView: View {
 
                 HStack(spacing: 12) {
                     Button {
-                        runner.initTwinDb()
+                        showingInitConfirmation = true
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "plus.cylinder")
@@ -93,9 +95,21 @@ struct TwinManagementView: View {
                         )
                     }
                     .buttonStyle(.plain)
+                    .confirmationDialog(
+                        "Initialize digital twin database?",
+                        isPresented: $showingInitConfirmation,
+                        titleVisibility: .visible
+                    ) {
+                        Button("Initialize", role: .destructive) {
+                            runner.initTwinDb()
+                        }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text("This will create a new twin database. If one already exists, it may be replaced.")
+                    }
 
                     Button {
-                        runner.compactTwinDb()
+                        showingCompactConfirmation = true
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "arrow.compress.cylinder")
@@ -114,6 +128,18 @@ struct TwinManagementView: View {
                         )
                     }
                     .buttonStyle(.plain)
+                    .confirmationDialog(
+                        "Compact digital twin database?",
+                        isPresented: $showingCompactConfirmation,
+                        titleVisibility: .visible
+                    ) {
+                        Button("Compact", role: .destructive) {
+                            runner.compactTwinDb()
+                        }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text("This will reclaim unused space in the twin database. The operation may take a few moments.")
+                    }
 
                     Spacer()
 

@@ -229,7 +229,7 @@ struct DiagnosticsView: View {
             }
             .frame(maxHeight: 200)
             .padding(8)
-            .background(Color.black.opacity(0.3))
+            .background(XTheme.color.backgroundCanvas.opacity(0.3))
             .cornerRadius(6)
         }
         .padding(.vertical, 8)

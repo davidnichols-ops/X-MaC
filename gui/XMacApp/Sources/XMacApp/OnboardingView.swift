@@ -19,13 +19,13 @@ struct OnboardingView: View {
         ),
         OnboardingPage(
             icon: "sparkles",
-            iconColors: [XTheme.low, Color(red: 0.20, green: 0.55, blue: 0.30)],
+            iconColors: [XTheme.color.severityLow, XTheme.color.teal],
             title: "One-tap clean, zero surprises",
             body: "Run a Smart Scan in seconds. X-MaC scores every file with an on-device neural network — no cloud, no guessing."
         ),
         OnboardingPage(
             icon: "brain",
-            iconColors: [XTheme.anomaly, Color(red: 0.45, green: 0.25, blue: 0.70)],
+            iconColors: [XTheme.color.statusAnomaly, XTheme.color.neuralBlue],
             title: "GNN scoring, on your device",
             body: "A Graph Neural Network maps relationships between files and directories, catching bloat that simple rules miss."
         ),
@@ -37,7 +37,7 @@ struct OnboardingView: View {
         ),
         OnboardingPage(
             icon: "checkmark.circle.fill",
-            iconColors: [XTheme.safe, Color(red: 0.20, green: 0.60, blue: 0.30)],
+            iconColors: [XTheme.color.statusSafe, XTheme.color.tealDeep],
             title: "You're all set",
             body: "Click Quick Scan below to find space you can safely reclaim right now."
         )
@@ -63,7 +63,7 @@ struct OnboardingView: View {
         GeometryReader { geo in
             RadialGradient(
                 gradient: Gradient(colors: [
-                    Color(red: 0.10, green: 0.20, blue: 0.40).opacity(0.35),
+                    XTheme.color.neuralBlue.opacity(0.35),
                     Color.clear
                 ]),
                 center: .center,
@@ -81,7 +81,7 @@ struct OnboardingView: View {
             ForEach(particles.indices, id: \.self) { i in
                 let particle = particles[i]
                 Circle()
-                    .fill(Color.white.opacity(0.15))
+                    .fill(XTheme.color.textPrimary.opacity(0.15))
                     .frame(width: particle.size, height: particle.size)
                     .position(
                         x: particle.x * geo.size.width,
@@ -131,7 +131,7 @@ struct OnboardingView: View {
             Button("Skip") { finish() }
                 .buttonStyle(.plain)
                 .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(Color(white: 0.65))
+                .foregroundStyle(XTheme.color.textSecondary)
                 .padding(.top, 24)
                 .padding(.trailing, 32)
                 .contentShape(Rectangle())
@@ -162,7 +162,7 @@ struct OnboardingView: View {
 
             Text(page.body)
                 .font(.system(size: 14))
-                .foregroundStyle(Color(white: 0.65))
+                .foregroundStyle(XTheme.color.textSecondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 400)
                 .fixedSize(horizontal: false, vertical: true)
@@ -190,7 +190,7 @@ struct OnboardingView: View {
             Button("Already used X-MaC?") { finish() }
                 .buttonStyle(.plain)
                 .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Color(white: 0.55))
+                .foregroundStyle(XTheme.color.textTertiary)
         }
     }
 
@@ -198,7 +198,7 @@ struct OnboardingView: View {
         HStack(spacing: 12) {
             ForEach(0..<pages.count, id: \.self) { index in
                 Circle()
-                    .fill(index == pageIndex ? XTheme.accent : Color(white: 0.35))
+                    .fill(index == pageIndex ? XTheme.accent : XTheme.color.textTertiary.opacity(0.5))
                     .frame(width: 8, height: 8)
                     .scaleEffect(index == pageIndex ? 1.25 : 1.0)
                     .animation(.easeInOut(duration: 0.25), value: pageIndex)
