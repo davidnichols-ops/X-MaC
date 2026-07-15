@@ -31,7 +31,7 @@ struct ContentView: View {
             case .whatChanged:
                 WhatChangedView()
             case .automation:
-                AutomationView()
+                AutomationTabView()
             case .assistant:
                 AssistantView()
             case .settings:

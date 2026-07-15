@@ -548,6 +548,119 @@ final class XMacRunner: ObservableObject {
         }
     }
 
+    // MARK: - Safety Rules & Path Classification
+
+    @Published var safetyRules: SafetyRulesResponse?
+    @Published var safetyRulesLoading = false
+    @Published var pathClassification: PathClassification?
+    @Published var pathClassificationLoading = false
+
+    func loadSafetyRules() {
+        safetyRulesLoading = true
+        Task {
+            let result = await trackOperation("Load Safety Rules") { () async throws -> SafetyRulesResponse in
+                let args = [self.xmacPath, "--format", "json", "safety", "--action", "list"]
+                let (stdout, _) = try await self.runProcess(args)
+                guard let data = stdout.data(using: .utf8) else {
+                    throw XMacError.invalidOutput("safety list: no data")
+                }
+                return try JSONDecoder().decode(SafetyRulesResponse.self, from: data)
+            }
+            switch result {
+            case .success(let rules):
+                self.safetyRules = rules
+                self.safetyRulesLoading = false
+            case .failure(let err):
+                self.error = err.localizedDescription
+                self.safetyRulesLoading = false
+            }
+        }
+    }
+
+    func classifyPath(_ path: String) {
+        pathClassificationLoading = true
+        Task {
+            let result = await trackOperation("Classify Path") { () async throws -> PathClassification in
+                let args = [self.xmacPath, "--format", "json", "safety", "--action", "classify", "--path", path]
+                let (stdout, _) = try await self.runProcess(args)
+                guard let data = stdout.data(using: .utf8) else {
+                    throw XMacError.invalidOutput("safety classify: no data")
+                }
+                return try JSONDecoder().decode(PathClassification.self, from: data)
+            }
+            switch result {
+            case .success(let classification):
+                self.pathClassification = classification
+                self.pathClassificationLoading = false
+            case .failure(let err):
+                self.error = err.localizedDescription
+                self.pathClassificationLoading = false
+            }
+        }
+    }
+
+    // MARK: - Twin DB Management
+
+    @Published var twinDbInitialized = false
+    @Published var twinDbMessage: String?
+
+    func initTwinDb() {
+        Task {
+            let result = await trackOperation("Init Twin DB") { () async throws -> String in
+                let args = [self.xmacPath, "twin", "--action", "init-db"]
+                let (_, stderr) = try await self.runProcess(args)
+                return stderr
+            }
+            switch result {
+            case .success(let msg):
+                self.twinDbMessage = msg
+                self.twinDbInitialized = true
+            case .failure(let err):
+                self.twinDbMessage = err.localizedDescription
+            }
+        }
+    }
+
+    func compactTwinDb() {
+        Task {
+            let result = await trackOperation("Compact Twin DB") { () async throws -> String in
+                let args = [self.xmacPath, "twin", "--action", "compact"]
+                let (_, stderr) = try await self.runProcess(args)
+                return stderr
+            }
+            switch result {
+            case .success(let msg):
+                self.twinDbMessage = msg
+            case .failure(let err):
+                self.twinDbMessage = err.localizedDescription
+            }
+        }
+    }
+
+    // MARK: - Observer
+
+    @Published var isObserving = false
+    @Published var observeMessage: String?
+
+    func runObservers(duration: String) {
+        isObserving = true
+        Task {
+            let result = await trackOperation("Observe \(duration)") { () async throws -> String in
+                let args = [self.xmacPath, "twin", "--action", "observe", "--duration", duration]
+                let (_, stderr) = try await self.runProcess(args)
+                return stderr
+            }
+            switch result {
+            case .success(let msg):
+                self.observeMessage = msg
+                self.isObserving = false
+            case .failure(let err):
+                self.observeMessage = err.localizedDescription
+                self.isObserving = false
+            }
+        }
+    }
+
     // MARK: - Zen Mode
 
     @Published var zenResult: ZenResult?

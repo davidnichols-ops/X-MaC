@@ -12,6 +12,7 @@ struct FilesystemTabView: View {
         case clean = "Clean"
         case integrity = "FS Integrity"
         case depth = "Depth Scan"
+        case safety = "Safety"
         var id: String { rawValue }
         var icon: String {
             switch self {
@@ -19,6 +20,7 @@ struct FilesystemTabView: View {
             case .clean: return "trash.circle"
             case .integrity: return "checkmark.shield"
             case .depth: return "scope"
+            case .safety: return "shield.lefthalf.filled"
             }
         }
     }
@@ -60,6 +62,8 @@ struct FilesystemTabView: View {
                 DepthView()
             case .depth:
                 DepthView()
+            case .safety:
+                SafetyView()
             }
         }
         .background(XTheme.voidGradient)
@@ -250,6 +254,64 @@ struct TimelineTabView: View {
                 TimelineView()
             case .whatChanged:
                 WhatChangedView()
+            }
+        }
+        .background(XTheme.voidGradient)
+    }
+}
+
+// MARK: - Automation Tab View
+// Combines Automation policy and Twin Management into one tab
+
+struct AutomationTabView: View {
+    @EnvironmentObject var runner: XMacRunner
+    @State private var selectedSubTab: SubTab = .automation
+
+    enum SubTab: String, CaseIterable, Identifiable {
+        case automation = "Automation"
+        case twinManagement = "Twin Management"
+        var id: String { rawValue }
+        var icon: String {
+            switch self {
+            case .automation: return "gearshape.arrow.triangle.2.circlepath"
+            case .twinManagement: return "externaldrive.connected.to.line.below"
+            }
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Sub-tab picker
+            HStack(spacing: 4) {
+                ForEach(SubTab.allCases) { tab in
+                    Button(action: { selectedSubTab = tab }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: tab.icon)
+                                .font(.system(size: 11))
+                            Text(tab.rawValue)
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(selectedSubTab == tab ? XTheme.accent.opacity(0.2) : Color.clear)
+                        .foregroundStyle(selectedSubTab == tab ? XTheme.accent : XTheme.textSecondary)
+                        .cornerRadius(6)
+                    }
+                    .buttonStyle(.plain)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 10)
+
+            Divider().background(XTheme.cardBorder)
+
+            // Content
+            switch selectedSubTab {
+            case .automation:
+                AutomationView()
+            case .twinManagement:
+                TwinManagementView()
             }
         }
         .background(XTheme.voidGradient)

@@ -15,6 +15,10 @@ struct Finding: Identifiable, Codable, Hashable {
     let discovered_at: TimeInfo
     let remediation_hint: String?
     let size_bytes: Int?
+    let safety_rating: String?
+    let safety_explanation: String?
+    let safety_rule: String?
+    let safety_confidence: Int?
 
     var displayName: String { title }
     var sizeFormatted: String {
@@ -41,6 +45,23 @@ struct Finding: Identifiable, Codable, Hashable {
         default: return "info.circle"
         }
     }
+    var safetyColor: Color {
+        switch safety_rating {
+        case "safe": return XTheme.safe
+        case "review": return XTheme.medium
+        case "protected": return XTheme.danger
+        default: return XTheme.textSecondary
+        }
+    }
+    var safetyIcon: String {
+        switch safety_rating {
+        case "safe": return "checkmark.shield.fill"
+        case "review": return "exclamationmark.shield.fill"
+        case "protected": return "xmark.shield.fill"
+        default: return "shield"
+        }
+    }
+    var hasSafetyInfo: Bool { safety_rating != nil }
 }
 
 struct TargetInfo: Codable, Hashable {

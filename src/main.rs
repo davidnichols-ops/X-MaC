@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
 use std::sync::Arc;
 use std::time::Instant;
@@ -41,7 +41,20 @@ async fn main() -> Result<()> {
     let collector_handle = {
         let output_writer = Arc::clone(&output_writer);
         tokio::spawn(async move {
-            while let Some(finding) = rx.recv().await {
+            // Load safety engine once for enriching findings as they arrive.
+            let safety_engine = safety::rule_engine::SafetyEngine::load_default().ok();
+            while let Some(mut finding) = rx.recv().await {
+                // Enrich with safety classification before output.
+                if let Some(ref engine) = safety_engine {
+                    if let core::types::Target::Path(ref path) = finding.target {
+                        if let Some(classification) = engine.classify(&path.to_string_lossy()) {
+                            finding.safety_rating = Some(classification.rating.label().to_string());
+                            finding.safety_rule = Some(classification.rule_name.clone());
+                            finding.safety_explanation = Some(classification.explanation());
+                            finding.safety_confidence = Some(classification.confidence);
+                        }
+                    }
+                }
                 let mut writer = output_writer.lock().await;
                 writer.write_finding(&finding)?;
             }
@@ -131,6 +144,9 @@ async fn main() -> Result<()> {
         cli::args::Commands::Mcp => {
             return mcp::run_server();
         }
+        cli::args::Commands::Safety(args) => {
+            return run_safety(&cli, args.clone());
+        }
     };
 
     drop(ctx);
@@ -141,6 +157,7 @@ async fn main() -> Result<()> {
 
     // Collect findings for the report and/or the fix-script generator.
     // `take_findings` drains the buffer, so we capture once and reuse.
+    // Note: safety enrichment happens in the collector task before output.
     let collected_findings: Vec<Finding> = {
         let mut writer = output_writer.lock().await;
         writer.take_findings()
@@ -1461,4 +1478,170 @@ fn humanize_duration(d: std::time::Duration) -> String {
     } else {
         format!("{}s", secs)
     }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Safety command
+// ═══════════════════════════════════════════════════════════════════════
+
+fn run_safety(cli: &Cli, args: cli::args::SafetyArgs) -> Result<()> {
+    use cli::args::SafetyAction;
+    use safety::rule_engine::SafetyEngine;
+
+    let engine = SafetyEngine::load_default().context("Failed to load safety rules")?;
+
+    match args.action {
+        SafetyAction::List => {
+            let counts = engine.rule_counts();
+            if cli.global.format == cli::args::OutputFormat::Json
+                || cli.global.format == cli::args::OutputFormat::JsonPretty
+            {
+                let output = serde_json::json!({
+                    "total_rules": engine.rules().len(),
+                    "counts_by_rating": counts,
+                    "rules": engine.rules().iter().map(|r| serde_json::json!({
+                        "name": r.name,
+                        "description": r.description,
+                        "rating": r.rating.label(),
+                        "paths": r.paths,
+                        "confidence": r.confidence,
+                        "category": r.category,
+                        "upstream_commit": r.upstream_commit,
+                    })).collect::<Vec<_>>()
+                });
+                if cli.global.format == cli::args::OutputFormat::JsonPretty {
+                    println!("{}", serde_json::to_string_pretty(&output)?);
+                } else {
+                    println!("{}", serde_json::to_string(&output)?);
+                }
+            } else {
+                println!("Safety Rules ({} total)", engine.rules().len());
+                println!(
+                    "  Safe: {} | Review: {} | Protected: {}",
+                    counts.get("safe").copied().unwrap_or(0),
+                    counts.get("review").copied().unwrap_or(0),
+                    counts.get("protected").copied().unwrap_or(0),
+                );
+                println!();
+                for rule in engine.rules() {
+                    println!(
+                        "  [{}] {} (confidence: {}/100)",
+                        rule.rating.label(),
+                        rule.name,
+                        rule.confidence,
+                    );
+                    println!("    {}", rule.description);
+                    for path in &rule.paths {
+                        println!("    → {}", path);
+                    }
+                    println!();
+                }
+            }
+        }
+        SafetyAction::Classify => {
+            let path = args
+                .path
+                .context("--path is required for --action classify")?;
+            match engine.classify(&path) {
+                Some(classification) => {
+                    if cli.global.format == cli::args::OutputFormat::Json
+                        || cli.global.format == cli::args::OutputFormat::JsonPretty
+                    {
+                        let output = serde_json::json!({
+                            "path": classification.path,
+                            "rating": classification.rating.label(),
+                            "rule": classification.rule_name,
+                            "description": classification.rule_description,
+                            "confidence": classification.confidence,
+                            "category": classification.category,
+                            "preselected": classification.preselected,
+                            "explanation": classification.explanation(),
+                        });
+                        if cli.global.format == cli::args::OutputFormat::JsonPretty {
+                            println!("{}", serde_json::to_string_pretty(&output)?);
+                        } else {
+                            println!("{}", serde_json::to_string(&output)?);
+                        }
+                    } else {
+                        println!("Path: {}", classification.path);
+                        println!("Rating: {}", classification.rating.label());
+                        println!("Rule: {}", classification.rule_name);
+                        println!("Description: {}", classification.rule_description);
+                        println!("Confidence: {}/100", classification.confidence);
+                        println!("Preselected: {}", classification.preselected);
+                    }
+                }
+                None => {
+                    if cli.global.format == cli::args::OutputFormat::Json
+                        || cli.global.format == cli::args::OutputFormat::JsonPretty
+                    {
+                        println!(
+                            "{}",
+                            serde_json::json!({
+                                "path": path,
+                                "rating": "unclassified",
+                                "rule": null,
+                                "description": "No matching safety rule found",
+                                "confidence": 0,
+                                "preselected": false
+                            })
+                        );
+                    } else {
+                        println!("Path: {}", path);
+                        println!("Rating: unclassified (no matching rule)");
+                    }
+                }
+            }
+        }
+        SafetyAction::Preview => {
+            let counts = engine.rule_counts();
+            let profile_rules: Vec<_> = engine
+                .rules()
+                .iter()
+                .filter(|r| args.profile == "all" || r.category.as_deref() == Some(&args.profile))
+                .collect();
+
+            if cli.global.format == cli::args::OutputFormat::Json
+                || cli.global.format == cli::args::OutputFormat::JsonPretty
+            {
+                let output = serde_json::json!({
+                    "profile": args.profile,
+                    "total_rules": engine.rules().len(),
+                    "matching_rules": profile_rules.len(),
+                    "safe_rules": counts.get("safe").copied().unwrap_or(0),
+                    "review_rules": counts.get("review").copied().unwrap_or(0),
+                    "protected_rules": counts.get("protected").copied().unwrap_or(0),
+                    "rules": profile_rules.iter().map(|r| serde_json::json!({
+                        "name": r.name,
+                        "rating": r.rating.label(),
+                        "description": r.description,
+                        "confidence": r.confidence,
+                    })).collect::<Vec<_>>()
+                });
+                if cli.global.format == cli::args::OutputFormat::JsonPretty {
+                    println!("{}", serde_json::to_string_pretty(&output)?);
+                } else {
+                    println!("{}", serde_json::to_string(&output)?);
+                }
+            } else {
+                println!("Cleanup Preview (profile: {})", args.profile);
+                println!(
+                    "  {} rules match (of {} total)",
+                    profile_rules.len(),
+                    engine.rules().len()
+                );
+                println!();
+                for rule in &profile_rules {
+                    println!(
+                        "  [{}] {} — {}",
+                        rule.rating.label(),
+                        rule.name,
+                        rule.description
+                    );
+                }
+            }
+        }
+    }
+
+    Ok(())
 }

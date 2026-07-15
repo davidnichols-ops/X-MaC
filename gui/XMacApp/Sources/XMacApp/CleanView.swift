@@ -37,6 +37,19 @@ struct CleanView: View {
         }.sorted { $0.2 > $1.2 }
     }
 
+    private var safetyCounts: (safe: Int, review: Int, protected: Int, unclassified: Int) {
+        var safe = 0, review = 0, protected = 0, unclassified = 0
+        for f in cleanFindings {
+            switch f.safety_rating {
+            case "safe": safe += 1
+            case "review": review += 1
+            case "protected": protected += 1
+            default: unclassified += 1
+            }
+        }
+        return (safe, review, protected, unclassified)
+    }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
@@ -47,12 +60,20 @@ struct CleanView: View {
                 } else if cleanFindings.isEmpty {
                     EmptyScanView(message: "No reclaimable space found. Run a clean scan to see results.")
                 } else {
-                    CleanReclaimCard(
-                        reclaimable: totalReclaimable,
-                        selectedReclaimable: selectedReclaimable,
-                        count: cleanFindings.count,
-                        selectedCount: runner.selectedPaths.count
-                    )
+                    HStack(spacing: 16) {
+                        CleanReclaimCard(
+                            reclaimable: totalReclaimable,
+                            selectedReclaimable: selectedReclaimable,
+                            count: cleanFindings.count,
+                            selectedCount: runner.selectedPaths.count
+                        )
+                        CleanSafetySummaryCard(
+                            safe: safetyCounts.safe,
+                            review: safetyCounts.review,
+                            protected: safetyCounts.protected,
+                            unclassified: safetyCounts.unclassified
+                        )
+                    }
 
                     CleanCategoryBreakdown(
                         breakdown: categoryBreakdown,
@@ -134,6 +155,98 @@ struct CleanReclaimCard: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Safety Summary Card
+
+struct CleanSafetySummaryCard: View {
+    let safe: Int
+    let review: Int
+    let protected: Int
+    let unclassified: Int
+
+    private var total: Int { safe + review + protected + unclassified }
+
+    var body: some View {
+        XCard {
+            VStack(alignment: .leading, spacing: 10) {
+                XSectionHeader(title: "Safety Summary", icon: "shield.lefthalf.filled")
+
+                HStack(spacing: 12) {
+                    SafetyStat(
+                        label: "Safe",
+                        count: safe,
+                        icon: "checkmark.shield.fill",
+                        color: XTheme.safe
+                    )
+                    SafetyStat(
+                        label: "Review",
+                        count: review,
+                        icon: "exclamationmark.shield.fill",
+                        color: XTheme.medium
+                    )
+                    SafetyStat(
+                        label: "Protected",
+                        count: protected,
+                        icon: "xmark.shield.fill",
+                        color: XTheme.danger
+                    )
+                    SafetyStat(
+                        label: "Unclassified",
+                        count: unclassified,
+                        icon: "shield",
+                        color: XTheme.textTertiary
+                    )
+                }
+
+                if total > 0 {
+                    GeometryReader { geo in
+                        let safeRatio = CGFloat(safe) / CGFloat(total)
+                        let reviewRatio = CGFloat(review) / CGFloat(total)
+                        let protectedRatio = CGFloat(protected) / CGFloat(total)
+                        HStack(spacing: 2) {
+                            Rectangle()
+                                .fill(XTheme.safe)
+                                .frame(width: geo.size.width * safeRatio)
+                            Rectangle()
+                                .fill(XTheme.medium)
+                                .frame(width: geo.size.width * reviewRatio)
+                            Rectangle()
+                                .fill(XTheme.danger)
+                                .frame(width: geo.size.width * protectedRatio)
+                            Rectangle()
+                                .fill(XTheme.textTertiary)
+                                .frame(width: geo.size.width * (1 - safeRatio - reviewRatio - protectedRatio))
+                        }
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                    }
+                    .frame(height: 6)
+                }
+            }
+        }
+    }
+}
+
+private struct SafetyStat: View {
+    let label: String
+    let count: Int
+    let icon: String
+    let color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Image(systemName: icon)
+                .font(.system(size: 14))
+                .foregroundStyle(color)
+            Text("\(count)")
+                .font(.system(size: 18, weight: .bold))
+                .foregroundStyle(color)
+            Text(label)
+                .font(.system(size: 10))
+                .foregroundStyle(XTheme.textSecondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

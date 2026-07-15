@@ -204,6 +204,11 @@ pub enum Commands {
     /// as a structured environment for AI agents (Claude, GPT, local models).
     /// The server reads JSON-RPC from stdin and writes to stdout.
     Mcp,
+
+    /// Safety — classify file paths by risk level and list loaded safety
+    /// rules. Every file targeted for cleanup traces to a named rule with
+    /// a rating (safe/review/protected).
+    Safety(SafetyArgs),
 }
 
 impl Commands {
@@ -233,6 +238,7 @@ impl Commands {
             Commands::Completions(_) => crate::core::types::EngineId::All,
             Commands::Twin(_) => crate::core::types::EngineId::All,
             Commands::Mcp => crate::core::types::EngineId::All,
+            Commands::Safety(_) => crate::core::types::EngineId::All,
         }
     }
 }
@@ -927,4 +933,35 @@ pub enum TwinAction {
     Compact,
     /// Run observers for a duration (--duration). Feeds events into the store.
     Observe,
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Safety command
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Arguments for the `safety` command.
+#[derive(Args, Debug, Clone)]
+pub struct SafetyArgs {
+    /// Safety action: classify a path, list all rules, or preview cleanup.
+    #[arg(long, default_value = "list")]
+    pub action: SafetyAction,
+
+    /// Path to classify (used with --action classify).
+    #[arg(long, value_name = "PATH")]
+    pub path: Option<String>,
+
+    /// Cleanup profile to preview (used with --action preview).
+    #[arg(long, value_name = "PROFILE", default_value = "all")]
+    pub profile: String,
+}
+
+/// Actions for the `safety` command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum SafetyAction {
+    /// Classify a single path (--path required).
+    Classify,
+    /// List all loaded safety rules.
+    List,
+    /// Preview cleanup for a profile (--profile).
+    Preview,
 }

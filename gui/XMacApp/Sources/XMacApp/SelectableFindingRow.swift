@@ -38,6 +38,9 @@ struct SelectableFindingRow: View {
                         .font(.system(size: 10))
                         .foregroundStyle(XTheme.textSecondary)
                         .lineLimit(2)
+                    if finding.hasSafetyInfo {
+                        SafetyBadge(finding: finding)
+                    }
                 }
             }
             .padding(.vertical, 5)
@@ -53,5 +56,55 @@ struct SelectableFindingRow: View {
         let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL
         let temp = URL(fileURLWithPath: "/private/tmp").standardizedFileURL
         return url.path.hasPrefix(home.path + "/") || url.path.hasPrefix(temp.path + "/")
+    }
+}
+
+// MARK: - Safety Badge
+
+struct SafetyBadge: View {
+    let finding: Finding
+
+    private var ratingText: String {
+        switch finding.safety_rating {
+        case "safe": return "Safe"
+        case "review": return "Review"
+        case "protected": return "Protected"
+        default: return finding.safety_rating ?? "Unknown"
+        }
+    }
+
+    private var tooltip: String {
+        var parts: [String] = []
+        if let explanation = finding.safety_explanation, !explanation.isEmpty {
+            parts.append(explanation)
+        }
+        if let rule = finding.safety_rule, !rule.isEmpty {
+            parts.append("Rule: \(rule)")
+        }
+        if let confidence = finding.safety_confidence {
+            parts.append("Confidence: \(confidence)%")
+        }
+        return parts.isEmpty ? ratingText : parts.joined(separator: " • ")
+    }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: finding.safetyIcon)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(finding.safetyColor)
+            Text(ratingText)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(finding.safetyColor)
+            if let confidence = finding.safety_confidence {
+                Text("\(confidence)%")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(XTheme.textTertiary)
+            }
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(finding.safetyColor.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .help(tooltip)
     }
 }
