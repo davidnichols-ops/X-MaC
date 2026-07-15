@@ -1032,7 +1032,7 @@ impl ProcessIntelligenceGraph {
 
 /// Collect running processes using `ps aux` (cross-platform).
 /// Returns a list of ProcessNode with resource metrics.
-fn collect_ps_processes() -> Vec<ProcessNode> {
+pub fn collect_ps_processes() -> Vec<ProcessNode> {
     // ps -eo pid,ppid,user,%cpu,%mem,rss,state,comm
     // %mem is percentage of total RAM, rss is in KB
     let output = Command::new("ps")

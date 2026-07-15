@@ -14,6 +14,7 @@ pub mod hardware;
 pub mod knowledge_graph;
 pub mod memory;
 pub mod model;
+pub mod observers;
 pub mod process;
 pub mod reasoning;
 pub mod software_genome;

@@ -1343,6 +1343,39 @@ async fn run_twin(cli: &Cli, args: cli::args::TwinArgs) -> Result<()> {
                 );
             }
         }
+        TwinAction::Observe => {
+            let db_path = twin::database::default_db_path()?;
+            let db = twin::database::TwinDb::open(&db_path)?;
+            let duration = parse_duration(&args.duration)?;
+            eprintln!(
+                "Starting observers for {} (writing to {})",
+                humanize_duration(duration),
+                db_path.display()
+            );
+            eprintln!("Watching processes (5s poll) and filesystem (FSEvents).");
+            eprintln!("Press Ctrl-C to stop early.\n");
+
+            let runner = twin::observers::ObserverRunner::new(db.handle());
+            let stats = runner.run_for(duration).await?;
+
+            eprintln!("\nObserver stats:");
+            eprintln!("  Total events:    {}", stats.total_events);
+            eprintln!("  Process events:  {}", stats.process_events);
+            eprintln!("  FS events:       {}", stats.fs_events);
+            eprintln!("  Poll cycles:     {}", stats.poll_cycles);
+
+            if json_out {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "total_events": stats.total_events,
+                        "process_events": stats.process_events,
+                        "fs_events": stats.fs_events,
+                        "poll_cycles": stats.poll_cycles,
+                    })
+                );
+            }
+        }
     }
 
     Ok(())
@@ -1388,4 +1421,43 @@ fn parse_timestamp(s: &str) -> Result<i64> {
         "invalid timestamp: {} (use ISO 8601, relative like '7d', or epoch millis)",
         s
     )
+}
+
+/// Parse a duration string. Supports: "60s", "5m", "1h", "30s".
+fn parse_duration(s: &str) -> Result<std::time::Duration> {
+    if let Some(rest) = s.strip_suffix('s') {
+        if let Ok(n) = rest.parse::<u64>() {
+            return Ok(std::time::Duration::from_secs(n));
+        }
+    }
+    if let Some(rest) = s.strip_suffix('m') {
+        if let Ok(n) = rest.parse::<u64>() {
+            return Ok(std::time::Duration::from_secs(n * 60));
+        }
+    }
+    if let Some(rest) = s.strip_suffix('h') {
+        if let Ok(n) = rest.parse::<u64>() {
+            return Ok(std::time::Duration::from_secs(n * 3600));
+        }
+    }
+    // Try plain seconds.
+    if let Ok(n) = s.parse::<u64>() {
+        return Ok(std::time::Duration::from_secs(n));
+    }
+    anyhow::bail!(
+        "invalid duration: {} (use format like '60s', '5m', '1h')",
+        s
+    )
+}
+
+/// Human-readable duration for display.
+fn humanize_duration(d: std::time::Duration) -> String {
+    let secs = d.as_secs();
+    if secs >= 3600 {
+        format!("{}h {}m", secs / 3600, (secs % 3600) / 60)
+    } else if secs >= 60 {
+        format!("{}m {}s", secs / 60, secs % 60)
+    } else {
+        format!("{}s", secs)
+    }
 }

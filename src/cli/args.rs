@@ -893,6 +893,11 @@ pub struct TwinArgs {
     /// End time for `what-changed` query (defaults to now).
     #[arg(long, value_name = "TIMESTAMP")]
     pub until: Option<String>,
+
+    /// Duration to run observers (used with --action observe).
+    /// Format: "60s", "5m", "1h". Defaults to "60s".
+    #[arg(long, value_name = "DURATION", default_value = "60s")]
+    pub duration: String,
 }
 
 /// Sub-actions for the `twin` command.
@@ -920,4 +925,6 @@ pub enum TwinAction {
     WhatChanged,
     /// Run compaction on the event store (prune raw events older than 7 days).
     Compact,
+    /// Run observers for a duration (--duration). Feeds events into the store.
+    Observe,
 }
