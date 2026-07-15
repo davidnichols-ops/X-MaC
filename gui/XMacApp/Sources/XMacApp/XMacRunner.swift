@@ -748,13 +748,24 @@ final class XMacRunner: ObservableObject {
         if selectedPaths.contains(path) {
             selectedPaths.remove(path)
         } else if isSafeCleanupPath(path) {
-            selectedPaths.insert(path)
+            // Block protected items from selection
+            let isProtected = findings.contains { f in
+                f.target.value == path && f.safety_rating?.lowercased() == "protected"
+            }
+            if !isProtected {
+                selectedPaths.insert(path)
+            }
         }
     }
 
     func selectAllSafeFindings() {
         selectedPaths = Set(findings.compactMap { finding in
-            guard let path = finding.target.value as String?, isSafeCleanupPath(path) else { return nil }
+            let path = finding.target.value
+            guard isSafeCleanupPath(path) else { return nil }
+            // Exclude protected items
+            if let rating = finding.safety_rating?.lowercased(), rating == "protected" {
+                return nil
+            }
             return path
         })
     }

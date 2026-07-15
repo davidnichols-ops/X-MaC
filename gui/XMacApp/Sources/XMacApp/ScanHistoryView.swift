@@ -117,6 +117,7 @@ private struct ChangeBadge: View {
 private struct HistoryList: View {
     let entries: [ScanHistoryEntry]
     @EnvironmentObject var runner: XMacRunner
+    @State private var showingClearConfirmation = false
 
     private var reversed: [ScanHistoryEntry] { entries.sorted { $0.timestamp > $1.timestamp } }
 
@@ -127,12 +128,24 @@ private struct HistoryList: View {
                     XSectionHeader(title: "Recent Scans", icon: "list.bullet.rectangle", count: entries.count)
                     
                     Button("Clear History") {
-                        runner.historyStore.clear()
+                        showingClearConfirmation = true
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .tint(XTheme.danger)
                     .disabled(entries.isEmpty)
+                    .confirmationDialog(
+                        "Clear all scan history?",
+                        isPresented: $showingClearConfirmation,
+                        titleVisibility: .visible
+                    ) {
+                        Button("Clear All History", role: .destructive) {
+                            runner.historyStore.clear()
+                        }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text("This will permanently remove all \(entries.count) scan history entries. This action cannot be undone.")
+                    }
                 }
                 
                 LazyVStack(spacing: 8) {

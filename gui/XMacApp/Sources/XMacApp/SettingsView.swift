@@ -8,6 +8,7 @@ struct SettingsView: View {
     @State private var profileName: String = ""
     @State private var showingImportSheet = false
     @State private var importJSON = ""
+    @State private var showingDeleteConfirmation = false
 
     private var xmacPath: String {
         let candidates = [
@@ -82,11 +83,23 @@ struct SettingsView: View {
                         }
                         Button("Import") { showingImportSheet = true }
                         Button("Delete") {
-                            profiles.delete(profiles.selectedProfile)
+                            showingDeleteConfirmation = true
                         }
                         .disabled(profiles.selectedProfile.isBuiltIn)
                     }
                     .controlSize(.small)
+                    .confirmationDialog(
+                        "Delete profile \"\(profiles.selectedProfile.name)\"?",
+                        isPresented: $showingDeleteConfirmation,
+                        titleVisibility: .visible
+                    ) {
+                        Button("Delete Profile", role: .destructive) {
+                            profiles.delete(profiles.selectedProfile)
+                        }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text("This action cannot be undone. The profile and all its settings will be permanently removed.")
+                    }
                 }
 
                 SettingsSectionCard(title: "Per-category policy", icon: "checklist") {
