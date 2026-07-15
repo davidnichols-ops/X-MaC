@@ -1175,6 +1175,50 @@ final class XMacRunner: ObservableObject {
         }
     }
 
+    /// Run an arbitrary shell command asynchronously (off the main thread).
+    /// Use this instead of direct Process() calls in views.
+    /// Returns (exitCode, stdout) — stderr is discarded.
+    func runShellCommand(_ args: [String], timeoutSecs: Double = 60) async -> (Int, String) {
+        guard !args.isEmpty else { return (-1, "Empty command") }
+
+        return await withTaskGroup(of: (Int, String).self) { group in
+            group.addTask {
+                let task = Process()
+                task.executableURL = URL(fileURLWithPath: args[0])
+                task.arguments = Array(args.dropFirst())
+                let pipe = Pipe()
+                task.standardOutput = pipe
+                task.standardError = Pipe() // discard stderr
+
+                do {
+                    try task.run()
+                } catch {
+                    return (-1, "Failed to launch: \(error.localizedDescription)")
+                }
+
+                task.waitUntilExit()
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                let output = String(data: data, encoding: .utf8) ?? "<binary output>"
+                return (Int(task.terminationStatus), output)
+            }
+
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(timeoutSecs * 1_000_000_000))
+                return (-1, "TIMEOUT after \(Int(timeoutSecs))s")
+            }
+
+            let result = await group.next() ?? (-1, "Unknown error")
+            group.cancelAll()
+            return result
+        }
+    }
+
+    /// Kill a process by PID. Does NOT block the main thread.
+    func killProcess(pid: Int, force: Bool) async {
+        let args = ["/bin/kill", force ? "-9" : "-15", "\(pid)"]
+        _ = await runShellCommand(args, timeoutSecs: 5)
+    }
+
     // MARK: - Privileged Command Execution (sudo via AppleScript)
 
     /// Run a shell command with administrator privileges.
