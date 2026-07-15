@@ -136,6 +136,14 @@ pub struct CleanConfig {
     #[serde(default = "default_true")]
     pub large_files: bool,
 
+    /// Detect orphaned application support directories.
+    #[serde(default = "default_true")]
+    pub orphans: bool,
+
+    /// Resource usage mode: "eco", "balanced", or "turbo".
+    #[serde(default = "default_resource_mode")]
+    pub resource_mode: String,
+
     /// Minimum size for large file detection (in MB).
     #[serde(default = "default_large_file_mb")]
     pub min_large_size_mb: u64,
@@ -152,6 +160,9 @@ fn default_large_file_mb() -> u64 {
 }
 fn default_true() -> bool {
     true
+}
+fn default_resource_mode() -> String {
+    "balanced".to_string()
 }
 
 impl Default for CleanConfig {
@@ -171,6 +182,8 @@ impl Default for CleanConfig {
             languages: true,
             trash: true,
             large_files: true,
+            orphans: true,
+            resource_mode: default_resource_mode(),
             min_large_size_mb: default_large_file_mb(),
         }
     }

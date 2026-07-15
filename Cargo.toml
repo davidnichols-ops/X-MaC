@@ -49,6 +49,7 @@ uuid = { version = "1.10", features = ["v7", "serde"] }
 
 async-trait = "0.1"
 libc = "0.2"
+futures = "0.3"
 
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

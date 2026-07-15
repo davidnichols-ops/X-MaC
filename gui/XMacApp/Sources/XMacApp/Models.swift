@@ -15,10 +15,10 @@ struct Finding: Identifiable, Codable, Hashable {
     let discovered_at: TimeInfo
     let remediation_hint: String?
     let size_bytes: Int?
-    let safety_rating: String?
-    let safety_explanation: String?
+    var safety_rating: String?
+    var safety_explanation: String?
     let safety_rule: String?
-    let safety_confidence: Int?
+    var safety_confidence: Int?
 
     var displayName: String { title }
     var sizeFormatted: String {

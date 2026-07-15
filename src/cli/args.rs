@@ -75,6 +75,12 @@ pub struct GlobalArgs {
     #[arg(long, default_value = "4", global = true)]
     pub concurrency: usize,
 
+    /// Resource mode controls scan parallelism and CPU strain.
+    /// eco = sequential (lowest CPU), balanced = limited parallelism,
+    /// turbo = full parallelism (fastest, higher CPU).
+    #[arg(long, default_value = "balanced", global = true)]
+    pub resource_mode: String,
+
     /// Exclude paths matching glob pattern (repeatable).
     #[arg(long, value_name = "GLOB", global = true)]
     pub exclude: Vec<String>,
@@ -370,6 +376,23 @@ pub struct CleanArgs {
     /// Minimum size for large file detection (e.g. 100M, 500M, 1G).
     #[arg(long, default_value = "100M")]
     pub min_large_size: String,
+
+    /// Detect orphaned application support directories (left by uninstalled apps).
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub orphans: bool,
+
+    /// Scan ONLY the specified categories (skip all others).
+    /// Accepts a comma-separated list of category names:
+    /// cache, orphan_file, package_manager_cache, build_artifact, temp_file,
+    /// xcode_artifact, browser_cache, log, trash_bin, large_file, mail_attachment,
+    /// ios_backup, language_file, document_version, duplicate_file, docker.
+    #[arg(long, value_delimiter = ',')]
+    pub only: Vec<String>,
+
+    /// Resource usage mode controls scan parallelism and CPU strain.
+    /// eco = sequential (lowest CPU), balanced = limited parallelism, turbo = full parallelism.
+    #[arg(long, default_value = "balanced")]
+    pub resource_mode: String,
 
     /// Directory to scan (defaults to home directory).
     #[arg(value_name = "PATH")]

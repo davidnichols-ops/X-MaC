@@ -310,6 +310,9 @@ pub struct ScanConfig {
     pub follow_symlinks: bool,
     pub exclude_patterns: Vec<String>,
     pub cache_dir: Option<PathBuf>,
+    /// Resource mode: "eco", "balanced", or "turbo".
+    /// Controls engine-level parallelism and CPU strain.
+    pub resource_mode: String,
 }
 
 impl Default for ScanConfig {
@@ -320,6 +323,7 @@ impl Default for ScanConfig {
             follow_symlinks: false,
             exclude_patterns: Vec::new(),
             cache_dir: None,
+            resource_mode: "balanced".to_string(),
         }
     }
 }

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct CleanView: View {
     @EnvironmentObject var runner: XMacRunner
+    @EnvironmentObject var settings: AppSettings
     @State private var searchText: String = ""
     @State private var selectedCategories: Set<String> = []
     @State private var showingExportPanel = false
@@ -60,6 +61,45 @@ struct CleanView: View {
                 } else if cleanFindings.isEmpty {
                     EmptyScanView(message: "No reclaimable space found. Run a clean scan to see results.")
                 } else {
+                    // GNN scoring indicator
+                    if runner.isGNNScoring {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .controlSize(.small)
+                                .tint(XTheme.anomaly)
+                            Text("Scoring findings with GNN...")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(XTheme.anomaly)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(XTheme.anomaly.opacity(0.1))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+
+                    // Current scope indicator
+                    if runner.cleanScanScope != .all {
+                        HStack(spacing: 6) {
+                            Image(systemName: runner.cleanScanScope.icon)
+                                .font(.system(size: 11))
+                                .foregroundStyle(XTheme.accent)
+                            Text("Scope: \(runner.cleanScanScope.label)")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(XTheme.accent)
+                            Spacer()
+                            Button("Scan All") {
+                                runner.startCleanScan(scope: .all)
+                            }
+                            .font(.system(size: 11))
+                            .buttonStyle(.borderless)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(XTheme.accent.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+
                     HStack(spacing: 16) {
                         CleanReclaimCard(
                             reclaimable: totalReclaimable,
@@ -71,7 +111,8 @@ struct CleanView: View {
                             safe: safetyCounts.safe,
                             review: safetyCounts.review,
                             protected: safetyCounts.protected,
-                            unclassified: safetyCounts.unclassified
+                            unclassified: safetyCounts.unclassified,
+                            gnnScoredCount: runner.gnnScoredFindings.count
                         )
                     }
 
@@ -97,6 +138,29 @@ struct CleanView: View {
         }
         .background(XTheme.voidGradient)
         .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    ForEach(CleanScanScope.allCases) { scope in
+                        Button {
+                            runner.startCleanScan(scope: scope)
+                        } label: {
+                            Label(scope.label, systemImage: scope.icon)
+                        }
+                    }
+                } label: {
+                    Label("Scan", systemImage: "magnifyingglass.circle")
+                }
+                .disabled(runner.isScanning)
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    runner.scoreFindingsWithGNN()
+                } label: {
+                    Label("Score with GNN", systemImage: "brain")
+                }
+                .disabled(cleanFindings.isEmpty || runner.isGNNScoring || runner.isScanning)
+                .help("Run the on-device GNN model to augment safety ratings with neural network predictions")
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button("Export Report") {
                     showingExportPanel = true
@@ -165,13 +229,31 @@ struct CleanSafetySummaryCard: View {
     let review: Int
     let protected: Int
     let unclassified: Int
+    var gnnScoredCount: Int = 0
 
     private var total: Int { safe + review + protected + unclassified }
 
     var body: some View {
         XCard {
             VStack(alignment: .leading, spacing: 10) {
-                XSectionHeader(title: "Safety Summary", icon: "shield.lefthalf.filled")
+                HStack {
+                    XSectionHeader(title: "Safety Summary", icon: "shield.lefthalf.filled")
+                    Spacer()
+                    if gnnScoredCount > 0 {
+                        HStack(spacing: 3) {
+                            Image(systemName: "brain.fill")
+                                .font(.system(size: 9))
+                                .foregroundStyle(XTheme.anomaly)
+                            Text("GNN \(gnnScoredCount)")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(XTheme.anomaly)
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(XTheme.anomaly.opacity(0.12))
+                        .clipShape(Capsule())
+                    }
+                }
 
                 HStack(spacing: 12) {
                     SafetyStat(

@@ -49,6 +49,9 @@ final class XMacRunner: ObservableObject {
     @Published var cleanupMessage: String?
     @Published var binaryPathOverride: String? = nil
     @Published var scanProgress: Double = 0
+    @Published var cleanScanScope: CleanScanScope = .all
+    @Published var isGNNScoring = false
+    @Published var gnnScoredFindings: Set<String> = []
 
     // Digital Twin data
     @Published var digitalTwin: DigitalTwin?
@@ -201,6 +204,13 @@ final class XMacRunner: ObservableObject {
     func startCleanScan() {
         guard !isScanning else { return }
         beginScan(mode: .clean, phase: "Scanning for reclaimable space...", task: runCleanScan)
+    }
+
+    func startCleanScan(scope: CleanScanScope) {
+        guard !isScanning else { return }
+        cleanScanScope = scope
+        let phase = scope == .all ? "Scanning for reclaimable space..." : "Scanning \(scope.label)..."
+        beginScan(mode: .clean, phase: phase, task: runCleanScan)
     }
 
     func startMaintainScan() {
@@ -749,6 +759,7 @@ final class XMacRunner: ObservableObject {
         selectedGNNPaths.removeAll()
         cleanupResults.removeAll()
         cleanupMessage = nil
+        gnnScoredFindings.removeAll()
     }
 
     func toggleSelection(path: String) {
@@ -879,21 +890,212 @@ final class XMacRunner: ObservableObject {
         return url.path.hasPrefix(home.path + "/") || url.path.hasPrefix(temporary.path + "/")
     }
 
+    // MARK: - GNN-Augmented Safety Scoring
+
+    /// Run the on-device GNN model over all findings to augment their
+    /// safety ratings with neural network predictions. This builds a mini-graph
+    /// from the findings, runs CoreML inference, and merges the scores back.
+    /// Works across all engines (clean, disk, conflict, map, etc.) — not just
+    /// clean findings.
+    func scoreFindingsWithGNN() {
+        guard !isGNNScoring, !findings.isEmpty else { return }
+        isGNNScoring = true
+        logActivity("gnn-score", status: .started, message: "Scoring \(findings.count) findings with GNN...")
+
+        Task { @MainActor in
+            // Build a graph JSON from the clean findings for the GNN model.
+            let graphJSON = buildFindingsGraphJSON()
+
+            let manager = CoreMLGNNManager()
+            let response = await manager.predict(graphJSON: graphJSON)
+
+            if let resp = response {
+                // Merge GNN scores into findings' safety_rating.
+                for score in resp.scores {
+                    if let idx = findings.firstIndex(where: { $0.target.value == score.path }) {
+                        findings[idx].safety_rating = gnnSafetyLabel(score.safety_score)
+                        findings[idx].safety_explanation = score.explanation
+                        findings[idx].safety_confidence = Int((score.confidence ?? 0.5) * 100)
+                        gnnScoredFindings.insert(score.path)
+                    }
+                }
+                // Also store the GNN scores for the neural view.
+                gnnScores = resp.scores
+                gnnResponse = resp
+                purgePlan = resp.purge_plan
+                let summary = resp.summary
+                let safeCount = summary?.safe_files ?? 0
+                let reviewCount = summary?.review_files ?? 0
+                let dangerCount = summary?.danger_files ?? 0
+                logActivity("gnn-score", status: .success, message: "Scored \(resp.scores.count) findings — \(safeCount) safe, \(reviewCount) review, \(dangerCount) danger")
+            } else {
+                logActivity("gnn-score", status: .failed, message: "GNN inference failed — using rule-based scores")
+            }
+            isGNNScoring = false
+        }
+    }
+
+    /// Build a minimal graph JSON from all findings for GNN inference.
+    /// Each finding becomes a node with features derived from its path, size,
+    /// category, and engine. Edges connect files in the same directory.
+    /// Includes findings from all engines (clean, disk, conflict, map, etc.)
+    /// so the GNN can learn cross-engine patterns.
+    private func buildFindingsGraphJSON() -> String {
+        // Include all findings with a path target — skip non-path findings.
+        let scoredFindings = findings.filter { finding in
+            // Only score findings that have a path target (not port conflicts,
+            // env var conflicts, etc. which don't have filesystem paths).
+            finding.target.value.contains("/")
+        }
+        var nodes: [[String: Any]] = []
+        var edges: [[Int]] = []
+
+        // Group by parent directory to create edges.
+        var dirGroups: [String: [Int]] = [:]
+
+        for (i, finding) in scoredFindings.enumerated() {
+            let path = finding.target.value
+            let url = URL(fileURLWithPath: path)
+            let ext = url.pathExtension.lowercased()
+            let isDir = (try? FileManager.default.attributesOfItem(atPath: path)[.type] as? FileAttributeType) == .typeDirectory
+            let sizeBytes = finding.size_bytes ?? 0
+            let modified = finding.discovered_at.secs_since_epoch
+
+            // 16-feature vector matching the GNN model's input.
+            // Features: [is_dir, is_hidden, size_log, ext_hash, age_days_norm,
+            //            is_cache, is_temp, is_build, is_pkg_cache, is_xcode,
+            //            is_browser, is_log, is_trash, is_large, is_orphan, is_dup]
+            let category = finding.category
+            let features: [Double] = [
+                isDir ? 1.0 : 0.0,
+                path.contains("/.") ? 1.0 : 0.0,
+                sizeBytes > 0 ? log10(Double(sizeBytes)) / 12.0 : 0.0,
+                Double(ext.hashValue % 100) / 100.0,
+                modified > 0 ? min(Double(Int(Date().timeIntervalSince1970) - Int(modified)) / 31_536_000.0, 1.0) : 0.0,
+                category == "cache" ? 1.0 : 0.0,
+                category == "temp_file" ? 1.0 : 0.0,
+                category == "build_artifact" ? 1.0 : 0.0,
+                category == "package_manager_cache" ? 1.0 : 0.0,
+                category == "xcode_artifact" ? 1.0 : 0.0,
+                category == "browser_cache" ? 1.0 : 0.0,
+                category == "log" ? 1.0 : 0.0,
+                category == "trash_bin" ? 1.0 : 0.0,
+                category == "large_file" ? 1.0 : 0.0,
+                category == "orphan_file" ? 1.0 : 0.0,
+                category == "duplicate_file" ? 1.0 : 0.0,
+            ]
+
+            nodes.append([
+                "path": path,
+                "features": features,
+                "node_type": isDir ? "directory" : "file",
+                "extension": ext,
+                "size_bytes": sizeBytes,
+                "modified_secs": modified,
+                "engine": finding.engine,
+                "category": finding.category,
+                "severity": finding.severity,
+                "is_hidden": path.contains("/."),
+            ])
+
+            let parentDir = (path as NSString).deletingLastPathComponent
+            dirGroups[parentDir, default: []].append(i)
+        }
+
+        // Create edges between nodes in the same directory (siblings).
+        for (_, indices) in dirGroups {
+            for i in 0..<indices.count {
+                for j in (i + 1)..<indices.count {
+                    edges.append([indices[i], indices[j]])
+                    edges.append([indices[j], indices[i]])
+                }
+            }
+        }
+
+        let graph: [String: Any] = [
+            "nodes": nodes,
+            "edges": edges,
+        ]
+
+        if let data = try? JSONSerialization.data(withJSONObject: graph),
+           let str = String(data: data, encoding: .utf8) {
+            return str
+        }
+        return "{\"nodes\": [], \"edges\": []}"
+    }
+
+    private func gnnSafetyLabel(_ score: Double) -> String {
+        if score >= 0.7 { return "safe" }
+        if score >= 0.4 { return "review" }
+        return "protected"
+    }
+
     // MARK: - Scan implementations
 
     private func runFullScan() async {
         let start = Date()
-        scanProgress = 0.1
-        await runCommand(cleanCommand())
-        guard !Task.isCancelled else { return }
-        scanPhase = "Running maintenance..."
-        scanProgress = 0.45
-        await runCommand([xmacPath, "--format", "json", "maintain"])
-        guard !Task.isCancelled else { return }
-        scanPhase = "Analyzing disk usage..."
-        scanProgress = 0.75
-        await runCommand([xmacPath, "--format", "json", "disk", "--top", "30", "--min-size", "50M"])
-        finishScan(start: start, mode: "full")
+        let resourceMode = appSettings?.resourceMode ?? "balanced"
+
+        // In eco mode, run phases sequentially (lowest CPU strain).
+        // In balanced/turbo mode, run clean + maintain + disk concurrently
+        // since they use different resources:
+        //   - clean: disk I/O (WalkDir via spawn_blocking)
+        //   - maintain: command execution (DNS flush, Spotlight, etc.)
+        //   - disk: disk I/O (WalkDir via spawn_blocking)
+        // The Rust core already bounds internal parallelism per engine via
+        // the --resource-mode flag, so overlapping the three phases is safe.
+        if resourceMode == "eco" {
+            scanProgress = 0.1
+            scanPhase = "Scanning for reclaimable space..."
+            await runCommand(cleanCommand())
+            guard !Task.isCancelled else { return }
+            scanPhase = "Running maintenance..."
+            scanProgress = 0.45
+            await runCommand([xmacPath, "--format", "json", "--resource-mode", resourceMode, "maintain"])
+            guard !Task.isCancelled else { return }
+            scanPhase = "Analyzing disk usage..."
+            scanProgress = 0.75
+            await runCommand([xmacPath, "--format", "json", "--resource-mode", resourceMode, "disk", "--top", "30", "--min-size", "50M"])
+            finishScan(start: start, mode: "full")
+        } else {
+            // Balanced/Turbo: run all three phases concurrently.
+            // Each phase is a separate xmac process, so the OS schedules
+            // them independently. The Rust core bounds each process's
+            // internal parallelism via --resource-mode.
+            scanPhase = "Running full scan (clean + maintain + disk)..."
+            scanProgress = 0.1
+
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask {
+                    await self.runCommand(self.cleanCommand())
+                }
+                group.addTask {
+                    await self.runCommand([self.xmacPath, "--format", "json", "--resource-mode", resourceMode, "maintain"])
+                }
+                group.addTask {
+                    await self.runCommand([self.xmacPath, "--format", "json", "--resource-mode", resourceMode, "disk", "--top", "30", "--min-size", "50M"])
+                }
+                // Update progress as phases complete.
+                var completed = 0
+                for await _ in group {
+                    completed += 1
+                    scanProgress = 0.1 + Double(completed) * 0.3
+                    if completed < 3 {
+                        scanPhase = "Full scan: \(completed)/3 phases complete..."
+                    }
+                }
+            }
+
+            guard !Task.isCancelled else { return }
+            finishScan(start: start, mode: "full")
+
+            // Auto-score with GNN if enabled and we have findings.
+            if appSettings?.gnnAutoScore == true && !findings.isEmpty {
+                scanPhase = "Scoring findings with GNN..."
+                scanProgress = 0.95
+                scoreFindingsWithGNN()
+            }
+        }
     }
 
     private func runCleanScan() async {
@@ -902,6 +1104,13 @@ final class XMacRunner: ObservableObject {
         await runCommand(cleanCommand())
         guard !Task.isCancelled else { return }
         finishScan(start: start, mode: "clean")
+
+        // Auto-score with GNN if enabled and we have findings.
+        if appSettings?.gnnAutoScore == true && !findings.isEmpty {
+            scanPhase = "Scoring findings with GNN..."
+            scanProgress = 0.95
+            scoreFindingsWithGNN()
+        }
     }
 
     private func cleanCommand() -> [String] {
@@ -911,6 +1120,7 @@ final class XMacRunner: ObservableObject {
         let includeHidden = profile?.includeHidden ?? appSettings?.includeHidden ?? false
         let followSymlinks = profile?.followSymlinks ?? appSettings?.followSymlinks ?? false
         let exclusions = profile?.excludedPaths ?? appSettings?.exclusionList ?? []
+        let resourceMode = appSettings?.resourceMode ?? "balanced"
 
         var command = [xmacPath, "--format", "json"]
         if includeHidden { command += ["--include-hidden"] }
@@ -919,21 +1129,37 @@ final class XMacRunner: ObservableObject {
             command += ["--exclude", exclusion]
         }
         command += ["clean", "--min-age", "\(age)d", "--min-size", "\(size)M", "--min-large-size", "100M"]
+
+        // Resource mode controls scan parallelism and CPU strain.
+        command += ["--resource-mode", resourceMode]
+
+        // Scope: if not "all", pass --only to scan just that category.
+        if let onlyKey = cleanScanScope.cliKey {
+            command += ["--only", onlyKey]
+        }
+
+        // Duplicates scope needs --dedup to actually run the BLAKE3 hasher.
+        if cleanScanScope == .duplicates {
+            command += ["--dedup"]
+        }
+
         return command
     }
 
     private func runMaintainScan() async {
         let start = Date()
+        let resourceMode = appSettings?.resourceMode ?? "balanced"
         scanProgress = 0.2
-        await runCommand([xmacPath, "--format", "json", "maintain"])
+        await runCommand([xmacPath, "--format", "json", "--resource-mode", resourceMode, "maintain"])
         guard !Task.isCancelled else { return }
         finishScan(start: start, mode: "maintain")
     }
 
     private func runDiskScan() async {
         let start = Date()
+        let resourceMode = appSettings?.resourceMode ?? "balanced"
         scanProgress = 0.2
-        await runCommand([xmacPath, "--format", "json", "disk", "--top", "40", "--min-size", "50M"])
+        await runCommand([xmacPath, "--format", "json", "--resource-mode", resourceMode, "disk", "--top", "40", "--min-size", "50M"])
         guard !Task.isCancelled else { return }
         finishScan(start: start, mode: "disk")
     }

@@ -226,6 +226,90 @@ fn init_tracing(verbosity: u8) {
         .init();
 }
 
+/// Type alias for a boxed engine future — avoids clippy type_complexity warnings.
+type EngineFuture = std::pin::Pin<Box<dyn std::future::Future<Output = EngineResult> + Send>>;
+
+/// Type alias for the result of running an engine.
+type EngineResult = std::result::Result<core::types::EngineStats, core::error::EngineError>;
+
+/// Determine the maximum number of engines to run concurrently based on
+/// the resource mode. This controls top-level engine parallelism —
+/// individual engines may have their own internal parallelism (e.g. the
+/// clean engine's category-level FuturesUnordered).
+///
+/// - eco: 1 engine at a time (sequential — lowest CPU strain)
+/// - balanced: 2 engines concurrently (good balance, moderate CPU)
+/// - turbo: 3 engines concurrently (faster, higher CPU)
+///
+/// Note: these numbers are intentionally conservative. Each engine has
+/// its own internal parallelism (e.g. clean engine runs up to 3-6 scan
+/// categories concurrently, each via spawn_blocking). So "balanced" with
+/// 2 engines × 3 internal tasks = up to 6 concurrent blocking threads,
+/// which is a reasonable load for modern multi-core Macs.
+fn max_concurrent_engines(resource_mode: &str) -> usize {
+    match resource_mode {
+        "eco" => 1,
+        "turbo" => 3,
+        _ => 2, // balanced
+    }
+}
+
+/// Run a list of engine futures with **actually bounded** concurrency.
+///
+/// In eco mode (max_concurrent=1), engines run sequentially.
+/// In balanced/turbo mode, at most `max_concurrent` engines run at once,
+/// enforced by a tokio Semaphore. Each engine is spawned as a 'static task
+/// that acquires a permit before running, so the semaphore truly limits
+/// how many engines are active simultaneously.
+///
+/// This is critical for CPU strain: without real bounding, FuturesUnordered
+/// polls ALL futures at once, which — combined with each engine's internal
+/// parallelism (spawn_blocking for WalkDir) — can spawn dozens of blocking
+/// threads and saturate all CPU cores.
+async fn run_engines_concurrent(
+    tasks: Vec<EngineFuture>,
+    max_concurrent: usize,
+) -> Vec<EngineResult> {
+    if tasks.is_empty() {
+        return Vec::new();
+    }
+
+    if max_concurrent <= 1 {
+        // Eco mode: run sequentially — lowest CPU strain.
+        let mut results = Vec::with_capacity(tasks.len());
+        for task in tasks {
+            results.push(task.await);
+        }
+        return results;
+    }
+
+    // Balanced/Turbo: use JoinSet + Semaphore for real bounded concurrency.
+    // Each task is spawned as a 'static task that acquires a permit before
+    // running. This ensures at most `max_concurrent` engines are active.
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(max_concurrent));
+    let mut join_set = tokio::task::JoinSet::new();
+
+    for task in tasks {
+        let sem = semaphore.clone();
+        join_set.spawn(async move {
+            // Acquire permit — blocks if max_concurrent engines are already running.
+            let _permit = sem.acquire().await.expect("semaphore closed");
+            task.await
+        });
+    }
+
+    let mut results = Vec::with_capacity(join_set.len());
+    while let Some(res) = join_set.join_next().await {
+        match res {
+            Ok(engine_result) => results.push(engine_result),
+            Err(join_err) => {
+                tracing::error!("Engine task panicked: {}", join_err);
+            }
+        }
+    }
+    results
+}
+
 async fn run_all_engines(
     ctx: Arc<ScanContext>,
     args: &cli::args::AllArgs,
@@ -235,34 +319,41 @@ async fn run_all_engines(
     let skip: Vec<EngineIdArg> = args.skip.clone();
     let should_run = |id: EngineIdArg| -> bool { !skip.contains(&id) };
 
-    let mut results = Vec::new();
+    // Determine max concurrent engines from resource_mode.
+    let max_concurrent = max_concurrent_engines(&ctx.config.resource_mode);
+
+    // Build the list of engines to run. Each is a boxed future that returns
+    // the engine's result. Engines are independent — they scan different
+    // aspects of the system and stream findings via the shared mpsc channel.
+    let mut tasks: Vec<EngineFuture> = Vec::new();
 
     if should_run(EngineIdArg::Clean) {
-        let clean_engine = engines::clean::CleanEngine::default();
-        results.push(clean_engine.run(ctx.clone()).await);
+        let engine = engines::clean::CleanEngine::default();
+        let ctx = ctx.clone();
+        tasks.push(Box::pin(async move { engine.run(ctx).await }));
     }
-
     if should_run(EngineIdArg::Conflict) {
-        let conflict_engine = engines::conflict::ConflictEngine::default();
-        results.push(conflict_engine.run(ctx.clone()).await);
+        let engine = engines::conflict::ConflictEngine::default();
+        let ctx = ctx.clone();
+        tasks.push(Box::pin(async move { engine.run(ctx).await }));
     }
-
     if should_run(EngineIdArg::Map) {
-        let map_engine = engines::map::MapEngine::default();
-        results.push(map_engine.run(ctx.clone()).await);
+        let engine = engines::map::MapEngine::default();
+        let ctx = ctx.clone();
+        tasks.push(Box::pin(async move { engine.run(ctx).await }));
     }
-
     if should_run(EngineIdArg::Envmap) {
-        let envmap_engine = engines::envmap::EnvmapEngine::default();
-        results.push(envmap_engine.run(ctx.clone()).await);
+        let engine = engines::envmap::EnvmapEngine::default();
+        let ctx = ctx.clone();
+        tasks.push(Box::pin(async move { engine.run(ctx).await }));
     }
-
     if should_run(EngineIdArg::Depth) {
-        let depth_engine = engines::depth::DepthEngine::default();
-        results.push(depth_engine.run(ctx.clone()).await);
+        let engine = engines::depth::DepthEngine::default();
+        let ctx = ctx.clone();
+        tasks.push(Box::pin(async move { engine.run(ctx).await }));
     }
 
-    results
+    run_engines_concurrent(tasks, max_concurrent).await
 }
 
 /// The `scan` command — the recommended default. Runs the safe, reliable
@@ -277,42 +368,42 @@ async fn run_scan(
     let skip: Vec<ScanEngineIdArg> = args.skip.clone();
     let should_run = |id: ScanEngineIdArg| -> bool { !skip.contains(&id) };
 
-    let mut results = Vec::new();
+    let max_concurrent = max_concurrent_engines(&ctx.config.resource_mode);
+
+    let mut tasks: Vec<EngineFuture> = Vec::new();
 
     if should_run(ScanEngineIdArg::Clean) {
-        let clean_engine = engines::clean::CleanEngine::default();
-        results.push(clean_engine.run(ctx.clone()).await);
+        let engine = engines::clean::CleanEngine::default();
+        let ctx = ctx.clone();
+        tasks.push(Box::pin(async move { engine.run(ctx).await }));
     }
-
     if should_run(ScanEngineIdArg::Conflict) {
-        let conflict_engine = engines::conflict::ConflictEngine::default();
-        results.push(conflict_engine.run(ctx.clone()).await);
+        let engine = engines::conflict::ConflictEngine::default();
+        let ctx = ctx.clone();
+        tasks.push(Box::pin(async move { engine.run(ctx).await }));
     }
-
     if should_run(ScanEngineIdArg::Map) {
-        let map_engine = engines::map::MapEngine::default();
-        results.push(map_engine.run(ctx.clone()).await);
+        let engine = engines::map::MapEngine::default();
+        let ctx = ctx.clone();
+        tasks.push(Box::pin(async move { engine.run(ctx).await }));
     }
-
-    // envmap is read-only and safe — included in `scan` by default.
     if args.envmap && should_run(ScanEngineIdArg::Envmap) {
-        let envmap_engine = engines::envmap::EnvmapEngine::default();
-        results.push(envmap_engine.run(ctx.clone()).await);
+        let engine = engines::envmap::EnvmapEngine::default();
+        let ctx = ctx.clone();
+        tasks.push(Box::pin(async move { engine.run(ctx).await }));
     }
-
-    // Depth is opt-in for `scan` — it can be noisy on large installations.
-    // Only run if --include-depth is explicitly passed AND not skipped.
     if args.include_depth && should_run(ScanEngineIdArg::Depth) {
-        let depth_engine = engines::depth::DepthEngine::default();
-        results.push(depth_engine.run(ctx.clone()).await);
+        let engine = engines::depth::DepthEngine::default();
+        let ctx = ctx.clone();
+        tasks.push(Box::pin(async move { engine.run(ctx).await }));
     }
-
     if args.diagnostics && should_run(ScanEngineIdArg::Diag) {
-        let diag_engine = engines::diag::DiagEngine::default();
-        results.push(diag_engine.run(ctx.clone()).await);
+        let engine = engines::diag::DiagEngine::default();
+        let ctx = ctx.clone();
+        tasks.push(Box::pin(async move { engine.run(ctx).await }));
     }
 
-    results
+    run_engines_concurrent(tasks, max_concurrent).await
 }
 
 /// The `install` command — symlinks the built binary into a directory on
@@ -510,10 +601,12 @@ async fn run_quick(
     ctx: Arc<ScanContext>,
     args: &cli::args::QuickArgs,
 ) -> Vec<std::result::Result<core::types::EngineStats, core::error::EngineError>> {
-    let mut results = Vec::new();
-
     let xmac_config = config::ConfigManager::load();
     let xmac_config = xmac_config.config().clone();
+
+    let max_concurrent = max_concurrent_engines(&ctx.config.resource_mode);
+
+    let mut tasks: Vec<EngineFuture> = Vec::new();
 
     // 1. Clean scan (with dedup if requested)
     let clean_args = cli::args::CleanArgs {
@@ -521,13 +614,17 @@ async fn run_quick(
         ..engines::clean::CleanEngine::default_args()
     };
     let clean_engine = engines::clean::CleanEngine::new(clean_args).with_config(&xmac_config);
-    results.push(clean_engine.run(ctx.clone()).await);
+    let ctx_clone = ctx.clone();
+    tasks.push(Box::pin(async move { clean_engine.run(ctx_clone).await }));
 
     // 2. Maintenance tasks (safe ones only — no sudo)
     if !args.no_maintain {
         let maintain_engine =
             engines::maintain::MaintainEngine::default().with_config(&xmac_config);
-        results.push(maintain_engine.run(ctx.clone()).await);
+        let ctx_clone = ctx.clone();
+        tasks.push(Box::pin(
+            async move { maintain_engine.run(ctx_clone).await },
+        ));
     }
 
     // 3. Disk usage breakdown
@@ -538,10 +635,11 @@ async fn run_quick(
             paths: args.paths.clone(),
         };
         let disk_engine = engines::disk::DiskEngine::new(disk_args);
-        results.push(disk_engine.run(ctx.clone()).await);
+        let ctx_clone = ctx.clone();
+        tasks.push(Box::pin(async move { disk_engine.run(ctx_clone).await }));
     }
 
-    results
+    run_engines_concurrent(tasks, max_concurrent).await
 }
 
 /// The `ram-boost` command — memory optimizer with before/after comparison.

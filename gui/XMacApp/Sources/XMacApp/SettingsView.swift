@@ -115,6 +115,36 @@ struct SettingsView: View {
                     Toggle("Follow symbolic links", isOn: $settings.followSymlinks)
                 }
 
+                SettingsSectionCard(title: "Resource Mode", icon: "gauge.with.dots.needle.67percent") {
+                    Text("Controls scan parallelism and CPU strain. Lower modes reduce CPU usage during scans.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(XTheme.textSecondary)
+
+                    Picker("Mode", selection: Binding(
+                        get: { settings.resourceModeEnum },
+                        set: { settings.resourceModeEnum = $0 }
+                    )) {
+                        ForEach(ResourceMode.allCases) { mode in
+                            Label(mode.label, systemImage: mode.icon).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(runner.isScanning)
+
+                    Text(settings.resourceModeEnum.description)
+                        .font(.system(size: 11))
+                        .foregroundStyle(XTheme.textTertiary)
+                }
+
+                SettingsSectionCard(title: "GNN Intelligence", icon: "brain") {
+                    Toggle("Auto-score findings with GNN after scan", isOn: $settings.gnnAutoScore)
+                        .help("Automatically run the on-device GNN model to augment safety ratings after each clean scan")
+
+                    Text("When enabled, the GNN model scores each finding's safety after a clean scan completes, providing neural network-augmented safety ratings in addition to rule-based scores.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(XTheme.textSecondary)
+                }
+
                 SettingsSectionCard(title: "Appearance", icon: "paintbrush") {
                     Picker("Theme", selection: $settings.appearance) {
                         Text("System").tag("system")

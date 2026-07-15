@@ -27,6 +27,83 @@ struct ApfsStats {
     applications_used: u64,
 }
 
+/// Async version of `apfs_stats` — offloads the blocking `dir_size_fast`
+/// calls to spawn_blocking so the disk engine doesn't stall the async
+/// runtime when running concurrently with other engines.
+async fn apfs_stats_async() -> Option<ApfsStats> {
+    // Run the diskutil commands and plist parsing on a blocking thread.
+    let base = tokio::task::spawn_blocking(|| {
+        // Reuse the synchronous apfs_stats but with zeroed applications_used;
+        // we'll compute that part async below.
+        apfs_stats_base()
+    })
+    .await
+    .ok()?;
+
+    let mut stats = base?;
+
+    // Compute /Applications sizes concurrently via spawn_blocking.
+    let apps_path = PathBuf::from("/Applications");
+    let sys_apps_path = PathBuf::from("/System/Applications");
+    let (apps_size, sys_apps_size) = tokio::join!(
+        dir_size_fast_async(apps_path),
+        dir_size_fast_async(sys_apps_path),
+    );
+    stats.applications_used = apps_size + sys_apps_size;
+    Some(stats)
+}
+
+/// Synchronous base for apfs_stats — returns stats with applications_used=0.
+/// The applications size is computed separately via async spawn_blocking.
+fn apfs_stats_base() -> Option<ApfsStats> {
+    // Ask diskutil for the APFS container that hosts the boot volume.
+    use std::process::Command;
+
+    fn parse_bytes(plist_output: &str, key: &str) -> Option<u64> {
+        let needle = format!("<key>{}</key>", key);
+        let pos = plist_output.find(&needle)?;
+        let after = &plist_output[pos + needle.len()..];
+        let int_start = after.find("<integer>")? + "<integer>".len();
+        let int_end = after.find("</integer>")?;
+        let int_str = &after[int_start..int_end];
+        int_str.parse::<u64>().ok()
+    }
+
+    let root_str = Command::new("diskutil")
+        .args(["info", "-plist", "/"])
+        .output()
+        .ok()?
+        .stdout;
+    let root_str = String::from_utf8_lossy(&root_str);
+
+    let data_str = Command::new("diskutil")
+        .args(["info", "-plist", "/System/Volumes/Data"])
+        .output()
+        .ok()?
+        .stdout;
+    let data_str = String::from_utf8_lossy(&data_str);
+
+    let container_free = parse_bytes(&root_str, "APFSContainerFree")
+        .or_else(|| parse_bytes(&data_str, "APFSContainerFree"))?;
+    let container_total = parse_bytes(&root_str, "APFSContainerSize")
+        .or_else(|| parse_bytes(&root_str, "TotalSize"))
+        .or_else(|| parse_bytes(&data_str, "APFSContainerSize"))?;
+
+    let system_used = parse_bytes(&root_str, "CapacityInUse").unwrap_or(0);
+    let data_used = parse_bytes(&data_str, "CapacityInUse").unwrap_or(0);
+
+    Some(ApfsStats {
+        total: container_total,
+        free: container_free,
+        system_used,
+        data_used,
+        applications_used: 0, // computed async in apfs_stats_async
+    })
+}
+
+/// Synchronous apfs_stats — kept for tests. Use `apfs_stats_async` in
+/// production code to avoid stalling the async runtime.
+#[allow(dead_code)]
 fn apfs_stats() -> Option<ApfsStats> {
     // Ask diskutil for the APFS container that hosts the boot volume.
     // We parse the output of `diskutil list -plist disk3` (or whichever
@@ -121,12 +198,28 @@ fn linux_stats() -> Option<ApfsStats> {
 }
 
 /// Cross-platform volume stats — dispatches to apfs_stats on macOS,
-/// linux_stats on Linux.
+/// linux_stats on Linux. Synchronous version (kept for tests).
+#[allow(dead_code)]
 fn volume_stats() -> Option<ApfsStats> {
     if cfg!(target_os = "macos") {
         apfs_stats()
     } else if cfg!(target_os = "linux") {
         linux_stats()
+    } else {
+        None
+    }
+}
+
+/// Async version of volume_stats — uses spawn_blocking for the blocking
+/// diskutil commands and dir_size_fast calls.
+async fn volume_stats_async() -> Option<ApfsStats> {
+    if cfg!(target_os = "macos") {
+        apfs_stats_async().await
+    } else if cfg!(target_os = "linux") {
+        tokio::task::spawn_blocking(linux_stats)
+            .await
+            .ok()
+            .flatten()
     } else {
         None
     }
@@ -145,6 +238,14 @@ fn dir_size_fast(path: &std::path::Path) -> u64 {
         .filter_map(|e| e.metadata().ok())
         .map(physical_size)
         .sum()
+}
+
+/// Async wrapper for `dir_size_fast` — offloads the blocking WalkDir to
+/// the tokio blocking thread pool so it doesn't stall the async runtime.
+async fn dir_size_fast_async(path: PathBuf) -> u64 {
+    tokio::task::spawn_blocking(move || dir_size_fast(&path))
+        .await
+        .unwrap_or(0)
 }
 
 /// The disk engine analyzes disk usage and emits findings for the top
@@ -178,6 +279,40 @@ impl DiskEngine {
             .filter_map(|e| e.metadata().ok())
             .map(physical_size)
             .sum()
+    }
+
+    /// Async wrapper for `dir_size_physical` — offloads the blocking WalkDir
+    /// to the tokio blocking thread pool so it doesn't stall the async runtime
+    /// when the disk engine runs concurrently with other engines.
+    async fn dir_size_physical_async(path: PathBuf) -> u64 {
+        tokio::task::spawn_blocking(move || Self::dir_size_physical(&path))
+            .await
+            .unwrap_or(0)
+    }
+
+    /// Walk a directory tree for large files, returning (path, size) pairs.
+    /// Offloaded to spawn_blocking to avoid stalling the async runtime.
+    fn walk_large_files(path: &std::path::Path, min_size: u64) -> Vec<(PathBuf, u64)> {
+        let mut results = Vec::new();
+        for entry in WalkDir::new(path)
+            .follow_links(false)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_file())
+        {
+            let size = entry.metadata().map(physical_size).unwrap_or(0);
+            if size >= min_size {
+                results.push((entry.path().to_path_buf(), size));
+            }
+        }
+        results
+    }
+
+    /// Async wrapper for `walk_large_files`.
+    async fn walk_large_files_async(path: PathBuf, min_size: u64) -> Vec<(PathBuf, u64)> {
+        tokio::task::spawn_blocking(move || Self::walk_large_files(&path, min_size))
+            .await
+            .unwrap_or_default()
     }
 }
 
@@ -217,7 +352,7 @@ impl Engine for DiskEngine {
         // Emit a volume-level summary finding so the GUI can render the
         // full disk donut chart (total / system / data / free / apps)
         // without needing a separate API call.
-        if let Some(stats) = volume_stats() {
+        if let Some(stats) = volume_stats_async().await {
             let total_known_used = stats.system_used + stats.data_used;
             let vol_label = if cfg!(target_os = "macos") {
                 "Macintosh HD"
@@ -280,20 +415,59 @@ impl Engine for DiskEngine {
             // Emitted as SystemInfo so they don't contribute to
             // total_reclaimable_bytes (which would double-count with the
             // file-level findings below).
+            //
+            // Directory sizes are computed via spawn_blocking to avoid
+            // stalling the async runtime when the disk engine runs
+            // concurrently with other engines.
             let mut entries: Vec<(PathBuf, u64, bool)> = Vec::new();
 
+            // Read immediate children synchronously (cheap — one readdir).
+            // Then compute directory sizes concurrently via spawn_blocking.
             if let Ok(dir_entries) = std::fs::read_dir(search_path) {
-                for entry in dir_entries.flatten() {
-                    let path = entry.path();
-                    let is_dir = path.is_dir();
-                    let size = if is_dir {
-                        Self::dir_size_physical(&path)
+                let children: Vec<(PathBuf, bool)> = dir_entries
+                    .flatten()
+                    .map(|entry| {
+                        let path = entry.path();
+                        let is_dir = path.is_dir();
+                        (path, is_dir)
+                    })
+                    .collect();
+
+                // Compute directory sizes with bounded concurrency (max 3 at
+                // a time) via buffer_unordered. This overlaps I/O waits
+                // without spawning dozens of blocking threads.
+                // For files, use the metadata directly (cheap).
+                use futures::stream::StreamExt;
+
+                let dir_indices: Vec<usize> = children
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, (_, is_dir))| *is_dir)
+                    .map(|(i, _)| i)
+                    .collect();
+
+                let dir_size_futures = dir_indices.into_iter().map(|i| {
+                    let p = children[i].0.clone();
+                    async move {
+                        let size = Self::dir_size_physical_async(p).await;
+                        (i, size)
+                    }
+                });
+
+                let dir_size_stream = futures::stream::iter(dir_size_futures).buffer_unordered(3);
+
+                let dir_sizes: std::collections::HashMap<usize, u64> =
+                    dir_size_stream.collect().await;
+
+                for (i, (path, is_dir)) in children.iter().enumerate() {
+                    let size = if *is_dir {
+                        *dir_sizes.get(&i).unwrap_or(&0)
                     } else {
-                        entry.metadata().map(physical_size).unwrap_or(0)
+                        std::fs::metadata(path).map(physical_size).unwrap_or(0)
                     };
                     items_scanned += 1;
                     if size >= min_size {
-                        entries.push((path, size, is_dir));
+                        entries.push((path.clone(), size, *is_dir));
                     }
                 }
             }
@@ -350,22 +524,13 @@ impl Engine for DiskEngine {
             // ---- File-level breakdown (recursive, top N largest files) ----
             // These use LargeFile category and DO contribute to reclaimable
             // totals. Physical block size avoids counting sparse file holes.
-            let mut large_files: Vec<(PathBuf, u64)> = Vec::new();
+            // The recursive WalkDir is offloaded to spawn_blocking so it
+            // doesn't stall the async runtime when running concurrently
+            // with other engines.
+            let large_files = Self::walk_large_files_async(search_path.clone(), min_size).await;
+            items_scanned += large_files.len() as u64;
 
-            let walker = WalkDir::new(search_path)
-                .follow_links(false)
-                .into_iter()
-                .filter_map(|e| e.ok())
-                .filter(|e| e.file_type().is_file());
-
-            for entry in walker {
-                items_scanned += 1;
-                let size = entry.metadata().map(physical_size).unwrap_or(0);
-                if size >= min_size {
-                    large_files.push((entry.path().to_path_buf(), size));
-                }
-            }
-
+            let mut large_files = large_files;
             large_files.sort_by_key(|e| std::cmp::Reverse(e.1));
             large_files.truncate(self.args.top);
 
