@@ -606,7 +606,7 @@ impl DuplicateEngine {
     /// 8. Find similar images (op 94, 96)
     /// 9. Select safest deletion candidate (op 100-103)
     /// 10. Build findings (op 104, 108)
-    async fn detect_duplicates(
+    pub async fn detect_duplicates(
         &self,
         include_hidden: bool,
         follow_symlinks: bool,

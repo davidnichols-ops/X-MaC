@@ -1,3 +1,5 @@
+#[cfg(test)]
+pub mod benchmarks;
 pub mod cleanup;
 pub mod cli;
 pub mod config;

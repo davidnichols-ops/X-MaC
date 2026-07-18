@@ -526,7 +526,7 @@ impl DiskEngine {
     /// **Op 29 (helper):** Build a scan cache from walking a directory tree.
     /// Collects file paths, physical sizes, and modification timestamps.
     #[allow(dead_code)]
-    fn build_scan_cache(path: &std::path::Path) -> ScanCache {
+    pub fn build_scan_cache(path: &std::path::Path) -> ScanCache {
         let entries: Vec<ScanCacheEntry> = WalkDir::new(path)
             .follow_links(false)
             .into_iter()
