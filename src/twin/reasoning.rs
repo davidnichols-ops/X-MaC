@@ -2566,6 +2566,268 @@ impl ReasoningEngine {
         }
     }
 
+    /// op 296: Detect unusual behavior — identifies processes and system
+    /// patterns that deviate from expected norms. Goes beyond the process
+    /// anomaly detector by checking cross-dimensional patterns.
+    #[allow(dead_code)]
+    pub fn detect_unusual_behavior(&self) -> Vec<String> {
+        let mut behaviors = Vec::new();
+
+        // Unusual: process consuming >50% CPU (single process hog).
+        for proc in &self.twin.processes.top_cpu_consumers {
+            if proc.unit == "%" && proc.value > 50.0 {
+                behaviors.push(format!(
+                    "Unusual CPU usage: '{}' consuming {:.0}% CPU — possible runaway process",
+                    proc.name, proc.value
+                ));
+            }
+        }
+
+        // Unusual: process consuming >25% of total memory.
+        let total_mem = self.twin.memory.total_bytes.max(1);
+        for proc in &self.twin.processes.top_memory_consumers {
+            // ProcessInfo.value is in the unit specified; for memory it's bytes.
+            let mem_bytes = if proc.unit == "bytes" || proc.unit == "B" {
+                proc.value as u64
+            } else {
+                (proc.value * 1_048_576.0) as u64 // assume MB if unit is different
+            };
+            let mem_pct = mem_bytes as f64 / total_mem as f64 * 100.0;
+            if mem_pct > 25.0 {
+                behaviors.push(format!(
+                    "Unusual memory usage: '{}' using {:.0}% of RAM ({:.1} GB)",
+                    proc.name,
+                    mem_pct,
+                    mem_bytes as f64 / 1_073_741_824.0
+                ));
+            }
+        }
+
+        // Unusual: swap usage >25% of total swap (indicates memory pressure).
+        let swap_total = self.twin.memory.swap_total_bytes.max(1);
+        let swap_pct = self.twin.memory.swap_used_bytes as f64 / swap_total as f64 * 100.0;
+        if swap_pct > 25.0 {
+            behaviors.push(format!(
+                "Unusual swap usage: {:.0}% of swap space used ({:.1} GB) — system is memory-starved",
+                swap_pct,
+                self.twin.memory.swap_used_bytes as f64 / 1_073_741_824.0
+            ));
+        }
+
+        // Unusual: very high process count (>400 processes is atypical).
+        let proc_count = self.twin.processes.process_tree.len();
+        if proc_count > 400 {
+            behaviors.push(format!(
+                "Unusual process count: {} processes running — typical Mac has 200-350",
+                proc_count
+            ));
+        }
+
+        // Unusual: disk nearly full (>90%).
+        for disk in &self.twin.hardware.storage {
+            if disk.capacity_bytes > 0 {
+                let used_pct = self.twin.filesystem.total_size_bytes as f64
+                    / disk.capacity_bytes as f64
+                    * 100.0;
+                if used_pct > 90.0 {
+                    behaviors.push(format!(
+                        "Unusual disk usage: '{}' is {:.0}% full — critically low space",
+                        disk.name, used_pct
+                    ));
+                }
+            }
+        }
+
+        // Unusual: high thermal pressure.
+        let thermal = &self.twin.hardware.thermal.thermal_pressure;
+        if thermal.contains("High") || thermal.contains("Critical") {
+            behaviors.push(format!(
+                "Unusual thermal state: '{}' — system may be throttling",
+                thermal
+            ));
+        }
+
+        // Unusual: battery draining rapidly while on battery.
+        if self.twin.hardware.power_state.is_on_battery {
+            if let Some(battery) = self.twin.hardware.battery.as_ref() {
+                if let (Some(current), Some(design)) =
+                    (battery.current_capacity_mah, battery.design_capacity_mah)
+                {
+                    if design > 0 {
+                        let health_pct = current as f64 / design as f64 * 100.0;
+                        if health_pct < 20.0 {
+                            behaviors.push(format!(
+                                "Unusual battery state: {:.0}% remaining on battery — low power",
+                                health_pct
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
+        behaviors
+    }
+
+    /// op 297: Detect emerging failures — analyzes trends and patterns that
+    /// indicate a hardware or software failure is developing. Focuses on
+    /// rate-of-change analysis rather than current state.
+    #[allow(dead_code)]
+    pub fn detect_emerging_failures(&self) -> Vec<String> {
+        let mut failures = Vec::new();
+
+        // Emerging SSD failure: SMART status not verified or failing.
+        for disk in &self.twin.hardware.storage {
+            if let Some(ref smart) = disk.smart_health {
+                if smart.status != "Verified" && smart.status != "OK" {
+                    failures.push(format!(
+                        "Emerging SSD failure: '{}' SMART status is '{}' — backup immediately",
+                        disk.name, smart.status
+                    ));
+                }
+                // High power-on hours (>30,000 = ~3.4 years continuous) indicates wear.
+                if let Some(hours) = smart.power_on_hours {
+                    if hours > 30_000 {
+                        failures.push(format!(
+                            "Emerging SSD wear: '{}' has {} power-on hours — approaching end of lifespan",
+                            disk.name, hours
+                        ));
+                    }
+                }
+            }
+        }
+
+        // Emerging battery failure: high cycle count with declining health.
+        if let Some(ref battery) = self.twin.hardware.battery {
+            if battery.cycle_count > 800 {
+                if let (Some(current), Some(design)) =
+                    (battery.current_capacity_mah, battery.design_capacity_mah)
+                {
+                    if design > 0 {
+                        let health_pct = current as f64 / design as f64 * 100.0;
+                        if health_pct < 85.0 {
+                            failures.push(format!(
+                                "Emerging battery failure: {} cycles with {:.0}% capacity — battery degrading",
+                                battery.cycle_count, health_pct
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Emerging memory leak: processes with high growth rate.
+        for leak in &self.twin.memory.leak_candidates {
+            if leak.growth_rate_bytes_per_min > 50_000_000.0 {
+                failures.push(format!(
+                    "Emerging memory leak: '{}' growing ~{:.0} MB/min — will cause pressure if unchecked",
+                    leak.name,
+                    leak.growth_rate_bytes_per_min / 1_048_576.0
+                ));
+            }
+        }
+
+        // Emerging storage exhaustion: disk filling rapidly.
+        if let Some(forecast_days) = self.twin.filesystem.exhaustion_forecast_days {
+            if forecast_days < 30 {
+                failures.push(format!(
+                    "Emerging storage exhaustion: disk will fill in ~{} days — free space is declining",
+                    forecast_days
+                ));
+            }
+        }
+        // Also check if storage growth trend is high.
+        if let Some(growth_trend) = self.twin.filesystem.storage_growth_trend {
+            if growth_trend > 1.0 {
+                failures.push(format!(
+                    "Emerging storage growth: filesystem growing at {:.1} GB/week — monitor closely",
+                    growth_trend
+                ));
+            }
+        }
+
+        // Emerging thermal issue: sustained high CPU temperature.
+        if let Some(cpu_temp) = self.twin.hardware.thermal.cpu_temp_c {
+            if cpu_temp > 90.0 {
+                failures.push(format!(
+                    "Emerging thermal issue: CPU at {:.0}°C — sustained high temps reduce lifespan",
+                    cpu_temp
+                ));
+            }
+        }
+
+        // Emerging process instability: many anomalies detected.
+        let anomaly_count = self.twin.processes.anomalies.len();
+        if anomaly_count > 5 {
+            failures.push(format!(
+                "Emerging process instability: {} anomalies detected — system may be unstable",
+                anomaly_count
+            ));
+        }
+
+        failures
+    }
+
+    /// op 308: Expose APIs — export the reasoning engine's state as
+    /// structured JSON for external tools and AI agents to consume.
+    #[allow(dead_code)]
+    pub fn export_state_json(&self) -> String {
+        let state = serde_json::json!({
+            "timestamp_ms": self.twin.timestamp_ms,
+            "health_score": self.twin.health_score,
+            "trust_score": self.twin.trust_score,
+            "hardware": {
+                "model": self.twin.hardware.model_identifier,
+                "soc_generation": self.twin.hardware.soc_generation,
+                "cpu_cores": self.twin.hardware.cpu_cores.total_logical_cores,
+                "memory_bytes": self.twin.hardware.memory.total_bytes,
+                "thermal_pressure": self.twin.hardware.thermal.thermal_pressure,
+            },
+            "memory": {
+                "utilization": self.twin.memory.utilization,
+                "pressure_level": self.twin.memory.pressure_level,
+                "swap_used_bytes": self.twin.memory.swap_used_bytes,
+                "leak_candidates": self.twin.memory.leak_candidates.len(),
+            },
+            "processes": {
+                "count": self.twin.processes.process_tree.len(),
+                "anomalies": self.twin.processes.anomalies.len(),
+                "top_cpu": self.twin.processes.top_cpu_consumers.iter().take(5).map(|p| {
+                    serde_json::json!({"name": p.name, "value": p.value, "unit": p.unit})
+                }).collect::<Vec<_>>(),
+            },
+            "energy": {
+                "has_battery": self.twin.hardware.battery.is_some(),
+                "on_battery": self.twin.hardware.power_state.is_on_battery,
+                "battery_cycles": self.twin.hardware.battery.as_ref().map(|b| b.cycle_count),
+            },
+            "filesystem": {
+                "total_files": self.twin.filesystem.total_files,
+                "total_size_bytes": self.twin.filesystem.total_size_bytes,
+                "orphan_files": self.twin.filesystem.orphan_files.len(),
+                "duplicate_clusters": self.twin.filesystem.duplicate_clusters.len(),
+                "exhaustion_forecast_days": self.twin.filesystem.exhaustion_forecast_days,
+            },
+        });
+        serde_json::to_string_pretty(&state).unwrap_or_else(|_| "{}".to_string())
+    }
+
+    /// op 308: Query the twin state and return results as JSON.
+    /// Wraps the `query()` method with JSON serialization for API exposure.
+    #[allow(dead_code)]
+    pub fn query_json(&self, query: &str) -> String {
+        let result = self.query(query);
+        serde_json::to_string_pretty(&serde_json::json!({
+            "query": result.query,
+            "answer": result.answer,
+            "confidence": result.confidence,
+            "data": result.data.iter().map(|(k, v)| {
+                serde_json::json!({"key": k, "value": v})
+            }).collect::<Vec<_>>(),
+        }))
+        .unwrap_or_else(|_| "{}".to_string())
+    }
+
     /// Get the twin reference.
     pub fn twin(&self) -> &DigitalTwin {
         &self.twin
@@ -2593,12 +2855,12 @@ mod tests {
     use crate::twin::energy::EnergyTwin;
     use crate::twin::fs_graph::FilesystemGraph;
     use crate::twin::hardware::{
-        CpuTopology, GpuInfo, HardwareMemory, HardwareProfile, NeuralEngineInfo, Peripherals,
-        PowerState, StorageDevice, ThermalInfo,
+        BatteryHardware, CpuTopology, GpuInfo, HardwareMemory, HardwareProfile, NeuralEngineInfo,
+        Peripherals, PowerState, SmartHealth, StorageDevice, ThermalInfo,
     };
     use crate::twin::memory::MemoryIntelligence;
     use crate::twin::model::DigitalTwin;
-    use crate::twin::process::{ProcessAnomaly, ProcessIntelligenceGraph, ProcessNode};
+    use crate::twin::process::{ProcessAnomaly, ProcessInfo, ProcessIntelligenceGraph, ProcessNode};
     use crate::twin::software_genome::SoftwareGenome;
     use std::collections::HashMap;
 
@@ -3885,5 +4147,157 @@ mod tests {
             .find(|i| i.dimension == "memory")
             .unwrap();
         assert_eq!(mem_interval.interval_secs, 15);
+    }
+
+    #[test]
+    fn test_detect_unusual_behavior_high_cpu() {
+        let mut twin = mock_twin();
+        twin.processes.top_cpu_consumers.push(ProcessInfo {
+            pid: 123,
+            name: "runaway".to_string(),
+            value: 75.0,
+            unit: "%".to_string(),
+        });
+
+        let engine = ReasoningEngine::new(twin);
+        let behaviors = engine.detect_unusual_behavior();
+        assert!(behaviors.iter().any(|b| b.contains("runaway")));
+    }
+
+    #[test]
+    fn test_detect_unusual_behavior_normal_system() {
+        let twin = mock_twin();
+        let engine = ReasoningEngine::new(twin);
+        let behaviors = engine.detect_unusual_behavior();
+        // A normal mock twin should produce few or no unusual behaviors.
+        // (May produce some due to mock data, but shouldn't panic.)
+        assert!(behaviors.len() < 10);
+    }
+
+    #[test]
+    fn test_detect_unusual_behavior_high_swap() {
+        let mut twin = mock_twin();
+        twin.memory.swap_total_bytes = 1_000_000_000;
+        twin.memory.swap_used_bytes = 500_000_000; // 50% swap usage
+
+        let engine = ReasoningEngine::new(twin);
+        let behaviors = engine.detect_unusual_behavior();
+        assert!(behaviors.iter().any(|b| b.contains("swap")));
+    }
+
+    #[test]
+    fn test_detect_emerging_failures_ssd_wear() {
+        let mut twin = mock_twin();
+        twin.hardware.storage.push(StorageDevice {
+            name: "Apple SSD".to_string(),
+            capacity_bytes: 500_000_000_000,
+            is_ssd: true,
+            smart_health: Some(SmartHealth {
+                status: "Verified".to_string(),
+                temperature_celsius: None,
+                power_on_hours: Some(35_000), // > 30,000 hours
+            }),
+        });
+
+        let engine = ReasoningEngine::new(twin);
+        let failures = engine.detect_emerging_failures();
+        assert!(failures.iter().any(|f| f.contains("SSD wear")));
+    }
+
+    #[test]
+    fn test_detect_emerging_failures_ssd_smart_failing() {
+        let mut twin = mock_twin();
+        twin.hardware.storage.push(StorageDevice {
+            name: "Failing SSD".to_string(),
+            capacity_bytes: 500_000_000_000,
+            is_ssd: true,
+            smart_health: Some(SmartHealth {
+                status: "Failing".to_string(),
+                temperature_celsius: None,
+                power_on_hours: None,
+            }),
+        });
+
+        let engine = ReasoningEngine::new(twin);
+        let failures = engine.detect_emerging_failures();
+        assert!(failures.iter().any(|f| f.contains("SMART status")));
+    }
+
+    #[test]
+    fn test_detect_emerging_failures_battery_degradation() {
+        let mut twin = mock_twin();
+        twin.hardware.battery = Some(BatteryHardware {
+            model: "Test".to_string(),
+            chemistry: "Lithium".to_string(),
+            cycle_count: 900, // > 800 cycles
+            design_capacity_mah: Some(5000),
+            current_capacity_mah: Some(3500), // 70% health < 85%
+        });
+
+        let engine = ReasoningEngine::new(twin);
+        let failures = engine.detect_emerging_failures();
+        assert!(failures.iter().any(|f| f.contains("battery")));
+    }
+
+    #[test]
+    fn test_detect_emerging_failures_memory_leak() {
+        use crate::twin::memory::MemoryLeakCandidate;
+        let mut twin = mock_twin();
+        twin.memory.leak_candidates.push(MemoryLeakCandidate {
+            pid: 123,
+            name: "leaky".to_string(),
+            growth_rate_bytes_per_min: 100_000_000.0, // 100 MB/min
+            duration_mins: 30,
+        });
+
+        let engine = ReasoningEngine::new(twin);
+        let failures = engine.detect_emerging_failures();
+        assert!(failures.iter().any(|f| f.contains("memory leak")));
+    }
+
+    #[test]
+    fn test_detect_emerging_failures_normal_system() {
+        let twin = mock_twin();
+        let engine = ReasoningEngine::new(twin);
+        let failures = engine.detect_emerging_failures();
+        // Normal mock twin should produce few failures.
+        assert!(failures.len() < 10);
+    }
+
+    #[test]
+    fn test_export_state_json_is_valid_json() {
+        let twin = mock_twin();
+        let engine = ReasoningEngine::new(twin);
+        let json = engine.export_state_json();
+
+        // Should be valid JSON.
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed.is_object());
+        assert!(parsed.get("health_score").is_some());
+        assert!(parsed.get("hardware").is_some());
+        assert!(parsed.get("memory").is_some());
+        assert!(parsed.get("processes").is_some());
+    }
+
+    #[test]
+    fn test_export_state_json_contains_hardware_info() {
+        let twin = mock_twin();
+        let engine = ReasoningEngine::new(twin);
+        let json = engine.export_state_json();
+        assert!(json.contains("cpu_cores"));
+        assert!(json.contains("memory_bytes"));
+        assert!(json.contains("thermal_pressure"));
+    }
+
+    #[test]
+    fn test_query_json_returns_valid_json() {
+        let twin = mock_twin();
+        let engine = ReasoningEngine::new(twin);
+        let json = engine.query_json("health");
+
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed.get("query").is_some());
+        assert!(parsed.get("answer").is_some());
+        assert!(parsed.get("confidence").is_some());
     }
 }
