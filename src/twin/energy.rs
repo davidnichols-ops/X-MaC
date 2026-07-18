@@ -129,6 +129,31 @@ pub struct EnergyPolicy {
 
 #[allow(dead_code)]
 impl EnergyTwin {
+    /// Return an empty EnergyTwin with zeroed values — for testing.
+    #[allow(dead_code)]
+    pub fn empty() -> Self {
+        Self {
+            battery: None,
+            charging_patterns: Vec::new(),
+            energy_consumers: Vec::new(),
+            thermal_efficiency: None,
+            sleep_efficiency: None,
+            wake_causes: Vec::new(),
+            degradation_forecast: None,
+            recommended_power_mode: String::new(),
+            profile: EnergyProfile {
+                background_drain_pct: 0.0,
+                network_drain_pct: 0.0,
+                display_drain_pct: 0.0,
+                compute_drain_pct: 0.0,
+            },
+            history: Vec::new(),
+            consumption_explanations: Vec::new(),
+            priorities: Vec::new(),
+            policies: Vec::new(),
+        }
+    }
+
     /// Collect energy and battery twin data.
     pub fn collect() -> Self {
         // op 201: Model battery behavior from system_awareness.
@@ -701,6 +726,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "Integration test — requires system commands"]
     fn test_collect_runs() {
         let et = EnergyTwin::collect();
         // Should not panic; recommended power mode is always set.
@@ -802,14 +828,14 @@ mod tests {
 
     #[test]
     fn test_battery_report() {
-        let et = EnergyTwin::collect();
+        let et = EnergyTwin::empty();
         let report = et.battery_report();
         assert!(!report.is_empty());
     }
 
     #[test]
     fn test_optimize_energy_and_standby() {
-        let et = EnergyTwin::collect();
+        let et = EnergyTwin::empty();
         assert!(!et.optimize_standby().is_empty());
         assert!(!et.reduce_idle_power().is_empty());
         // optimize_energy returns a Vec (may be empty if no heavy apps).

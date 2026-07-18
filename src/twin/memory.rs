@@ -164,6 +164,40 @@ pub struct UnifiedMemoryPlan {
 
 #[allow(dead_code)]
 impl MemoryIntelligence {
+    /// Return an empty MemoryIntelligence with zeroed values — for testing.
+    #[allow(dead_code)]
+    pub fn empty() -> Self {
+        Self {
+            total_bytes: 0,
+            used_bytes: 0,
+            available_bytes: 0,
+            compressed_bytes: 0,
+            swap_used_bytes: 0,
+            swap_total_bytes: 0,
+            purgeable_bytes: 0,
+            utilization: 0.0,
+            pressure_level: 0,
+            pressure_forecast: None,
+            top_consumers: Vec::new(),
+            leak_candidates: Vec::new(),
+            fragmentation_pct: None,
+            unified_memory_model: UnifiedMemoryModel {
+                is_apple_silicon: false,
+                gpu_allocated_bytes: None,
+                ane_allocated_bytes: None,
+                metal_allocated_bytes: None,
+            },
+            topology: MemoryTopology {
+                clients: Vec::new(),
+                shared_pool_bytes: None,
+            },
+            history: Vec::new(),
+            learned_workflows: Vec::new(),
+            policies: Vec::new(),
+            decision_explanations: Vec::new(),
+        }
+    }
+
     /// Collect memory intelligence.
     pub fn collect() -> Self {
         // Start with what system_awareness already provides (ops 161-163).
@@ -749,6 +783,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "Integration test — requires system commands"]
     fn test_collect_runs() {
         let mi = MemoryIntelligence::collect();
         // On any real system total_bytes may be 0 on stubbed Linux; just
@@ -795,7 +830,7 @@ mod tests {
 
     #[test]
     fn test_simulate_change() {
-        let mut mi = MemoryIntelligence::collect();
+        let mut mi = MemoryIntelligence::empty();
         mi.total_bytes = 16_000_000_000;
         mi.used_bytes = 8_000_000_000;
         let predicted = mi.simulate_change(2_000_000_000);
@@ -804,7 +839,7 @@ mod tests {
 
     #[test]
     fn test_inefficient_apps() {
-        let mut mi = MemoryIntelligence::collect();
+        let mut mi = MemoryIntelligence::empty();
         mi.top_consumers = vec![
             MemoryConsumer {
                 pid: 1,
@@ -855,7 +890,7 @@ mod tests {
 
     #[test]
     fn test_workload_optimization_recs() {
-        let mi = MemoryIntelligence::collect();
+        let mi = MemoryIntelligence::empty();
         assert!(!mi.optimize_developer_workloads().is_empty());
         assert!(!mi.optimize_creative_workloads().is_empty());
         assert!(!mi.optimize_gaming_workloads().is_empty());
@@ -864,8 +899,9 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Integration test — requires system commands"]
     fn test_record_sample_grows_history() {
-        let mut mi = MemoryIntelligence::collect();
+        let mut mi = MemoryIntelligence::empty();
         let initial = mi.history.len();
         mi.record_sample();
         assert_eq!(mi.history.len(), initial + 1);
@@ -873,14 +909,14 @@ mod tests {
 
     #[test]
     fn test_intelligence_summary() {
-        let mi = MemoryIntelligence::collect();
+        let mi = MemoryIntelligence::empty();
         let s = mi.intelligence_summary();
         assert!(s.contains("Memory:"));
     }
 
     #[test]
     fn test_manage_gpu_memory() {
-        let mut mi = MemoryIntelligence::collect();
+        let mut mi = MemoryIntelligence::empty();
         mi.total_bytes = 16_000_000_000;
         let plan = mi.manage_gpu_memory();
         assert_eq!(plan.recommended_limit_bytes, 4_000_000_000);
@@ -889,7 +925,7 @@ mod tests {
 
     #[test]
     fn test_manage_gpu_memory_overcommitted() {
-        let mut mi = MemoryIntelligence::collect();
+        let mut mi = MemoryIntelligence::empty();
         mi.total_bytes = 16_000_000_000;
         mi.unified_memory_model.gpu_allocated_bytes = Some(5_000_000_000);
         mi.unified_memory_model.metal_allocated_bytes = Some(0);
@@ -903,7 +939,7 @@ mod tests {
 
     #[test]
     fn test_optimize_unified_memory_non_apple_silicon() {
-        let mut mi = MemoryIntelligence::collect();
+        let mut mi = MemoryIntelligence::empty();
         mi.unified_memory_model.is_apple_silicon = false;
         let plan = mi.optimize_unified_memory();
         assert!(!plan.is_apple_silicon);
@@ -912,7 +948,7 @@ mod tests {
 
     #[test]
     fn test_optimize_unified_memory_apple_silicon() {
-        let mut mi = MemoryIntelligence::collect();
+        let mut mi = MemoryIntelligence::empty();
         mi.unified_memory_model.is_apple_silicon = true;
         mi.total_bytes = 16_000_000_000;
         mi.used_bytes = 10_000_000_000;

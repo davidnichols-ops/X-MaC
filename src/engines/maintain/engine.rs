@@ -2254,6 +2254,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "Integration test — requires system commands"]
     async fn test_maintain_engine_scan_completes() {
         use clap::Parser;
         let engine = MaintainEngine::default();

@@ -80,6 +80,22 @@ pub struct AppPolicy {
 
 #[allow(dead_code)]
 impl AppIntelligenceGraph {
+    /// Return an empty AppIntelligenceGraph with zeroed values — for testing.
+    #[allow(dead_code)]
+    pub fn empty() -> Self {
+        Self {
+            apps: Vec::new(),
+            health_scores: HashMap::new(),
+            suspicious_apps: Vec::new(),
+            unused_apps: Vec::new(),
+            duplicate_apps: Vec::new(),
+            knowledge_graph: Vec::new(),
+            policies: Vec::new(),
+            problem_explanations: Vec::new(),
+            total_apps: 0,
+        }
+    }
+
     /// Collect the application intelligence graph.
     pub fn collect() -> Self {
         // op 236-240: Build app nodes from the envmap engine's app list.
@@ -633,6 +649,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "Integration test — requires system commands"]
     fn test_collect_runs() {
         let g = AppIntelligenceGraph::collect();
         // total_apps is usize, always >= 0
@@ -744,7 +761,7 @@ mod tests {
 
     #[test]
     fn test_predict_uninstall_impact() {
-        let mut g = AppIntelligenceGraph::collect();
+        let mut g = AppIntelligenceGraph::empty();
         g.apps.push(AppIntelligenceNode {
             bundle_id: "test.foo".to_string(),
             name: "Foo".to_string(),
@@ -768,7 +785,7 @@ mod tests {
 
     #[test]
     fn test_maintain_app_profiles_refreshes_aggregates() {
-        let mut g = AppIntelligenceGraph::collect();
+        let mut g = AppIntelligenceGraph::empty();
         g.apps.clear();
         g.apps.push(AppIntelligenceNode {
             bundle_id: "com.example.unused".to_string(),
@@ -828,7 +845,7 @@ mod tests {
 
     #[test]
     fn test_maintain_app_profiles_updates_crash_predictions() {
-        let mut g = AppIntelligenceGraph::collect();
+        let mut g = AppIntelligenceGraph::empty();
         g.apps.clear();
         g.apps.push(AppIntelligenceNode {
             bundle_id: "com.example.corrupt".to_string(),

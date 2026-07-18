@@ -717,6 +717,7 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
+    #[ignore = "Integration test — requires system commands"]
     fn collect_system_telemetry() {
         let tel = SystemTelemetry::collect();
         assert!(tel.total_bytes > 0, "total_bytes should be > 0");
@@ -738,6 +739,7 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
+    #[ignore = "Integration test — requires system commands"]
     fn collect_full_snapshot() {
         let snap = TelemetrySnapshot::collect();
         assert!(snap.system.total_bytes > 0);
@@ -745,6 +747,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Integration test — requires system commands"]
     fn telemetry_buffer_tracks_trends() {
         let mut buf = TelemetryBuffer::new(10);
         for _ in 0..3 {
@@ -758,6 +761,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Integration test — requires system commands"]
     fn system_telemetry_derived_metrics() {
         let tel = SystemTelemetry::collect();
         let used = tel.used_bytes();

@@ -2917,12 +2917,12 @@ mod tests {
                 },
                 fingerprint: String::new(),
             },
-            software_genome: SoftwareGenome::collect(),
-            filesystem: FilesystemGraph::collect(),
+            software_genome: SoftwareGenome::empty(),
+            filesystem: FilesystemGraph::empty(),
             processes: ProcessIntelligenceGraph::empty(),
-            memory: MemoryIntelligence::collect(),
-            energy: EnergyTwin::collect(),
-            applications: AppIntelligenceGraph::collect(),
+            memory: MemoryIntelligence::empty(),
+            energy: EnergyTwin::empty(),
+            applications: AppIntelligenceGraph::empty(),
             health_score: 80.0,
             trust_score: 0.5,
             metadata: HashMap::new(),
@@ -3311,10 +3311,11 @@ mod tests {
     fn test_compute_system_health_with_thermal_pressure() {
         let mut twin = mock_twin();
         twin.hardware.thermal.thermal_pressure = "Critical".to_string();
+        twin.memory.utilization = 0.5;
 
         let engine = ReasoningEngine::new(twin);
         let health = engine.compute_system_health();
-        assert!(health < 90.0);
+        assert!(health < 90.0, "thermal pressure should lower health, got {}", health);
     }
 
     #[test]

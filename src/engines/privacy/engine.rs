@@ -2472,6 +2472,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "Integration test — runs full privacy engine scan"]
     async fn test_privacy_engine_scan_completes() {
         use clap::Parser;
         let engine = PrivacyEngine::new();
@@ -2487,6 +2488,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "Integration test — runs full privacy engine scan"]
     async fn test_privacy_engine_scan_browser_data_only() {
         use clap::Parser;
         let engine = PrivacyEngine::new()
@@ -2502,6 +2504,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "Integration test — runs full privacy engine scan"]
     async fn test_privacy_engine_scan_disabled() {
         use clap::Parser;
         let engine = PrivacyEngine::new()
@@ -2560,6 +2563,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Integration test — queries system TCC database"]
     fn test_manage_permissions_returns_report() {
         let report = manage_permissions();
         assert_eq!(
@@ -2569,6 +2573,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Integration test — runs system security checks"]
     fn test_audit_security_posture_returns_score() {
         let posture = audit_security_posture();
         assert!(posture.score >= 0.0 && posture.score <= 100.0);

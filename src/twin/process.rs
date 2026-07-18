@@ -1735,6 +1735,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Integration test — requires system commands"]
     fn test_process_intelligence_graph_collect() {
         // Full collection from the running system
         let graph = ProcessIntelligenceGraph::collect();

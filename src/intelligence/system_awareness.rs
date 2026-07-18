@@ -767,6 +767,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Integration test — requires system commands"]
     fn test_system_snapshot_collects() {
         let snapshot = SystemSnapshot::collect();
         assert!(snapshot.health_score >= 0.0 && snapshot.health_score <= 100.0);
@@ -774,6 +775,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Integration test — requires system commands"]
     fn test_memory_dimension_collects() {
         let mem = MemoryDimension::collect();
         // On any real system, total should be > 0

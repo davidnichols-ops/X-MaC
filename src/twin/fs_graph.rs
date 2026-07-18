@@ -233,8 +233,9 @@ impl FilesystemGraph {
         graph
     }
 
-    /// Construct an empty (zeroed) filesystem graph.
-    fn empty() -> Self {
+    /// Return an empty (zeroed) filesystem graph — for testing.
+    #[allow(dead_code)]
+    pub fn empty() -> Self {
         Self {
             total_files: 0,
             total_size_bytes: 0,

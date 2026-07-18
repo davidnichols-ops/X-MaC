@@ -852,6 +852,7 @@ mod tests {
     use crate::config::store::AdaptiveState;
 
     #[test]
+    #[ignore = "Integration test — requires system commands"]
     fn test_advisor_produces_recommendations() {
         let snapshot = SystemSnapshot::collect();
         let advisor = Advisor::new(OptimizationProfile::Balanced, AdaptiveState::default());
@@ -888,6 +889,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Integration test — requires system commands"]
     fn test_adaptive_weighting() {
         let mut adaptive = AdaptiveState::default();
         // Record that user always accepts memory recommendations
@@ -944,6 +946,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Integration test — requires system commands"]
     fn test_advisor_with_gaming_profile() {
         let snapshot = SystemSnapshot::collect();
         let advisor = Advisor::new(OptimizationProfile::Gaming, AdaptiveState::default());
@@ -954,6 +957,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Integration test — requires system commands"]
     fn test_advisor_with_conservative_profile() {
         let snapshot = SystemSnapshot::collect();
         let advisor = Advisor::new(OptimizationProfile::Conservative, AdaptiveState::default());
@@ -963,6 +967,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Integration test — requires system commands"]
     fn test_recommendations_are_sorted_by_severity() {
         let snapshot = SystemSnapshot::collect();
         let advisor = Advisor::new(OptimizationProfile::Balanced, AdaptiveState::default());

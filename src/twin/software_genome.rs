@@ -68,6 +68,37 @@ pub struct SoftwareComponent {
 }
 
 impl SoftwareGenome {
+    /// Return an empty SoftwareGenome with no components — for testing.
+    #[allow(dead_code)]
+    pub fn empty() -> Self {
+        Self {
+            applications: Vec::new(),
+            frameworks: Vec::new(),
+            dynamic_libraries: Vec::new(),
+            kernel_extensions: Vec::new(),
+            system_extensions: Vec::new(),
+            launch_agents: Vec::new(),
+            launch_daemons: Vec::new(),
+            login_items: Vec::new(),
+            plugins: Vec::new(),
+            browser_extensions: Vec::new(),
+            fonts: Vec::new(),
+            developer_tools: Vec::new(),
+            sdks: Vec::new(),
+            package_managers: Vec::new(),
+            python_envs: Vec::new(),
+            node_envs: Vec::new(),
+            rust_toolchains: Vec::new(),
+            docker_images: Vec::new(),
+            containers: Vec::new(),
+            virtual_machines: Vec::new(),
+            ai_models: Vec::new(),
+            datasets: Vec::new(),
+            dependency_graph: HashMap::new(),
+            total_components: 0,
+        }
+    }
+
     /// Collect the complete software genome.
     ///
     /// Orchestrates operations 41-80: application inventory, framework
@@ -1361,6 +1392,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "Integration test — requires system commands"]
     fn collect_returns_non_negative_total() {
         let genome = SoftwareGenome::collect();
         // total_components is a sum of vec lengths, so it must be >= 0 and
@@ -1395,6 +1427,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Integration test — requires system commands"]
     fn collect_runs_without_panic() {
         // The full collection touches the filesystem and may invoke external
         // commands; it must never panic regardless of the host environment.
@@ -1493,6 +1526,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Integration test — walks /Applications"]
     fn collect_applications_returns_vec() {
         // Must not panic; content depends on the host.
         let apps = collect_applications();
@@ -1502,6 +1536,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Integration test — walks font directories"]
     fn collect_fonts_returns_vec() {
         let fonts = collect_fonts();
         for font in &fonts {
@@ -1514,16 +1549,19 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Integration test — queries login items"]
     fn collect_login_items_returns_vec() {
         let _items = collect_login_items();
     }
 
     #[test]
+    #[ignore = "Integration test — walks plugin directories"]
     fn collect_plugins_returns_vec() {
         let _plugins = collect_plugins();
     }
 
     #[test]
+    #[ignore = "Integration test — runs which for each tool"]
     fn collect_developer_tools_returns_vec() {
         let tools = collect_developer_tools();
         // At least git is usually present in dev environments, but we don't
@@ -1534,38 +1572,45 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Integration test — walks filesystem for Python envs"]
     fn collect_python_envs_returns_vec() {
         let _envs = collect_python_envs();
     }
 
     #[test]
+    #[ignore = "Integration test — walks filesystem for Node envs"]
     fn collect_node_envs_returns_vec() {
         let _envs = collect_node_envs();
     }
 
     #[test]
+    #[ignore = "Integration test — walks ~/.rustup"]
     fn collect_rust_toolchains_returns_vec() {
         let _envs = collect_rust_toolchains();
     }
 
     #[test]
+    #[ignore = "Integration test — runs which for each package manager"]
     fn collect_package_managers_returns_vec() {
         let _pms = collect_package_managers();
     }
 
     #[test]
+    #[ignore = "Integration test — runs docker command"]
     fn collect_docker_images_returns_vec() {
         // Docker may not be installed; the function must still return a vec.
         let _images = collect_docker_images();
     }
 
     #[test]
+    #[ignore = "Integration test — walks filesystem for VMs"]
     fn collect_virtual_machines_returns_vec() {
         let _vms = collect_virtual_machines();
     }
 
     #[cfg(target_os = "macos")]
     #[test]
+    #[ignore = "Integration test — walks /System/Library/Frameworks"]
     fn collect_frameworks_returns_vec_on_macos() {
         let frameworks = collect_frameworks();
         // /System/Library/Frameworks always exists on macOS.
@@ -1577,12 +1622,14 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
+    #[ignore = "Integration test — walks SDK directories"]
     fn collect_sdks_returns_vec_on_macos() {
         let _sdks = collect_sdks();
     }
 
     #[cfg(target_os = "macos")]
     #[test]
+    #[ignore = "Integration test — reads LaunchAgents/LaunchDaemons directories"]
     fn collect_launchd_items_returns_vec_on_macos() {
         let (agents, daemons) = collect_launchd_items();
         // At least system LaunchDaemons should be present on macOS.
