@@ -80,6 +80,10 @@ pub struct DuplicateEngine {
     scan_paths: Vec<PathBuf>,
     /// Whitelist of path substrings to exclude from duplicate detection.
     whitelist: Vec<String>,
+    /// Whether to detect similar images via perceptual hashing.
+    similar_images: bool,
+    /// Whether duplicate detection is enabled.
+    enabled: bool,
 }
 
 impl Default for DuplicateEngine {
@@ -95,6 +99,8 @@ impl Default for DuplicateEngine {
                 home.join("Desktop"),
             ],
             whitelist: DEFAULT_WHITELIST.iter().map(|s| s.to_string()).collect(),
+            similar_images: false,
+            enabled: true,
         }
     }
 }
@@ -103,6 +109,31 @@ impl DuplicateEngine {
     #[allow(dead_code)]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Apply config and profile overrides to the engine. Config values act
+    /// as defaults; the active optimization profile further tunes behavior.
+    #[allow(dead_code)]
+    pub fn with_config(mut self, config: &crate::config::Config) -> Self {
+        let dc = &config.duplicate;
+        let profile = config.profile;
+
+        self.min_size = dc.min_size;
+        self.enabled = dc.enabled;
+        self.similar_images = dc.similar_images;
+
+        let profile_min_size = profile.dedup_min_size();
+        if profile_min_size > self.min_size {
+            self.min_size = profile_min_size;
+        }
+        if !dc.enabled {
+            self.enabled = profile.dedup_enabled();
+        }
+        if profile.dedup_similar_images() {
+            self.similar_images = true;
+        }
+
+        self
     }
 
     /// Set custom scan paths.
@@ -632,18 +663,20 @@ impl DuplicateEngine {
         }
 
         // Find similar images (not identical, but visually close)
-        let similar_clusters = Self::find_similar_images(&all_files, 8);
-        let mut similar_dup_clusters: Vec<DuplicateCluster> = similar_clusters
-            .into_iter()
-            .map(|files| {
-                let mut c = DuplicateCluster::from_files(files);
-                c.similar = true;
-                c.confidence = 0.75; // lower confidence for similar (not identical)
-                c.select_deletion_candidates();
-                c
-            })
-            .collect();
-        all_clusters.append(&mut similar_dup_clusters);
+        if self.similar_images {
+            let similar_clusters = Self::find_similar_images(&all_files, 8);
+            let mut similar_dup_clusters: Vec<DuplicateCluster> = similar_clusters
+                .into_iter()
+                .map(|files| {
+                    let mut c = DuplicateCluster::from_files(files);
+                    c.similar = true;
+                    c.confidence = 0.75; // lower confidence for similar (not identical)
+                    c.select_deletion_candidates();
+                    c
+                })
+                .collect();
+            all_clusters.append(&mut similar_dup_clusters);
+        }
 
         (all_clusters, items_scanned)
     }
@@ -1916,5 +1949,30 @@ mod tests {
     fn test_scan_database_default_is_empty() {
         let db = ScanDatabase::default();
         assert!(db.entries.is_empty());
+    }
+
+    #[test]
+    fn test_with_config_applies_profile_overrides() {
+        use crate::config::profiles::OptimizationProfile;
+        use crate::config::Config;
+
+        let mut config = Config::default();
+        config.profile = OptimizationProfile::Aggressive;
+        let engine = DuplicateEngine::new().with_config(&config);
+        assert!(engine.similar_images);
+        assert!(engine.enabled);
+        assert_eq!(engine.min_size, 1024);
+    }
+
+    #[test]
+    fn test_with_config_conservative_raises_min_size() {
+        use crate::config::profiles::OptimizationProfile;
+        use crate::config::Config;
+
+        let mut config = Config::default();
+        config.profile = OptimizationProfile::Conservative;
+        let engine = DuplicateEngine::new().with_config(&config);
+        assert_eq!(engine.min_size, 10 * 1024 * 1024);
+        assert!(!engine.similar_images);
     }
 }

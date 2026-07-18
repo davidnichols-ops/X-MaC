@@ -24,6 +24,10 @@ pub struct Config {
     #[serde(default)]
     pub clean: CleanConfig,
 
+    /// Duplicate detection engine settings.
+    #[serde(default)]
+    pub duplicate: DuplicateConfig,
+
     /// Maintain engine settings.
     #[serde(default)]
     pub maintain: MaintainConfig,
@@ -78,6 +82,7 @@ impl Default for Config {
         Self {
             profile: OptimizationProfile::default(),
             clean: CleanConfig::default(),
+            duplicate: DuplicateConfig::default(),
             maintain: MaintainConfig::default(),
             optimize: OptimizeConfig::default(),
             daemon: DaemonConfig::default(),
@@ -185,6 +190,34 @@ impl Default for CleanConfig {
             orphans: true,
             resource_mode: default_resource_mode(),
             min_large_size_mb: default_large_file_mb(),
+        }
+    }
+}
+
+/// Configuration for the duplicate detection engine.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DuplicateConfig {
+    /// Minimum file size in bytes to consider for duplicate detection.
+    #[serde(default = "default_dedup_min_size")]
+    pub min_size: u64,
+    /// Whether duplicate detection is enabled.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Whether to detect similar images (perceptual hash).
+    #[serde(default)]
+    pub similar_images: bool,
+}
+
+fn default_dedup_min_size() -> u64 {
+    1024
+}
+
+impl Default for DuplicateConfig {
+    fn default() -> Self {
+        Self {
+            min_size: default_dedup_min_size(),
+            enabled: false,
+            similar_images: false,
         }
     }
 }
@@ -804,5 +837,58 @@ min_age_days = 7
 
         let mgr2 = ConfigManager::load_from(&path);
         assert_eq!(mgr2.config().clean.min_age_days, 42);
+    }
+
+    #[test]
+    fn test_duplicate_config_defaults() {
+        let config = DuplicateConfig::default();
+        assert_eq!(config.min_size, 1024);
+        assert!(!config.enabled);
+        assert!(!config.similar_images);
+    }
+
+    #[test]
+    fn test_duplicate_config_in_top_level() {
+        let config = Config::default();
+        assert_eq!(config.duplicate.min_size, 1024);
+    }
+
+    #[test]
+    fn test_duplicate_config_partial_toml() {
+        let toml_str = r#"
+[duplicate]
+min_size = 4096
+enabled = true
+"#;
+        let config = ConfigManager::parse(toml_str).expect("parse");
+        assert_eq!(config.duplicate.min_size, 4096);
+        assert!(config.duplicate.enabled);
+        assert!(!config.duplicate.similar_images);
+    }
+
+    #[test]
+    fn test_duplicate_config_roundtrip() {
+        let mut config = Config::default();
+        config.duplicate.min_size = 8192;
+        config.duplicate.enabled = true;
+        config.duplicate.similar_images = true;
+        let toml_str = toml::to_string(&config).expect("serialize");
+        let parsed: Config = toml::from_str(&toml_str).expect("deserialize");
+        assert_eq!(parsed.duplicate.min_size, 8192);
+        assert!(parsed.duplicate.enabled);
+        assert!(parsed.duplicate.similar_images);
+    }
+
+    #[test]
+    fn test_duplicate_profile_thresholds() {
+        use crate::config::profiles::OptimizationProfile as P;
+        assert_eq!(P::Conservative.dedup_min_size(), 10 * 1024 * 1024);
+        assert_eq!(P::Balanced.dedup_min_size(), 1024);
+        assert_eq!(P::Aggressive.dedup_min_size(), 1024);
+        assert!(!P::Conservative.dedup_enabled());
+        assert!(P::Balanced.dedup_enabled());
+        assert!(P::Aggressive.dedup_enabled());
+        assert!(!P::Balanced.dedup_similar_images());
+        assert!(P::Aggressive.dedup_similar_images());
     }
 }
