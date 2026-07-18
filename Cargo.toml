@@ -45,6 +45,8 @@ byte-unit = "4.0"
 
 blake3 = "1.5"
 
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "bmp", "tiff"] }
+
 uuid = { version = "1.10", features = ["v7", "serde"] }
 
 async-trait = "0.1"
