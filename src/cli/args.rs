@@ -215,6 +215,11 @@ pub enum Commands {
     /// rules. Every file targeted for cleanup traces to a named rule with
     /// a rating (safe/review/protected).
     Safety(SafetyArgs),
+
+    /// Find duplicate files via BLAKE3 hashing and perceptual image
+    /// fingerprinting. A standalone version of `clean --dedup` focused
+    /// only on duplicate detection.
+    Dedup(DedupArgs),
 }
 
 impl Commands {
@@ -245,6 +250,7 @@ impl Commands {
             Commands::Twin(_) => crate::core::types::EngineId::All,
             Commands::Mcp => crate::core::types::EngineId::All,
             Commands::Safety(_) => crate::core::types::EngineId::All,
+            Commands::Dedup(_) => crate::core::types::EngineId::Duplicate,
         }
     }
 }
@@ -987,4 +993,26 @@ pub enum SafetyAction {
     List,
     /// Preview cleanup for a profile (--profile).
     Preview,
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Dedup command
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Arguments for the `dedup` command — find duplicate files.
+#[derive(Args, Debug, Clone)]
+pub struct DedupArgs {
+    /// Directories to scan for duplicates. Defaults to ~/Downloads,
+    /// ~/Documents, ~/Desktop.
+    #[arg(value_name = "PATH")]
+    pub paths: Vec<PathBuf>,
+
+    /// Minimum file size to consider (e.g. 1K, 1M, 100M). Default: 1K.
+    #[arg(long, default_value = "1K")]
+    pub min_size: String,
+
+    /// Also detect similar (not just identical) images using perceptual
+    /// hashing.
+    #[arg(long)]
+    pub similar: bool,
 }

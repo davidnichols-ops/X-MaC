@@ -147,6 +147,15 @@ async fn main() -> Result<()> {
         cli::args::Commands::Safety(args) => {
             return run_safety(&cli, args.clone());
         }
+        cli::args::Commands::Dedup(args) => {
+            let min_size = byte_unit::Byte::from_str(&args.min_size)
+                .map(|b| b.get_bytes() as u64)
+                .unwrap_or(1024);
+            let engine = engines::duplicate::DuplicateEngine::new()
+                .with_scan_paths(args.paths.clone())
+                .with_min_size(min_size);
+            vec![engine.run(ctx.clone()).await]
+        }
     };
 
     drop(ctx);
@@ -912,6 +921,13 @@ fn set_config_value(config: &mut config::Config, key: &str, value: &str) -> Resu
                 .parse()
                 .map_err(|e| anyhow::anyhow!("parse error: {}", e))?
         }
+        "duplicate.min_size" => {
+            config.duplicate.min_size = value
+                .parse()
+                .map_err(|e| anyhow::anyhow!("parse error: {}", e))?
+        }
+        "duplicate.enabled" => config.duplicate.enabled = parse_bool(value)?,
+        "duplicate.similar_images" => config.duplicate.similar_images = parse_bool(value)?,
         "maintain.dns" => config.maintain.dns = parse_bool(value)?,
         "maintain.spotlight" => config.maintain.spotlight = parse_bool(value)?,
         "maintain.launchservices" => config.maintain.launchservices = parse_bool(value)?,
@@ -1006,6 +1022,9 @@ fn get_config_value(config: &config::Config, key: &str) -> String {
         "clean.browser" => config.clean.browser.to_string(),
         "clean.large_files" => config.clean.large_files.to_string(),
         "clean.min_large_size_mb" => config.clean.min_large_size_mb.to_string(),
+        "duplicate.min_size" => config.duplicate.min_size.to_string(),
+        "duplicate.enabled" => config.duplicate.enabled.to_string(),
+        "duplicate.similar_images" => config.duplicate.similar_images.to_string(),
         "optimize.max_processes" => config.optimize.max_processes.to_string(),
         "optimize.pressure_threshold" => config.optimize.pressure_threshold.to_string(),
         "optimize.ai_advisor" => config.optimize.ai_advisor.to_string(),
