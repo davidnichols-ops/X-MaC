@@ -230,6 +230,12 @@ pub enum Commands {
     /// and background helpers. Identifies startup bottlenecks, zombies,
     /// and frozen apps.
     Startup(StartupArgs),
+
+    /// Undo a previous cleanup by restoring trashed files to their
+    /// original locations. Uses the cleanup history to find what was
+    /// moved to Trash. By default restores the most recent transaction;
+    /// use --transaction-id to target a specific one.
+    Undo(UndoArgs),
 }
 
 impl Commands {
@@ -263,6 +269,7 @@ impl Commands {
             Commands::Dedup(_) => crate::core::types::EngineId::Duplicate,
             Commands::Privacy(_) => crate::core::types::EngineId::Privacy,
             Commands::Startup(_) => crate::core::types::EngineId::Startup,
+            Commands::Undo(_) => crate::core::types::EngineId::All,
         }
     }
 }
@@ -648,6 +655,12 @@ pub struct PurgeArgs {
     /// Minimum file size to include in the purge (e.g. 1M, 100M).
     #[arg(long, default_value = "1M")]
     pub min_size: String,
+
+    /// Verify each file hasn't been modified since scan before moving to
+    /// Trash. Skips files that were changed between scan and execution
+    /// (TOCTOU protection). Recommended for safety.
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub verify: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -1075,4 +1088,25 @@ pub struct StartupArgs {
     /// Detect zombie processes and frozen apps.
     #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
     pub health: bool,
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Undo command
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Arguments for the `undo` command — restore trashed files.
+#[derive(Args, Debug, Clone)]
+pub struct UndoArgs {
+    /// Restore a specific transaction by ID. If omitted, restores the
+    /// most recent transaction.
+    #[arg(long, value_name = "ID")]
+    pub transaction_id: Option<String>,
+
+    /// Show what would be restored without actually moving files.
+    #[arg(long)]
+    pub dry_run: bool,
+
+    /// List recent transactions instead of restoring.
+    #[arg(long)]
+    pub list: bool,
 }

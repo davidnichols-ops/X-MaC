@@ -114,6 +114,9 @@ async fn main() -> Result<()> {
         cli::args::Commands::Purge(args) => {
             return run_purge(&cli, args).await;
         }
+        cli::args::Commands::Undo(args) => {
+            return run_undo(&cli, args);
+        }
         cli::args::Commands::RamBoost(args) => {
             return run_ram_boost(&cli, args.clone()).await;
         }
@@ -578,9 +581,41 @@ async fn run_purge(cli: &Cli, args: &cli::args::PurgeArgs) -> Result<()> {
     let executor = CleanupExecutor::new(policy, args.dry_run);
     let plan = executor.plan(&findings);
     let mut executor = executor;
+
+    // 3a. Snapshot verification — if enabled, verify each candidate file
+    // hasn't been modified since the scan. Files that changed between scan
+    // and execution are skipped (TOCTOU protection).
+    let mut skipped_modified = 0u64;
+    if args.verify && !args.dry_run {
+        use cleanup::verification::FileSnapshot;
+        for candidate in plan.executable() {
+            if let Some(snap) = FileSnapshot::capture(&candidate.path) {
+                if let Err(e) = snap.verify(&candidate.path) {
+                    eprintln!("  [SKIP] {} — {}", candidate.path.display(), e);
+                    skipped_modified += 1;
+                }
+            }
+        }
+    }
+
     let transaction = executor.execute(&plan);
 
-    // 4. Output the transaction record.
+    // 4. Save transaction to history (skip in dry-run mode).
+    if !args.dry_run && transaction.successful_count() > 0 {
+        use cleanup::history::{load_history, save_history};
+        let history_path = config::ConfigManager::load()
+            .config()
+            .history
+            .path
+            .clone();
+        let mut history = load_history(&history_path);
+        history.add_transaction(transaction.clone());
+        if let Err(e) = save_history(&history, &history_path) {
+            eprintln!("  warning: failed to save cleanup history: {}", e);
+        }
+    }
+
+    // 5. Output the transaction record.
     if cli.global.format == OutputFormat::Json || cli.global.format == OutputFormat::JsonPretty {
         let json = match cli.global.format {
             OutputFormat::JsonPretty => serde_json::to_string_pretty(&transaction)?,
@@ -602,6 +637,12 @@ async fn run_purge(cli: &Cli, args: &cli::args::PurgeArgs) -> Result<()> {
             "  Reclaimed:   {}",
             crate::util::disk::format_bytes(transaction.successful_bytes())
         );
+        if skipped_modified > 0 {
+            eprintln!(
+                "  Skipped (modified): {}",
+                skipped_modified
+            );
+        }
         for action in &transaction.actions {
             let status = if action.success { "OK" } else { "SKIP" };
             eprintln!(
@@ -618,6 +659,172 @@ async fn run_purge(cli: &Cli, args: &cli::args::PurgeArgs) -> Result<()> {
                 eprintln!("       error: {}", err);
             }
         }
+    }
+
+    Ok(())
+}
+
+/// The `undo` command — restore trashed files from a previous cleanup
+/// transaction. Uses the cleanup history to find what was moved to Trash
+/// and moves each item back to its original location.
+fn run_undo(cli: &Cli, args: &cli::args::UndoArgs) -> Result<()> {
+    use cleanup::history::load_history;
+    use cli::args::OutputFormat;
+
+    let history_path = config::ConfigManager::load()
+        .config()
+        .history
+        .path
+        .clone();
+    let history = load_history(&history_path);
+
+    // --list: show recent transactions and exit.
+    if args.list {
+        if history.transactions.is_empty() {
+            if cli.global.format == OutputFormat::Json
+                || cli.global.format == OutputFormat::JsonPretty
+            {
+                serde_json::to_writer(std::io::stdout(), &history.transactions)?;
+                println!();
+            } else {
+                eprintln!("No cleanup transactions in history.");
+            }
+            return Ok(());
+        }
+        if cli.global.format == OutputFormat::Json
+            || cli.global.format == OutputFormat::JsonPretty
+        {
+            let json = match cli.global.format {
+                OutputFormat::JsonPretty => serde_json::to_string_pretty(&history.transactions)?,
+                _ => serde_json::to_string(&history.transactions)?,
+            };
+            println!("{}", json);
+        } else {
+            eprintln!("Cleanup Transactions (most recent first)\n");
+            for txn in history.transactions.iter().rev() {
+                let time = chrono::DateTime::from_timestamp(txn.started_at as i64, 0)
+                    .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
+                    .unwrap_or_else(|| txn.started_at.to_string());
+                eprintln!(
+                    "  {} — {} actions, {} reclaimed",
+                    txn.id,
+                    txn.successful_count(),
+                    crate::util::disk::format_bytes(txn.successful_bytes())
+                );
+                eprintln!("    started: {}", time);
+                for action in txn.actions.iter().filter(|a| a.success) {
+                    eprintln!(
+                        "      {} -> {}",
+                        action.original_path.display(),
+                        action
+                            .trashed_path
+                            .as_ref()
+                            .map(|p| p.display().to_string())
+                            .unwrap_or_else(|| "-".to_string())
+                    );
+                }
+                eprintln!();
+            }
+        }
+        return Ok(());
+    }
+
+    // Find the target transaction.
+    let target_txn = if let Some(ref id) = args.transaction_id {
+        history
+            .transactions
+            .iter()
+            .find(|t| t.id == *id)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("transaction '{}' not found in history", id))?
+    } else {
+        history
+            .transactions
+            .last()
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("no cleanup transactions in history to undo"))?
+    };
+
+    if target_txn.actions.is_empty() {
+        eprintln!("Transaction {} has no actions to undo.", target_txn.id);
+        return Ok(());
+    }
+
+    let restorable: Vec<_> = target_txn
+        .actions
+        .iter()
+        .filter(|a| a.success && a.trashed_path.is_some())
+        .collect();
+
+    if restorable.is_empty() {
+        eprintln!(
+            "Transaction {} has no restorable actions (items may have been emptied from Trash).",
+            target_txn.id
+        );
+        return Ok(());
+    }
+
+    let mode = if args.dry_run { "DRY RUN" } else { "LIVE" };
+    eprintln!("X-MaC undo ({}) — transaction {}", mode, target_txn.id);
+    eprintln!("  Restorable: {}", restorable.len());
+
+    if args.dry_run {
+        for action in &restorable {
+            let trashed = action.trashed_path.as_ref().unwrap();
+            let exists = trashed.exists();
+            let status = if exists { "OK" } else { "MISSING" };
+            eprintln!(
+                "  [{}] {} <- {}",
+                status,
+                action.original_path.display(),
+                trashed.display()
+            );
+        }
+        return Ok(());
+    }
+
+    // Execute the restoration.
+    let mut restored = 0u64;
+    let mut failed = 0u64;
+    for action in &restorable {
+        let trashed = action.trashed_path.as_ref().unwrap();
+        if !trashed.exists() {
+            eprintln!(
+                "  [SKIP] {} — trashed item no longer exists",
+                action.original_path.display()
+            );
+            failed += 1;
+            continue;
+        }
+        // Recreate parent directories if needed.
+        if let Some(parent) = action.original_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        match std::fs::rename(trashed, &action.original_path) {
+            Ok(()) => {
+                eprintln!(
+                    "  [OK] {} <- {}",
+                    action.original_path.display(),
+                    trashed.display()
+                );
+                restored += 1;
+            }
+            Err(e) => {
+                eprintln!(
+                    "  [FAIL] {} — {}",
+                    action.original_path.display(),
+                    e
+                );
+                failed += 1;
+            }
+        }
+    }
+
+    eprintln!("\n  Restored: {}", restored);
+    eprintln!("  Failed:   {}", failed);
+
+    if failed > 0 && restored == 0 {
+        return Err(anyhow::anyhow!("no items could be restored"));
     }
 
     Ok(())
