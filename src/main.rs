@@ -117,6 +117,9 @@ async fn main() -> Result<()> {
         cli::args::Commands::Undo(args) => {
             return run_undo(&cli, args);
         }
+        cli::args::Commands::Insights(args) => {
+            return run_insights(&cli, args).await;
+        }
         cli::args::Commands::RamBoost(args) => {
             return run_ram_boost(&cli, args.clone()).await;
         }
@@ -828,6 +831,239 @@ fn run_undo(cli: &Cli, args: &cli::args::UndoArgs) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// The `insights` command — collects a Digital Twin snapshot and runs
+/// multiple reasoning methods to produce a comprehensive AI health report.
+/// Aggregates predictions, regressions, unusual behavior, and recommendations
+/// into a single readable summary.
+async fn run_insights(cli: &Cli, args: &cli::args::InsightsArgs) -> Result<()> {
+    use cli::args::OutputFormat;
+
+    let json_out = cli.global.format == OutputFormat::Json
+        || cli.global.format == OutputFormat::JsonPretty;
+
+    eprintln!("Collecting Digital Twin snapshot...");
+    let twin = twin::DigitalTwin::collect();
+    let engine = twin.reason();
+
+    let health = engine.compute_system_health();
+    let trust = engine.compute_trust_score();
+    let predictions = engine.predict_problems();
+    let regressions = engine.detect_regressions();
+    let preventive = engine.recommend_preventive_actions();
+
+    let mut unusual = Vec::new();
+    let mut emerging = Vec::new();
+    let mut unique = Vec::new();
+    let mut workflows = Vec::new();
+    let mut hardware = Vec::new();
+    let mut software = Vec::new();
+
+    if args.unusual {
+        unusual = engine.detect_unusual_behavior();
+    }
+    if args.emerging {
+        emerging = engine.detect_emerging_failures();
+    }
+    if args.unique {
+        unique = engine.detect_unique_problems();
+    }
+    if args.workflows {
+        workflows = engine.recommend_workflow_changes();
+    }
+    if args.hardware {
+        hardware = engine.recommend_hardware_upgrades();
+    }
+    if args.software {
+        software = engine.recommend_software_changes();
+    }
+
+    if json_out {
+        let report = serde_json::json!({
+            "health_score": health,
+            "trust_score": trust,
+            "predictions": predictions,
+            "regressions": regressions,
+            "unusual_behavior": unusual,
+            "emerging_failures": emerging,
+            "unique_problems": unique,
+            "preventive_actions": preventive,
+            "workflow_changes": workflows,
+            "hardware_upgrades": hardware,
+            "software_changes": software,
+        });
+        match cli.global.format {
+            OutputFormat::JsonPretty => serde_json::to_writer_pretty(std::io::stdout(), &report)?,
+            _ => serde_json::to_writer(std::io::stdout(), &report)?,
+        }
+        println!();
+        return Ok(());
+    }
+
+    // Human-readable report.
+    println!();
+    println!("  X-MaC AI Insights");
+    println!("  ═══════════════════════════════════════════════════");
+    println!();
+    println!(
+        "  System Health: {}/100  ({})",
+        health as u32,
+        health_label(health)
+    );
+    println!(
+        "  Trust Score:   {:.2}/1.0  ({})",
+        trust,
+        trust_label(trust)
+    );
+    println!();
+
+    if !predictions.is_empty() {
+        println!("  PREDICTIONS");
+        println!("  ───────────────────────────────────────────────────");
+        for p in &predictions {
+            println!("  • {}", p);
+        }
+        println!();
+    }
+
+    if !regressions.is_empty() {
+        println!("  REGRESSIONS DETECTED");
+        println!("  ───────────────────────────────────────────────────");
+        for r in &regressions {
+            println!("  • {}", r);
+        }
+        println!();
+    }
+
+    if !unusual.is_empty() {
+        println!("  UNUSUAL BEHAVIOR");
+        println!("  ───────────────────────────────────────────────────");
+        for u in &unusual {
+            println!("  • {}", u);
+        }
+        println!();
+    }
+
+    if !emerging.is_empty() {
+        println!("  EMERGING FAILURES");
+        println!("  ───────────────────────────────────────────────────");
+        for e in &emerging {
+            println!("  • {}", e);
+        }
+        println!();
+    }
+
+    if !unique.is_empty() {
+        println!("  UNIQUE PROBLEMS (specific to this Mac)");
+        println!("  ───────────────────────────────────────────────────");
+        for u in &unique {
+            println!("  • {}", u);
+        }
+        println!();
+    }
+
+    if !preventive.is_empty() {
+        println!("  RECOMMENDED ACTIONS");
+        println!("  ───────────────────────────────────────────────────");
+        for (i, action) in preventive.iter().enumerate() {
+            print_action(i + 1, action);
+        }
+        println!();
+    }
+
+    if !workflows.is_empty() {
+        println!("  WORKFLOW SUGGESTIONS");
+        println!("  ───────────────────────────────────────────────────");
+        for w in &workflows {
+            println!("  • {} — {}", w.name, w.estimated_benefit);
+            println!("    current: {}", w.current_behavior);
+            println!("    recommended: {}", w.recommended_behavior);
+        }
+        println!();
+    }
+
+    if !hardware.is_empty() {
+        println!("  HARDWARE UPGRADES");
+        println!("  ───────────────────────────────────────────────────");
+        for h in &hardware {
+            println!(
+                "  • {} ({} priority): {} -> {}",
+                h.component, h.priority, h.current, h.recommended
+            );
+            println!("    reason: {}", h.reason);
+        }
+        println!();
+    }
+
+    if !software.is_empty() {
+        println!("  SOFTWARE CHANGES");
+        println!("  ───────────────────────────────────────────────────");
+        for s in &software {
+            println!(
+                "  • {} {} ({} priority)",
+                s.kind, s.target, s.priority
+            );
+            println!("    {}", s.recommendation);
+            println!("    reason: {}", s.reason);
+        }
+        println!();
+    }
+
+    if predictions.is_empty()
+        && regressions.is_empty()
+        && unusual.is_empty()
+        && emerging.is_empty()
+        && unique.is_empty()
+        && preventive.is_empty()
+    {
+        println!("  No issues detected. Your system looks healthy.");
+        println!();
+    }
+
+    Ok(())
+}
+
+fn health_label(score: f64) -> &'static str {
+    if score >= 80.0 {
+        "Good"
+    } else if score >= 60.0 {
+        "Fair"
+    } else if score >= 40.0 {
+        "Poor"
+    } else {
+        "Critical"
+    }
+}
+
+fn trust_label(score: f64) -> &'static str {
+    if score >= 0.8 {
+        "High"
+    } else if score >= 0.5 {
+        "Neutral"
+    } else if score >= 0.3 {
+        "Low"
+    } else {
+        "Untrusted"
+    }
+}
+
+fn print_action(idx: usize, action: &twin::reasoning::RecommendedAction) {
+    println!(
+        "  {}. {} — {} impact, {} risk{}",
+        idx,
+        action.action,
+        action.estimated_impact,
+        action.risk_level,
+        if action.is_reversible {
+            " (reversible)"
+        } else {
+            ""
+        }
+    );
+    if let Some(ref cmd) = action.command {
+        println!("     $ {}", cmd);
+    }
 }
 
 /// The `quick` command — one-shot cleanup scan + maintenance + disk breakdown.

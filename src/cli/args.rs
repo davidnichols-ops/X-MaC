@@ -236,6 +236,12 @@ pub enum Commands {
     /// moved to Trash. By default restores the most recent transaction;
     /// use --transaction-id to target a specific one.
     Undo(UndoArgs),
+
+    /// AI Insights — collects a Digital Twin snapshot and runs multiple
+    /// reasoning methods to produce a comprehensive system health report.
+    /// Shows health score, predictions, regressions, unusual behavior,
+    /// and recommended actions in a single readable summary.
+    Insights(InsightsArgs),
 }
 
 impl Commands {
@@ -270,6 +276,7 @@ impl Commands {
             Commands::Privacy(_) => crate::core::types::EngineId::Privacy,
             Commands::Startup(_) => crate::core::types::EngineId::Startup,
             Commands::Undo(_) => crate::core::types::EngineId::All,
+            Commands::Insights(_) => crate::core::types::EngineId::All,
         }
     }
 }
@@ -1109,4 +1116,36 @@ pub struct UndoArgs {
     /// List recent transactions instead of restoring.
     #[arg(long)]
     pub list: bool,
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Insights command
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Arguments for the `insights` command — AI system health report.
+#[derive(Args, Debug, Clone)]
+pub struct InsightsArgs {
+    /// Include workflow change recommendations (learned from usage patterns).
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub workflows: bool,
+
+    /// Include hardware upgrade recommendations.
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub hardware: bool,
+
+    /// Include software change recommendations.
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub software: bool,
+
+    /// Include unusual behavior detection.
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub unusual: bool,
+
+    /// Include emerging failure detection.
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub emerging: bool,
+
+    /// Include unique problem detection (problems specific to this Mac).
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub unique: bool,
 }
