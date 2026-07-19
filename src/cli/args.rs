@@ -220,6 +220,16 @@ pub enum Commands {
     /// fingerprinting. A standalone version of `clean --dedup` focused
     /// only on duplicate detection.
     Dedup(DedupArgs),
+
+    /// Scan for privacy and security issues: browser data exposure,
+    /// malware/adware signatures, app permissions, and security posture
+    /// (Gatekeeper, SIP, FileVault, firmware password).
+    Privacy(PrivacyArgs),
+
+    /// Scan startup items: Login Items, LaunchAgents, LaunchDaemons,
+    /// and background helpers. Identifies startup bottlenecks, zombies,
+    /// and frozen apps.
+    Startup(StartupArgs),
 }
 
 impl Commands {
@@ -251,6 +261,8 @@ impl Commands {
             Commands::Mcp => crate::core::types::EngineId::All,
             Commands::Safety(_) => crate::core::types::EngineId::All,
             Commands::Dedup(_) => crate::core::types::EngineId::Duplicate,
+            Commands::Privacy(_) => crate::core::types::EngineId::Privacy,
+            Commands::Startup(_) => crate::core::types::EngineId::Startup,
         }
     }
 }
@@ -1015,4 +1027,52 @@ pub struct DedupArgs {
     /// hashing.
     #[arg(long)]
     pub similar: bool,
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Privacy command
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Arguments for the `privacy` command — privacy & security scan.
+#[derive(Args, Debug, Clone)]
+pub struct PrivacyArgs {
+    /// Scan browser data locations (history, cookies, caches).
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub browser_data: bool,
+
+    /// Scan for known malware and adware signatures.
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub malware: bool,
+
+    /// Audit app permissions (TCC database, microphone, camera, etc.).
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub permissions: bool,
+
+    /// Audit overall security posture (Gatekeeper, SIP, FileVault, etc.).
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub posture: bool,
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Startup command
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Arguments for the `startup` command — startup items scan.
+#[derive(Args, Debug, Clone)]
+pub struct StartupArgs {
+    /// Scan Login Items (System Settings > General > Login Items).
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub login_items: bool,
+
+    /// Scan LaunchAgents (per-user and system-wide).
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub launch_agents: bool,
+
+    /// Scan LaunchDaemons (system-wide background services).
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub launch_daemons: bool,
+
+    /// Detect zombie processes and frozen apps.
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub health: bool,
 }

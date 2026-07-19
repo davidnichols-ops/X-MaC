@@ -156,6 +156,26 @@ async fn main() -> Result<()> {
                 .with_min_size(min_size);
             vec![engine.run(ctx.clone()).await]
         }
+        cli::args::Commands::Privacy(args) => {
+            let mut engine = engines::privacy::PrivacyEngine::new();
+            if !args.browser_data {
+                engine = engine.without_browser_data();
+            }
+            if !args.malware {
+                engine = engine.without_malware_scan();
+            }
+            if !args.permissions {
+                engine = engine.without_permission_audit();
+            }
+            if !args.posture {
+                engine = engine.without_posture();
+            }
+            vec![engine.run(ctx.clone()).await]
+        }
+        cli::args::Commands::Startup(_) => {
+            let engine = engines::startup::StartupEngine::new();
+            vec![engine.run(ctx.clone()).await]
+        }
     };
 
     drop(ctx);

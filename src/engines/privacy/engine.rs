@@ -30,6 +30,9 @@ pub struct PrivacyEngine {
     scan_malware: bool,
     /// When true, the engine checks TCC/permission databases.
     scan_permissions: bool,
+    /// When true, the engine audits security posture and checks for
+    /// vulnerable/outdated software (ops 220-221).
+    scan_posture: bool,
 }
 
 impl Default for PrivacyEngine {
@@ -45,6 +48,7 @@ impl PrivacyEngine {
             scan_browser_data: true,
             scan_malware: true,
             scan_permissions: true,
+            scan_posture: true,
         }
     }
 
@@ -66,6 +70,14 @@ impl PrivacyEngine {
     #[allow(dead_code)]
     pub fn without_permission_audit(mut self) -> Self {
         self.scan_permissions = false;
+        self
+    }
+
+    /// Disable security posture and vulnerable/outdated software checks
+    /// (ops 220-221). This avoids running `softwareupdate -l` which can
+    /// be slow.
+    pub fn without_posture(mut self) -> Self {
+        self.scan_posture = false;
         self
     }
 
@@ -2355,9 +2367,11 @@ impl Engine for PrivacyEngine {
             run_task!(task_check_disk_access_permissions);
         }
 
-        // ops 220-221: Vulnerable & outdated software (always run)
-        run_task!(task_detect_vulnerable_apps);
-        run_task!(task_detect_outdated_software);
+        // ops 220-221: Vulnerable & outdated software
+        if self.scan_posture {
+            run_task!(task_detect_vulnerable_apps);
+            run_task!(task_detect_outdated_software);
+        }
 
         Ok(EngineStats {
             engine: self.id(),
