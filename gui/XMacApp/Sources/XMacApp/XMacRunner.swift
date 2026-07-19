@@ -1064,7 +1064,7 @@ final class XMacRunner: ObservableObject {
         // decoding a 500KB nested graph through the Finding JSONValue enum.
         scanPhase = "Extracting file system graph..."
         scanProgress = 0.1
-        let maxNodes = appSettings?.neuralMaxNodes ?? 600
+        let maxNodes = appSettings?.neuralMaxNodes ?? 2000
         let graphDir = FileManager.default.temporaryDirectory.appendingPathComponent("xmac_gnn_\(UUID().uuidString)")
         var graphCommand = [xmacPath, "--format", "json"]
         if let settings = appSettings {
@@ -1073,7 +1073,7 @@ final class XMacRunner: ObservableObject {
                 graphCommand += ["--exclude", exclusion]
             }
         }
-        graphCommand += ["graph", "--max-depth", "8", "--max-nodes", "\(maxNodes)", "--output-graph", graphDir.path]
+        graphCommand += ["graph", "--max-depth", "15", "--max-nodes", "\(maxNodes)", "/", "--output-graph", graphDir.path]
         let graphResult = await runCommandCollect(graphCommand)
 
         guard !Task.isCancelled else {

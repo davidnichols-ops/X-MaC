@@ -120,8 +120,8 @@ final class CoreMLGNNManager {
             return emptyResponse(nodeCount: 0)
         }
 
-        // Hard cap to keep inference fast and within CoreML's comfort zone.
-        let nodeCount = min(nodes.count, 600)
+        // Cap to the model's maximum input size (2000 nodes).
+        let nodeCount = min(nodes.count, 2000)
         let cappedNodes = Array(nodes.prefix(nodeCount))
         let featureCount = 16
         guard cappedNodes.allSatisfy({ ($0["features"] as? [Double])?.count == featureCount }) else {
@@ -168,7 +168,7 @@ final class CoreMLGNNManager {
         do {
             let features = try MLDictionaryFeatureProvider(dictionary: inputDict)
             let predStart = Date()
-            let output = try await withTimeout(seconds: 5) {
+            let output = try await withTimeout(seconds: 15) {
                 return try await loadedModel.prediction(from: features)
             }
             print("[CoreMLGNN] Prediction: \(Date().timeIntervalSince(predStart))s")

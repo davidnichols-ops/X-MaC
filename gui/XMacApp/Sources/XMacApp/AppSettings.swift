@@ -140,7 +140,7 @@ final class AppSettings: ObservableObject {
     @AppStorage("xmac.minimumSizeMB") var minimumSizeMB = 1
     @AppStorage("xmac.includeHidden") var includeHidden = false
     @AppStorage("xmac.followSymlinks") var followSymlinks = false
-    @AppStorage("xmac.neuralMaxNodes") var neuralMaxNodes = 600
+    @AppStorage("xmac.neuralMaxNodes") var neuralMaxNodes = 2000
     @AppStorage("xmac.trashInsteadOfDelete") var trashInsteadOfDelete = true
     @AppStorage("xmac.confirmCleanup") var confirmCleanup = true
     @AppStorage("xmac.excludePaths") var excludePaths = ""
