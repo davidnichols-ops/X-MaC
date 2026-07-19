@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Hardened runtime entitlements for ad-hoc signed apps -->
+    <!-- These allow the app to function without a Developer ID certificate -->
+
+    <!-- Allow JIT (needed for CoreML inference) -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+
+    <!-- Allow unsigned executable memory (CoreML) -->
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+
+    <!-- Allow dyld environment variables (for debugging) -->
+    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+    <true/>
+
+    <!-- Disable library validation (allows loading unsigned libraries) -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+
+    <!-- Apple Events for running maintenance commands -->
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
+
+    <!-- User-selected file access (for cleanup operations) -->
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+
+    <!-- Allow subprocess execution (for running xmac CLI) -->
+    <key>com.apple.security.temporary-exception.mach-lookup.global-name</key>
+    <array>
+        <string>com.apple.system.opendirectoryd.api</string>
+    </array>
+</dict>
+</plist>

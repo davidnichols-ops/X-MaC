@@ -89,6 +89,7 @@ if [[ "$SKIP_NOTARIZE" == "1" ]]; then
   echo "  SKIP_NOTARIZE=1 — skipping codesign."
 else
   codesign --force --deep --options runtime \
+    --entitlements "$PROJECT_ROOT/gui/XMacApp/XMacApp.entitlements" \
     --sign "$SIGN_IDENTITY" \
     --timestamp \
     "$APP_PATH"
