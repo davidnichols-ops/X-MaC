@@ -45,10 +45,13 @@ byte-unit = "4.0"
 
 blake3 = "1.5"
 
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "bmp", "tiff"] }
+
 uuid = { version = "1.10", features = ["v7", "serde"] }
 
 async-trait = "0.1"
 libc = "0.2"
+futures = "0.3"
 
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -58,6 +61,9 @@ toml = "0.8"
 dirs = "5"
 chrono = { version = "0.4", features = ["serde"] }
 glob = "0.3.3"
+rusqlite = { version = "0.40.1", features = ["bundled"] }
+notify = "8.2.0"
+serde_yaml = "0.9.34"
 
 [dev-dependencies]
 tempfile = "3.12"

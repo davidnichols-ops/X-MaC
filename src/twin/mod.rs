@@ -1,0 +1,23 @@
+// X-MaC - twin module
+//
+// This module implements the macOS Digital Twin: a live computational model
+// of the Mac's hardware, software, filesystem, processes, memory, energy,
+// and behavior. See docs/INTEGRATION_PLAN.md and docs/OPERATIONS_MANIFEST.md
+// for the full operation mapping.
+
+pub mod app_agent;
+pub mod database;
+pub mod energy;
+pub mod event_stream;
+pub mod fs_graph;
+pub mod hardware;
+pub mod knowledge_graph;
+pub mod memory;
+pub mod model;
+pub mod observers;
+pub mod process;
+pub mod reasoning;
+pub mod software_genome;
+pub mod what_changed;
+
+pub use model::DigitalTwin;

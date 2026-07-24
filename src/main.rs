@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
 use std::sync::Arc;
 use std::time::Instant;
@@ -11,6 +11,9 @@ mod config;
 mod core;
 mod engines;
 mod intelligence;
+mod mcp;
+mod safety;
+mod twin;
 mod util;
 
 use cli::{
@@ -38,7 +41,20 @@ async fn main() -> Result<()> {
     let collector_handle = {
         let output_writer = Arc::clone(&output_writer);
         tokio::spawn(async move {
-            while let Some(finding) = rx.recv().await {
+            // Load safety engine once for enriching findings as they arrive.
+            let safety_engine = safety::rule_engine::SafetyEngine::load_default().ok();
+            while let Some(mut finding) = rx.recv().await {
+                // Enrich with safety classification before output.
+                if let Some(ref engine) = safety_engine {
+                    if let core::types::Target::Path(ref path) = finding.target {
+                        if let Some(classification) = engine.classify(&path.to_string_lossy()) {
+                            finding.safety_rating = Some(classification.rating.label().to_string());
+                            finding.safety_rule = Some(classification.rule_name.clone());
+                            finding.safety_explanation = Some(classification.explanation());
+                            finding.safety_confidence = Some(classification.confidence);
+                        }
+                    }
+                }
                 let mut writer = output_writer.lock().await;
                 writer.write_finding(&finding)?;
             }
@@ -98,6 +114,12 @@ async fn main() -> Result<()> {
         cli::args::Commands::Purge(args) => {
             return run_purge(&cli, args).await;
         }
+        cli::args::Commands::Undo(args) => {
+            return run_undo(&cli, args);
+        }
+        cli::args::Commands::Insights(args) => {
+            return run_insights(&cli, args).await;
+        }
         cli::args::Commands::RamBoost(args) => {
             return run_ram_boost(&cli, args.clone()).await;
         }
@@ -122,6 +144,44 @@ async fn main() -> Result<()> {
         cli::args::Commands::Completions(args) => {
             return run_completions(args.clone());
         }
+        cli::args::Commands::Twin(args) => {
+            return run_twin(&cli, args.clone()).await;
+        }
+        cli::args::Commands::Mcp => {
+            return mcp::run_server();
+        }
+        cli::args::Commands::Safety(args) => {
+            return run_safety(&cli, args.clone());
+        }
+        cli::args::Commands::Dedup(args) => {
+            let min_size = byte_unit::Byte::from_str(&args.min_size)
+                .map(|b| b.get_bytes() as u64)
+                .unwrap_or(1024);
+            let engine = engines::duplicate::DuplicateEngine::new()
+                .with_scan_paths(args.paths.clone())
+                .with_min_size(min_size);
+            vec![engine.run(ctx.clone()).await]
+        }
+        cli::args::Commands::Privacy(args) => {
+            let mut engine = engines::privacy::PrivacyEngine::new();
+            if !args.browser_data {
+                engine = engine.without_browser_data();
+            }
+            if !args.malware {
+                engine = engine.without_malware_scan();
+            }
+            if !args.permissions {
+                engine = engine.without_permission_audit();
+            }
+            if !args.posture {
+                engine = engine.without_posture();
+            }
+            vec![engine.run(ctx.clone()).await]
+        }
+        cli::args::Commands::Startup(_) => {
+            let engine = engines::startup::StartupEngine::new();
+            vec![engine.run(ctx.clone()).await]
+        }
     };
 
     drop(ctx);
@@ -132,6 +192,7 @@ async fn main() -> Result<()> {
 
     // Collect findings for the report and/or the fix-script generator.
     // `take_findings` drains the buffer, so we capture once and reuse.
+    // Note: safety enrichment happens in the collector task before output.
     let collected_findings: Vec<Finding> = {
         let mut writer = output_writer.lock().await;
         writer.take_findings()
@@ -200,6 +261,90 @@ fn init_tracing(verbosity: u8) {
         .init();
 }
 
+/// Type alias for a boxed engine future — avoids clippy type_complexity warnings.
+type EngineFuture = std::pin::Pin<Box<dyn std::future::Future<Output = EngineResult> + Send>>;
+
+/// Type alias for the result of running an engine.
+type EngineResult = std::result::Result<core::types::EngineStats, core::error::EngineError>;
+
+/// Determine the maximum number of engines to run concurrently based on
+/// the resource mode. This controls top-level engine parallelism —
+/// individual engines may have their own internal parallelism (e.g. the
+/// clean engine's category-level FuturesUnordered).
+///
+/// - eco: 1 engine at a time (sequential — lowest CPU strain)
+/// - balanced: 2 engines concurrently (good balance, moderate CPU)
+/// - turbo: 3 engines concurrently (faster, higher CPU)
+///
+/// Note: these numbers are intentionally conservative. Each engine has
+/// its own internal parallelism (e.g. clean engine runs up to 3-6 scan
+/// categories concurrently, each via spawn_blocking). So "balanced" with
+/// 2 engines × 3 internal tasks = up to 6 concurrent blocking threads,
+/// which is a reasonable load for modern multi-core Macs.
+fn max_concurrent_engines(resource_mode: &str) -> usize {
+    match resource_mode {
+        "eco" => 1,
+        "turbo" => 3,
+        _ => 2, // balanced
+    }
+}
+
+/// Run a list of engine futures with **actually bounded** concurrency.
+///
+/// In eco mode (max_concurrent=1), engines run sequentially.
+/// In balanced/turbo mode, at most `max_concurrent` engines run at once,
+/// enforced by a tokio Semaphore. Each engine is spawned as a 'static task
+/// that acquires a permit before running, so the semaphore truly limits
+/// how many engines are active simultaneously.
+///
+/// This is critical for CPU strain: without real bounding, FuturesUnordered
+/// polls ALL futures at once, which — combined with each engine's internal
+/// parallelism (spawn_blocking for WalkDir) — can spawn dozens of blocking
+/// threads and saturate all CPU cores.
+async fn run_engines_concurrent(
+    tasks: Vec<EngineFuture>,
+    max_concurrent: usize,
+) -> Vec<EngineResult> {
+    if tasks.is_empty() {
+        return Vec::new();
+    }
+
+    if max_concurrent <= 1 {
+        // Eco mode: run sequentially — lowest CPU strain.
+        let mut results = Vec::with_capacity(tasks.len());
+        for task in tasks {
+            results.push(task.await);
+        }
+        return results;
+    }
+
+    // Balanced/Turbo: use JoinSet + Semaphore for real bounded concurrency.
+    // Each task is spawned as a 'static task that acquires a permit before
+    // running. This ensures at most `max_concurrent` engines are active.
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(max_concurrent));
+    let mut join_set = tokio::task::JoinSet::new();
+
+    for task in tasks {
+        let sem = semaphore.clone();
+        join_set.spawn(async move {
+            // Acquire permit — blocks if max_concurrent engines are already running.
+            let _permit = sem.acquire().await.expect("semaphore closed");
+            task.await
+        });
+    }
+
+    let mut results = Vec::with_capacity(join_set.len());
+    while let Some(res) = join_set.join_next().await {
+        match res {
+            Ok(engine_result) => results.push(engine_result),
+            Err(join_err) => {
+                tracing::error!("Engine task panicked: {}", join_err);
+            }
+        }
+    }
+    results
+}
+
 async fn run_all_engines(
     ctx: Arc<ScanContext>,
     args: &cli::args::AllArgs,
@@ -209,34 +354,41 @@ async fn run_all_engines(
     let skip: Vec<EngineIdArg> = args.skip.clone();
     let should_run = |id: EngineIdArg| -> bool { !skip.contains(&id) };
 
-    let mut results = Vec::new();
+    // Determine max concurrent engines from resource_mode.
+    let max_concurrent = max_concurrent_engines(&ctx.config.resource_mode);
+
+    // Build the list of engines to run. Each is a boxed future that returns
+    // the engine's result. Engines are independent — they scan different
+    // aspects of the system and stream findings via the shared mpsc channel.
+    let mut tasks: Vec<EngineFuture> = Vec::new();
 
     if should_run(EngineIdArg::Clean) {
-        let clean_engine = engines::clean::CleanEngine::default();
-        results.push(clean_engine.run(ctx.clone()).await);
+        let engine = engines::clean::CleanEngine::default();
+        let ctx = ctx.clone();
+        tasks.push(Box::pin(async move { engine.run(ctx).await }));
     }
-
     if should_run(EngineIdArg::Conflict) {
-        let conflict_engine = engines::conflict::ConflictEngine::default();
-        results.push(conflict_engine.run(ctx.clone()).await);
+        let engine = engines::conflict::ConflictEngine::default();
+        let ctx = ctx.clone();
+        tasks.push(Box::pin(async move { engine.run(ctx).await }));
     }
-
     if should_run(EngineIdArg::Map) {
-        let map_engine = engines::map::MapEngine::default();
-        results.push(map_engine.run(ctx.clone()).await);
+        let engine = engines::map::MapEngine::default();
+        let ctx = ctx.clone();
+        tasks.push(Box::pin(async move { engine.run(ctx).await }));
     }
-
     if should_run(EngineIdArg::Envmap) {
-        let envmap_engine = engines::envmap::EnvmapEngine::default();
-        results.push(envmap_engine.run(ctx.clone()).await);
+        let engine = engines::envmap::EnvmapEngine::default();
+        let ctx = ctx.clone();
+        tasks.push(Box::pin(async move { engine.run(ctx).await }));
     }
-
     if should_run(EngineIdArg::Depth) {
-        let depth_engine = engines::depth::DepthEngine::default();
-        results.push(depth_engine.run(ctx.clone()).await);
+        let engine = engines::depth::DepthEngine::default();
+        let ctx = ctx.clone();
+        tasks.push(Box::pin(async move { engine.run(ctx).await }));
     }
 
-    results
+    run_engines_concurrent(tasks, max_concurrent).await
 }
 
 /// The `scan` command — the recommended default. Runs the safe, reliable
@@ -251,42 +403,42 @@ async fn run_scan(
     let skip: Vec<ScanEngineIdArg> = args.skip.clone();
     let should_run = |id: ScanEngineIdArg| -> bool { !skip.contains(&id) };
 
-    let mut results = Vec::new();
+    let max_concurrent = max_concurrent_engines(&ctx.config.resource_mode);
+
+    let mut tasks: Vec<EngineFuture> = Vec::new();
 
     if should_run(ScanEngineIdArg::Clean) {
-        let clean_engine = engines::clean::CleanEngine::default();
-        results.push(clean_engine.run(ctx.clone()).await);
+        let engine = engines::clean::CleanEngine::default();
+        let ctx = ctx.clone();
+        tasks.push(Box::pin(async move { engine.run(ctx).await }));
     }
-
     if should_run(ScanEngineIdArg::Conflict) {
-        let conflict_engine = engines::conflict::ConflictEngine::default();
-        results.push(conflict_engine.run(ctx.clone()).await);
+        let engine = engines::conflict::ConflictEngine::default();
+        let ctx = ctx.clone();
+        tasks.push(Box::pin(async move { engine.run(ctx).await }));
     }
-
     if should_run(ScanEngineIdArg::Map) {
-        let map_engine = engines::map::MapEngine::default();
-        results.push(map_engine.run(ctx.clone()).await);
+        let engine = engines::map::MapEngine::default();
+        let ctx = ctx.clone();
+        tasks.push(Box::pin(async move { engine.run(ctx).await }));
     }
-
-    // envmap is read-only and safe — included in `scan` by default.
     if args.envmap && should_run(ScanEngineIdArg::Envmap) {
-        let envmap_engine = engines::envmap::EnvmapEngine::default();
-        results.push(envmap_engine.run(ctx.clone()).await);
+        let engine = engines::envmap::EnvmapEngine::default();
+        let ctx = ctx.clone();
+        tasks.push(Box::pin(async move { engine.run(ctx).await }));
     }
-
-    // Depth is opt-in for `scan` — it can be noisy on large installations.
-    // Only run if --include-depth is explicitly passed AND not skipped.
     if args.include_depth && should_run(ScanEngineIdArg::Depth) {
-        let depth_engine = engines::depth::DepthEngine::default();
-        results.push(depth_engine.run(ctx.clone()).await);
+        let engine = engines::depth::DepthEngine::default();
+        let ctx = ctx.clone();
+        tasks.push(Box::pin(async move { engine.run(ctx).await }));
     }
-
     if args.diagnostics && should_run(ScanEngineIdArg::Diag) {
-        let diag_engine = engines::diag::DiagEngine::default();
-        results.push(diag_engine.run(ctx.clone()).await);
+        let engine = engines::diag::DiagEngine::default();
+        let ctx = ctx.clone();
+        tasks.push(Box::pin(async move { engine.run(ctx).await }));
     }
 
-    results
+    run_engines_concurrent(tasks, max_concurrent).await
 }
 
 /// The `install` command — symlinks the built binary into a directory on
@@ -432,9 +584,37 @@ async fn run_purge(cli: &Cli, args: &cli::args::PurgeArgs) -> Result<()> {
     let executor = CleanupExecutor::new(policy, args.dry_run);
     let plan = executor.plan(&findings);
     let mut executor = executor;
+
+    // 3a. Snapshot verification — if enabled, verify each candidate file
+    // hasn't been modified since the scan. Files that changed between scan
+    // and execution are skipped (TOCTOU protection).
+    let mut skipped_modified = 0u64;
+    if args.verify && !args.dry_run {
+        use cleanup::verification::FileSnapshot;
+        for candidate in plan.executable() {
+            if let Some(snap) = FileSnapshot::capture(&candidate.path) {
+                if let Err(e) = snap.verify(&candidate.path) {
+                    eprintln!("  [SKIP] {} — {}", candidate.path.display(), e);
+                    skipped_modified += 1;
+                }
+            }
+        }
+    }
+
     let transaction = executor.execute(&plan);
 
-    // 4. Output the transaction record.
+    // 4. Save transaction to history (skip in dry-run mode).
+    if !args.dry_run && transaction.successful_count() > 0 {
+        use cleanup::history::{load_history, save_history};
+        let history_path = config::ConfigManager::load().config().history.path.clone();
+        let mut history = load_history(&history_path);
+        history.add_transaction(transaction.clone());
+        if let Err(e) = save_history(&history, &history_path) {
+            eprintln!("  warning: failed to save cleanup history: {}", e);
+        }
+    }
+
+    // 5. Output the transaction record.
     if cli.global.format == OutputFormat::Json || cli.global.format == OutputFormat::JsonPretty {
         let json = match cli.global.format {
             OutputFormat::JsonPretty => serde_json::to_string_pretty(&transaction)?,
@@ -456,6 +636,9 @@ async fn run_purge(cli: &Cli, args: &cli::args::PurgeArgs) -> Result<()> {
             "  Reclaimed:   {}",
             crate::util::disk::format_bytes(transaction.successful_bytes())
         );
+        if skipped_modified > 0 {
+            eprintln!("  Skipped (modified): {}", skipped_modified);
+        }
         for action in &transaction.actions {
             let status = if action.success { "OK" } else { "SKIP" };
             eprintln!(
@@ -477,6 +660,393 @@ async fn run_purge(cli: &Cli, args: &cli::args::PurgeArgs) -> Result<()> {
     Ok(())
 }
 
+/// The `undo` command — restore trashed files from a previous cleanup
+/// transaction. Uses the cleanup history to find what was moved to Trash
+/// and moves each item back to its original location.
+fn run_undo(cli: &Cli, args: &cli::args::UndoArgs) -> Result<()> {
+    use cleanup::history::load_history;
+    use cli::args::OutputFormat;
+
+    let history_path = config::ConfigManager::load().config().history.path.clone();
+    let history = load_history(&history_path);
+
+    // --list: show recent transactions and exit.
+    if args.list {
+        if history.transactions.is_empty() {
+            if cli.global.format == OutputFormat::Json
+                || cli.global.format == OutputFormat::JsonPretty
+            {
+                serde_json::to_writer(std::io::stdout(), &history.transactions)?;
+                println!();
+            } else {
+                eprintln!("No cleanup transactions in history.");
+            }
+            return Ok(());
+        }
+        if cli.global.format == OutputFormat::Json || cli.global.format == OutputFormat::JsonPretty
+        {
+            let json = match cli.global.format {
+                OutputFormat::JsonPretty => serde_json::to_string_pretty(&history.transactions)?,
+                _ => serde_json::to_string(&history.transactions)?,
+            };
+            println!("{}", json);
+        } else {
+            eprintln!("Cleanup Transactions (most recent first)\n");
+            for txn in history.transactions.iter().rev() {
+                let time = chrono::DateTime::from_timestamp(txn.started_at as i64, 0)
+                    .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
+                    .unwrap_or_else(|| txn.started_at.to_string());
+                eprintln!(
+                    "  {} — {} actions, {} reclaimed",
+                    txn.id,
+                    txn.successful_count(),
+                    crate::util::disk::format_bytes(txn.successful_bytes())
+                );
+                eprintln!("    started: {}", time);
+                for action in txn.actions.iter().filter(|a| a.success) {
+                    eprintln!(
+                        "      {} -> {}",
+                        action.original_path.display(),
+                        action
+                            .trashed_path
+                            .as_ref()
+                            .map(|p| p.display().to_string())
+                            .unwrap_or_else(|| "-".to_string())
+                    );
+                }
+                eprintln!();
+            }
+        }
+        return Ok(());
+    }
+
+    // Find the target transaction.
+    let target_txn = if let Some(ref id) = args.transaction_id {
+        history
+            .transactions
+            .iter()
+            .find(|t| t.id == *id)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("transaction '{}' not found in history", id))?
+    } else {
+        history
+            .transactions
+            .last()
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("no cleanup transactions in history to undo"))?
+    };
+
+    if target_txn.actions.is_empty() {
+        eprintln!("Transaction {} has no actions to undo.", target_txn.id);
+        return Ok(());
+    }
+
+    let restorable: Vec<_> = target_txn
+        .actions
+        .iter()
+        .filter(|a| a.success && a.trashed_path.is_some())
+        .collect();
+
+    if restorable.is_empty() {
+        eprintln!(
+            "Transaction {} has no restorable actions (items may have been emptied from Trash).",
+            target_txn.id
+        );
+        return Ok(());
+    }
+
+    let mode = if args.dry_run { "DRY RUN" } else { "LIVE" };
+    eprintln!("X-MaC undo ({}) — transaction {}", mode, target_txn.id);
+    eprintln!("  Restorable: {}", restorable.len());
+
+    if args.dry_run {
+        for action in &restorable {
+            let trashed = action.trashed_path.as_ref().unwrap();
+            let exists = trashed.exists();
+            let status = if exists { "OK" } else { "MISSING" };
+            eprintln!(
+                "  [{}] {} <- {}",
+                status,
+                action.original_path.display(),
+                trashed.display()
+            );
+        }
+        return Ok(());
+    }
+
+    // Execute the restoration.
+    let mut restored = 0u64;
+    let mut failed = 0u64;
+    for action in &restorable {
+        let trashed = action.trashed_path.as_ref().unwrap();
+        if !trashed.exists() {
+            eprintln!(
+                "  [SKIP] {} — trashed item no longer exists",
+                action.original_path.display()
+            );
+            failed += 1;
+            continue;
+        }
+        // Recreate parent directories if needed.
+        if let Some(parent) = action.original_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        match std::fs::rename(trashed, &action.original_path) {
+            Ok(()) => {
+                eprintln!(
+                    "  [OK] {} <- {}",
+                    action.original_path.display(),
+                    trashed.display()
+                );
+                restored += 1;
+            }
+            Err(e) => {
+                eprintln!("  [FAIL] {} — {}", action.original_path.display(), e);
+                failed += 1;
+            }
+        }
+    }
+
+    eprintln!("\n  Restored: {}", restored);
+    eprintln!("  Failed:   {}", failed);
+
+    if failed > 0 && restored == 0 {
+        return Err(anyhow::anyhow!("no items could be restored"));
+    }
+
+    Ok(())
+}
+
+/// The `insights` command — collects a Digital Twin snapshot and runs
+/// multiple reasoning methods to produce a comprehensive AI health report.
+/// Aggregates predictions, regressions, unusual behavior, and recommendations
+/// into a single readable summary.
+async fn run_insights(cli: &Cli, args: &cli::args::InsightsArgs) -> Result<()> {
+    use cli::args::OutputFormat;
+
+    let json_out =
+        cli.global.format == OutputFormat::Json || cli.global.format == OutputFormat::JsonPretty;
+
+    eprintln!("Collecting Digital Twin snapshot...");
+    let twin = twin::DigitalTwin::collect();
+    let engine = twin.reason();
+
+    let health = engine.compute_system_health();
+    let trust = engine.compute_trust_score();
+    let predictions = engine.predict_problems();
+    let regressions = engine.detect_regressions();
+    let preventive = engine.recommend_preventive_actions();
+
+    let mut unusual = Vec::new();
+    let mut emerging = Vec::new();
+    let mut unique = Vec::new();
+    let mut workflows = Vec::new();
+    let mut hardware = Vec::new();
+    let mut software = Vec::new();
+
+    if args.unusual {
+        unusual = engine.detect_unusual_behavior();
+    }
+    if args.emerging {
+        emerging = engine.detect_emerging_failures();
+    }
+    if args.unique {
+        unique = engine.detect_unique_problems();
+    }
+    if args.workflows {
+        workflows = engine.recommend_workflow_changes();
+    }
+    if args.hardware {
+        hardware = engine.recommend_hardware_upgrades();
+    }
+    if args.software {
+        software = engine.recommend_software_changes();
+    }
+
+    if json_out {
+        let report = serde_json::json!({
+            "health_score": health,
+            "trust_score": trust,
+            "predictions": predictions,
+            "regressions": regressions,
+            "unusual_behavior": unusual,
+            "emerging_failures": emerging,
+            "unique_problems": unique,
+            "preventive_actions": preventive,
+            "workflow_changes": workflows,
+            "hardware_upgrades": hardware,
+            "software_changes": software,
+        });
+        match cli.global.format {
+            OutputFormat::JsonPretty => serde_json::to_writer_pretty(std::io::stdout(), &report)?,
+            _ => serde_json::to_writer(std::io::stdout(), &report)?,
+        }
+        println!();
+        return Ok(());
+    }
+
+    // Human-readable report.
+    println!();
+    println!("  X-MaC AI Insights");
+    println!("  ═══════════════════════════════════════════════════");
+    println!();
+    println!(
+        "  System Health: {}/100  ({})",
+        health as u32,
+        health_label(health)
+    );
+    println!(
+        "  Trust Score:   {:.2}/1.0  ({})",
+        trust,
+        trust_label(trust)
+    );
+    println!();
+
+    if !predictions.is_empty() {
+        println!("  PREDICTIONS");
+        println!("  ───────────────────────────────────────────────────");
+        for p in &predictions {
+            println!("  • {}", p);
+        }
+        println!();
+    }
+
+    if !regressions.is_empty() {
+        println!("  REGRESSIONS DETECTED");
+        println!("  ───────────────────────────────────────────────────");
+        for r in &regressions {
+            println!("  • {}", r);
+        }
+        println!();
+    }
+
+    if !unusual.is_empty() {
+        println!("  UNUSUAL BEHAVIOR");
+        println!("  ───────────────────────────────────────────────────");
+        for u in &unusual {
+            println!("  • {}", u);
+        }
+        println!();
+    }
+
+    if !emerging.is_empty() {
+        println!("  EMERGING FAILURES");
+        println!("  ───────────────────────────────────────────────────");
+        for e in &emerging {
+            println!("  • {}", e);
+        }
+        println!();
+    }
+
+    if !unique.is_empty() {
+        println!("  UNIQUE PROBLEMS (specific to this Mac)");
+        println!("  ───────────────────────────────────────────────────");
+        for u in &unique {
+            println!("  • {}", u);
+        }
+        println!();
+    }
+
+    if !preventive.is_empty() {
+        println!("  RECOMMENDED ACTIONS");
+        println!("  ───────────────────────────────────────────────────");
+        for (i, action) in preventive.iter().enumerate() {
+            print_action(i + 1, action);
+        }
+        println!();
+    }
+
+    if !workflows.is_empty() {
+        println!("  WORKFLOW SUGGESTIONS");
+        println!("  ───────────────────────────────────────────────────");
+        for w in &workflows {
+            println!("  • {} — {}", w.name, w.estimated_benefit);
+            println!("    current: {}", w.current_behavior);
+            println!("    recommended: {}", w.recommended_behavior);
+        }
+        println!();
+    }
+
+    if !hardware.is_empty() {
+        println!("  HARDWARE UPGRADES");
+        println!("  ───────────────────────────────────────────────────");
+        for h in &hardware {
+            println!(
+                "  • {} ({} priority): {} -> {}",
+                h.component, h.priority, h.current, h.recommended
+            );
+            println!("    reason: {}", h.reason);
+        }
+        println!();
+    }
+
+    if !software.is_empty() {
+        println!("  SOFTWARE CHANGES");
+        println!("  ───────────────────────────────────────────────────");
+        for s in &software {
+            println!("  • {} {} ({} priority)", s.kind, s.target, s.priority);
+            println!("    {}", s.recommendation);
+            println!("    reason: {}", s.reason);
+        }
+        println!();
+    }
+
+    if predictions.is_empty()
+        && regressions.is_empty()
+        && unusual.is_empty()
+        && emerging.is_empty()
+        && unique.is_empty()
+        && preventive.is_empty()
+    {
+        println!("  No issues detected. Your system looks healthy.");
+        println!();
+    }
+
+    Ok(())
+}
+
+fn health_label(score: f64) -> &'static str {
+    if score >= 80.0 {
+        "Good"
+    } else if score >= 60.0 {
+        "Fair"
+    } else if score >= 40.0 {
+        "Poor"
+    } else {
+        "Critical"
+    }
+}
+
+fn trust_label(score: f64) -> &'static str {
+    if score >= 0.8 {
+        "High"
+    } else if score >= 0.5 {
+        "Neutral"
+    } else if score >= 0.3 {
+        "Low"
+    } else {
+        "Untrusted"
+    }
+}
+
+fn print_action(idx: usize, action: &twin::reasoning::RecommendedAction) {
+    println!(
+        "  {}. {} — {} impact, {} risk{}",
+        idx,
+        action.action,
+        action.estimated_impact,
+        action.risk_level,
+        if action.is_reversible {
+            " (reversible)"
+        } else {
+            ""
+        }
+    );
+    if let Some(ref cmd) = action.command {
+        println!("     $ {}", cmd);
+    }
+}
+
 /// The `quick` command — one-shot cleanup scan + maintenance + disk breakdown.
 /// Like CleanMyMac's "Smart Scan": gives you a quick overview of system health
 /// and reclaimable space, runs safe maintenance, and shows disk usage.
@@ -484,10 +1054,12 @@ async fn run_quick(
     ctx: Arc<ScanContext>,
     args: &cli::args::QuickArgs,
 ) -> Vec<std::result::Result<core::types::EngineStats, core::error::EngineError>> {
-    let mut results = Vec::new();
-
     let xmac_config = config::ConfigManager::load();
     let xmac_config = xmac_config.config().clone();
+
+    let max_concurrent = max_concurrent_engines(&ctx.config.resource_mode);
+
+    let mut tasks: Vec<EngineFuture> = Vec::new();
 
     // 1. Clean scan (with dedup if requested)
     let clean_args = cli::args::CleanArgs {
@@ -495,13 +1067,17 @@ async fn run_quick(
         ..engines::clean::CleanEngine::default_args()
     };
     let clean_engine = engines::clean::CleanEngine::new(clean_args).with_config(&xmac_config);
-    results.push(clean_engine.run(ctx.clone()).await);
+    let ctx_clone = ctx.clone();
+    tasks.push(Box::pin(async move { clean_engine.run(ctx_clone).await }));
 
     // 2. Maintenance tasks (safe ones only — no sudo)
     if !args.no_maintain {
         let maintain_engine =
             engines::maintain::MaintainEngine::default().with_config(&xmac_config);
-        results.push(maintain_engine.run(ctx.clone()).await);
+        let ctx_clone = ctx.clone();
+        tasks.push(Box::pin(
+            async move { maintain_engine.run(ctx_clone).await },
+        ));
     }
 
     // 3. Disk usage breakdown
@@ -512,10 +1088,11 @@ async fn run_quick(
             paths: args.paths.clone(),
         };
         let disk_engine = engines::disk::DiskEngine::new(disk_args);
-        results.push(disk_engine.run(ctx.clone()).await);
+        let ctx_clone = ctx.clone();
+        tasks.push(Box::pin(async move { disk_engine.run(ctx_clone).await }));
     }
 
-    results
+    run_engines_concurrent(tasks, max_concurrent).await
 }
 
 /// The `ram-boost` command — memory optimizer with before/after comparison.
@@ -609,38 +1186,77 @@ async fn run_optimize(cli: &Cli, args: cli::args::OptimizeArgs) -> Result<()> {
 //  Config command
 // ═══════════════════════════════════════════════════════════════════════
 
-fn run_config(_cli: &Cli, args: &cli::args::ConfigArgs) -> Result<()> {
-    use cli::args::ConfigAction;
+fn run_config(cli: &Cli, args: &cli::args::ConfigArgs) -> Result<()> {
+    use cli::args::{ConfigAction, OutputFormat};
     use config::{
         profiles::{OptimizationProfile, ProfilePreset},
         ConfigManager,
     };
+
+    let json_out = cli.global.format == OutputFormat::Json;
 
     match &args.action {
         ConfigAction::Init => {
             let mgr = ConfigManager::load();
             let path = mgr.path().to_path_buf();
             mgr.ensure_config_file().map_err(|e| anyhow::anyhow!(e))?;
-            eprintln!("Created config file at: {}", path.display());
-            eprintln!("Edit it to customize X-MaC behavior.");
+            if json_out {
+                serde_json::to_writer_pretty(
+                    std::io::stdout(),
+                    &serde_json::json!({
+                        "action": "init",
+                        "path": path.display().to_string(),
+                        "status": "created"
+                    }),
+                )?;
+                println!();
+            } else {
+                eprintln!("Created config file at: {}", path.display());
+                eprintln!("Edit it to customize X-MaC behavior.");
+            }
             Ok(())
         }
         ConfigAction::Show => {
             let mgr = ConfigManager::load();
-            let toml = toml::to_string_pretty(mgr.config()).map_err(|e| anyhow::anyhow!(e))?;
-            println!("{}", toml);
+            if json_out {
+                serde_json::to_writer_pretty(std::io::stdout(), mgr.config())?;
+                println!();
+            } else {
+                let toml = toml::to_string_pretty(mgr.config()).map_err(|e| anyhow::anyhow!(e))?;
+                println!("{}", toml);
+            }
             Ok(())
         }
         ConfigAction::Path => {
-            println!("{}", ConfigManager::default_config_path().display());
+            let path = ConfigManager::default_config_path();
+            if json_out {
+                serde_json::to_writer_pretty(
+                    std::io::stdout(),
+                    &serde_json::json!({
+                        "config_path": path.display().to_string()
+                    }),
+                )?;
+                println!();
+            } else {
+                println!("{}", path.display());
+            }
             Ok(())
         }
         ConfigAction::Profiles => {
-            eprintln!("Available optimization profiles:\n");
-            for preset in ProfilePreset::all() {
-                eprintln!("  {:15} {}", preset.name, preset.description);
+            if json_out {
+                let profiles: Vec<_> = ProfilePreset::all()
+                    .iter()
+                    .map(|p| serde_json::json!({"name": p.name, "description": p.description}))
+                    .collect();
+                serde_json::to_writer_pretty(std::io::stdout(), &profiles)?;
+                println!();
+            } else {
+                eprintln!("Available optimization profiles:\n");
+                for preset in ProfilePreset::all() {
+                    eprintln!("  {:15} {}", preset.name, preset.description);
+                }
+                eprintln!("\nSet with: xmac config set-profile <name>");
             }
-            eprintln!("\nSet with: xmac config set-profile <name>");
             Ok(())
         }
         ConfigAction::SetProfile { name } => {
@@ -657,24 +1273,58 @@ fn run_config(_cli: &Cli, args: &cli::args::ConfigArgs) -> Result<()> {
             let mut mgr = ConfigManager::load();
             mgr.set_profile(profile);
             mgr.save().map_err(|e| anyhow::anyhow!(e))?;
-            eprintln!(
-                "Active profile set to: {} ({})",
-                profile.label(),
-                profile.description()
-            );
+            if json_out {
+                serde_json::to_writer_pretty(
+                    std::io::stdout(),
+                    &serde_json::json!({
+                        "action": "set_profile",
+                        "profile": name,
+                        "label": profile.label(),
+                        "description": profile.description(),
+                        "status": "ok"
+                    }),
+                )?;
+                println!();
+            } else {
+                eprintln!(
+                    "Active profile set to: {} ({})",
+                    profile.label(),
+                    profile.description()
+                );
+            }
             Ok(())
         }
         ConfigAction::Set { key, value } => {
             let mut mgr = ConfigManager::load();
             set_config_value(mgr.config_mut(), key, value)?;
             mgr.save().map_err(|e| anyhow::anyhow!(e))?;
-            eprintln!("Set {} = {}", key, value);
+            if json_out {
+                serde_json::to_writer_pretty(
+                    std::io::stdout(),
+                    &serde_json::json!({
+                        "action": "set", "key": key, "value": value, "status": "ok"
+                    }),
+                )?;
+                println!();
+            } else {
+                eprintln!("Set {} = {}", key, value);
+            }
             Ok(())
         }
         ConfigAction::Get { key } => {
             let mgr = ConfigManager::load();
             let val = get_config_value(mgr.config(), key);
-            println!("{}", val);
+            if json_out {
+                serde_json::to_writer_pretty(
+                    std::io::stdout(),
+                    &serde_json::json!({
+                        "key": key, "value": val
+                    }),
+                )?;
+                println!();
+            } else {
+                println!("{}", val);
+            }
             Ok(())
         }
     }
@@ -715,6 +1365,13 @@ fn set_config_value(config: &mut config::Config, key: &str, value: &str) -> Resu
                 .parse()
                 .map_err(|e| anyhow::anyhow!("parse error: {}", e))?
         }
+        "duplicate.min_size" => {
+            config.duplicate.min_size = value
+                .parse()
+                .map_err(|e| anyhow::anyhow!("parse error: {}", e))?
+        }
+        "duplicate.enabled" => config.duplicate.enabled = parse_bool(value)?,
+        "duplicate.similar_images" => config.duplicate.similar_images = parse_bool(value)?,
         "maintain.dns" => config.maintain.dns = parse_bool(value)?,
         "maintain.spotlight" => config.maintain.spotlight = parse_bool(value)?,
         "maintain.launchservices" => config.maintain.launchservices = parse_bool(value)?,
@@ -809,6 +1466,9 @@ fn get_config_value(config: &config::Config, key: &str) -> String {
         "clean.browser" => config.clean.browser.to_string(),
         "clean.large_files" => config.clean.large_files.to_string(),
         "clean.min_large_size_mb" => config.clean.min_large_size_mb.to_string(),
+        "duplicate.min_size" => config.duplicate.min_size.to_string(),
+        "duplicate.enabled" => config.duplicate.enabled.to_string(),
+        "duplicate.similar_images" => config.duplicate.similar_images.to_string(),
         "optimize.max_processes" => config.optimize.max_processes.to_string(),
         "optimize.pressure_threshold" => config.optimize.pressure_threshold.to_string(),
         "optimize.ai_advisor" => config.optimize.ai_advisor.to_string(),
@@ -943,9 +1603,12 @@ async fn run_advisor(_cli: &Cli, args: &cli::args::AdvisorArgs) -> Result<()> {
 //  History command
 // ═══════════════════════════════════════════════════════════════════════
 
-fn run_history(_cli: &Cli, args: &cli::args::HistoryArgs) -> Result<()> {
+fn run_history(cli: &Cli, args: &cli::args::HistoryArgs) -> Result<()> {
     use cleanup::history::{load_history, save_history};
+    use cli::args::OutputFormat;
     use config::ConfigManager;
+
+    let json_out = cli.global.format == OutputFormat::Json;
 
     let mgr = ConfigManager::load();
     let history_path = &mgr.config().history.path;
@@ -953,7 +1616,17 @@ fn run_history(_cli: &Cli, args: &cli::args::HistoryArgs) -> Result<()> {
     if args.clear {
         let empty = cleanup::history::CleanupHistory::new();
         save_history(&empty, history_path).map_err(|e| anyhow::anyhow!(e))?;
-        eprintln!("History cleared.");
+        if json_out {
+            serde_json::to_writer_pretty(
+                std::io::stdout(),
+                &serde_json::json!({
+                    "action": "clear", "status": "ok"
+                }),
+            )?;
+            println!();
+        } else {
+            eprintln!("History cleared.");
+        }
         return Ok(());
     }
 
@@ -962,7 +1635,24 @@ fn run_history(_cli: &Cli, args: &cli::args::HistoryArgs) -> Result<()> {
     if let Some(export_path) = &args.export {
         let json = serde_json::to_string_pretty(&history)?;
         std::fs::write(export_path, json)?;
-        eprintln!("History exported to: {}", export_path.display());
+        if json_out {
+            serde_json::to_writer_pretty(
+                std::io::stdout(),
+                &serde_json::json!({
+                    "action": "export", "path": export_path.display().to_string(), "status": "ok"
+                }),
+            )?;
+            println!();
+        } else {
+            eprintln!("History exported to: {}", export_path.display());
+        }
+        return Ok(());
+    }
+
+    if json_out {
+        // Output full history as JSON
+        serde_json::to_writer_pretty(std::io::stdout(), &history)?;
+        println!();
         return Ok(());
     }
 
@@ -1042,5 +1732,477 @@ fn run_completions(args: cli::args::CompletionsArgs) -> Result<()> {
         ShellArg::PowerShell => clap_complete::Shell::PowerShell,
     };
     clap_complete::generate(shell, &mut cmd, "xmac", &mut std::io::stdout());
+    Ok(())
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Digital Twin
+// ═══════════════════════════════════════════════════════════════════════
+
+async fn run_twin(cli: &Cli, args: cli::args::TwinArgs) -> Result<()> {
+    use cli::args::{OutputFormat, TwinAction};
+
+    let json_out = cli.global.format == OutputFormat::Json;
+
+    fn print_json<T: serde::Serialize>(value: &T, json_out: bool) -> Result<()> {
+        if json_out {
+            serde_json::to_writer_pretty(std::io::stdout(), value)
+                .map_err(|e| anyhow::anyhow!("JSON serialization error: {}", e))?;
+        } else {
+            let json_str = serde_json::to_string_pretty(value)
+                .unwrap_or_else(|_| "<serialization error>".to_string());
+            println!("{}", json_str);
+        }
+        Ok(())
+    }
+
+    match args.action {
+        TwinAction::Collect => {
+            eprintln!("Collecting Digital Twin snapshot...");
+            let twin = twin::DigitalTwin::collect();
+            print_json(&twin, json_out)?;
+        }
+        TwinAction::Ask => {
+            let question = args
+                .question
+                .as_deref()
+                .unwrap_or("How is my system doing?");
+            eprintln!("Collecting twin and reasoning...");
+            let twin = twin::DigitalTwin::collect();
+            let engine = twin.reason();
+            let result = engine.ask(question);
+            print_json(&result, json_out)?;
+        }
+        TwinAction::Predict => {
+            eprintln!("Collecting twin and predicting problems...");
+            let twin = twin::DigitalTwin::collect();
+            let engine = twin.reason();
+            let predictions = engine.predict_problems();
+            print_json(&predictions, json_out)?;
+        }
+        TwinAction::Simulate => {
+            let action = args.simulate.as_deref().unwrap_or("clear cache");
+            eprintln!("Simulating: {}...", action);
+            let result = twin::reasoning::ReasoningEngine::sandbox_simulation(action);
+            print_json(&result, json_out)?;
+        }
+        TwinAction::Recommend => {
+            eprintln!("Collecting twin and generating recommendations...");
+            let twin = twin::DigitalTwin::collect();
+            let engine = twin.reason();
+            let mut recommendations = serde_json::json!({
+                "cleanup_impact": engine.simulate_cleanup(),
+                "workflow_changes": engine.recommend_workflow_changes(),
+                "hardware_upgrades": engine.recommend_hardware_upgrades(),
+                "software_changes": engine.recommend_software_changes(),
+                "preventive_actions": engine.recommend_preventive_actions(),
+            });
+            if let Some(obj) = recommendations.as_object_mut() {
+                obj.insert(
+                    "health_score".to_string(),
+                    serde_json::json!(twin.health_score),
+                );
+                obj.insert(
+                    "trust_score".to_string(),
+                    serde_json::json!(twin.trust_score),
+                );
+            }
+            print_json(&recommendations, json_out)?;
+        }
+        TwinAction::Query => {
+            let dimension = args.query.as_deref().unwrap_or("health");
+            eprintln!("Querying dimension: {}...", dimension);
+            let twin = twin::DigitalTwin::collect();
+            let engine = twin.reason();
+            let result = engine.query(dimension);
+            print_json(&result, json_out)?;
+        }
+        TwinAction::Benchmark => {
+            eprintln!("Generating anonymized benchmark...");
+            let twin = twin::DigitalTwin::collect();
+            let engine = twin.reason();
+            let benchmark = engine.generate_anonymized_benchmark();
+            print_json(&benchmark, json_out)?;
+        }
+        TwinAction::Monitor => {
+            eprintln!("Generating monitoring plan...");
+            let twin = twin::DigitalTwin::collect();
+            let engine = twin.reason();
+            let plan = engine.continuous_monitoring_plan();
+            print_json(&plan, json_out)?;
+        }
+        TwinAction::InitDb => {
+            let db_path = twin::database::default_db_path()?;
+            eprintln!(
+                "Initializing Digital Twin database at {}",
+                db_path.display()
+            );
+            let db = twin::database::TwinDb::open(&db_path)?;
+            // Verify tables exist.
+            let conn = db.conn().await;
+            let count: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table'",
+                [],
+                |r| r.get(0),
+            )?;
+            eprintln!("Database initialized. {} tables ready.", count);
+            if json_out {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "status": "initialized",
+                        "path": db_path.display().to_string(),
+                        "tables": count
+                    })
+                );
+            }
+        }
+        TwinAction::WhatChanged => {
+            let db_path = twin::database::default_db_path()?;
+            let db = twin::database::TwinDb::open(&db_path)?;
+            let store = twin::database::EventStore::new(db.handle());
+
+            let end_ms = args
+                .until
+                .as_deref()
+                .map(parse_timestamp)
+                .transpose()?
+                .unwrap_or_else(|| chrono::Utc::now().timestamp_millis());
+            let start_ms = args
+                .since
+                .as_deref()
+                .map(parse_timestamp)
+                .transpose()?
+                .unwrap_or_else(||
+                // Default: 24 hours ago.
+                chrono::Utc::now().timestamp_millis() - 86_400_000);
+
+            eprintln!(
+                "Querying changes from {} to {}...",
+                chrono::DateTime::<chrono::Utc>::from_timestamp_millis(start_ms)
+                    .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
+                    .unwrap_or_else(|| start_ms.to_string()),
+                chrono::DateTime::<chrono::Utc>::from_timestamp_millis(end_ms)
+                    .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
+                    .unwrap_or_else(|| end_ms.to_string()),
+            );
+
+            let report = twin::what_changed::what_changed_between(&store, start_ms, end_ms).await?;
+            if json_out {
+                print_json(&report, true)?;
+            } else {
+                print!("{}", twin::what_changed::format_report(&report));
+            }
+        }
+        TwinAction::Compact => {
+            let db_path = twin::database::default_db_path()?;
+            let db = twin::database::TwinDb::open(&db_path)?;
+            let store = twin::database::EventStore::new(db.handle());
+            eprintln!("Running compaction (raw events older than 7 days → hourly aggregates)...");
+            let (hourly_pruned, raw_deleted) = store.compact_events(7).await?;
+            let event_count = store.event_count().await?;
+            let agg_count = store.aggregate_count().await?;
+            eprintln!(
+                "Compaction complete: {} raw events deleted, {} hourly aggregates pruned.",
+                raw_deleted, hourly_pruned
+            );
+            eprintln!(
+                "Current: {} raw events, {} aggregates.",
+                event_count, agg_count
+            );
+            if json_out {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "raw_events_deleted": raw_deleted,
+                        "hourly_aggregates_pruned": hourly_pruned,
+                        "remaining_events": event_count,
+                        "remaining_aggregates": agg_count,
+                    })
+                );
+            }
+        }
+        TwinAction::Observe => {
+            let db_path = twin::database::default_db_path()?;
+            let db = twin::database::TwinDb::open(&db_path)?;
+            let duration = parse_duration(&args.duration)?;
+            eprintln!(
+                "Starting observers for {} (writing to {})",
+                humanize_duration(duration),
+                db_path.display()
+            );
+            eprintln!("Watching processes (5s poll) and filesystem (FSEvents).");
+            eprintln!("Press Ctrl-C to stop early.\n");
+
+            let runner = twin::observers::ObserverRunner::new(db.handle());
+            let stats = runner.run_for(duration).await?;
+
+            eprintln!("\nObserver stats:");
+            eprintln!("  Total events:    {}", stats.total_events);
+            eprintln!("  Process events:  {}", stats.process_events);
+            eprintln!("  FS events:       {}", stats.fs_events);
+            eprintln!("  Poll cycles:     {}", stats.poll_cycles);
+
+            if json_out {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "total_events": stats.total_events,
+                        "process_events": stats.process_events,
+                        "fs_events": stats.fs_events,
+                        "poll_cycles": stats.poll_cycles,
+                    })
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Parse a timestamp string. Supports:
+///   - ISO 8601: "2026-07-14T13:00:00Z"
+///   - Relative: "7d" (7 days ago), "24h" (24 hours ago), "30m" (30 minutes ago)
+fn parse_timestamp(s: &str) -> Result<i64> {
+    // Try relative format first: NNd, NNh, NNm.
+    if let Some(rest) = s.strip_suffix('d') {
+        if let Ok(n) = rest.parse::<i64>() {
+            return Ok(chrono::Utc::now().timestamp_millis() - n * 86_400_000);
+        }
+    }
+    if let Some(rest) = s.strip_suffix('h') {
+        if let Ok(n) = rest.parse::<i64>() {
+            return Ok(chrono::Utc::now().timestamp_millis() - n * 3_600_000);
+        }
+    }
+    if let Some(rest) = s.strip_suffix('m') {
+        if let Ok(n) = rest.parse::<i64>() {
+            return Ok(chrono::Utc::now().timestamp_millis() - n * 60_000);
+        }
+    }
+    // Try ISO 8601.
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(s) {
+        return Ok(dt.with_timezone(&chrono::Utc).timestamp_millis());
+    }
+    // Try YYYY-MM-DD HH:MM.
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M") {
+        return Ok(dt.and_utc().timestamp_millis());
+    }
+    // Try YYYY-MM-DD.
+    if let Ok(d) = chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+        return Ok(d.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp_millis());
+    }
+    // Try plain integer (epoch millis).
+    if let Ok(ms) = s.parse::<i64>() {
+        return Ok(ms);
+    }
+    anyhow::bail!(
+        "invalid timestamp: {} (use ISO 8601, relative like '7d', or epoch millis)",
+        s
+    )
+}
+
+/// Parse a duration string. Supports: "60s", "5m", "1h", "30s".
+fn parse_duration(s: &str) -> Result<std::time::Duration> {
+    if let Some(rest) = s.strip_suffix('s') {
+        if let Ok(n) = rest.parse::<u64>() {
+            return Ok(std::time::Duration::from_secs(n));
+        }
+    }
+    if let Some(rest) = s.strip_suffix('m') {
+        if let Ok(n) = rest.parse::<u64>() {
+            return Ok(std::time::Duration::from_secs(n * 60));
+        }
+    }
+    if let Some(rest) = s.strip_suffix('h') {
+        if let Ok(n) = rest.parse::<u64>() {
+            return Ok(std::time::Duration::from_secs(n * 3600));
+        }
+    }
+    // Try plain seconds.
+    if let Ok(n) = s.parse::<u64>() {
+        return Ok(std::time::Duration::from_secs(n));
+    }
+    anyhow::bail!(
+        "invalid duration: {} (use format like '60s', '5m', '1h')",
+        s
+    )
+}
+
+/// Human-readable duration for display.
+fn humanize_duration(d: std::time::Duration) -> String {
+    let secs = d.as_secs();
+    if secs >= 3600 {
+        format!("{}h {}m", secs / 3600, (secs % 3600) / 60)
+    } else if secs >= 60 {
+        format!("{}m {}s", secs / 60, secs % 60)
+    } else {
+        format!("{}s", secs)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Safety command
+// ═══════════════════════════════════════════════════════════════════════
+
+fn run_safety(cli: &Cli, args: cli::args::SafetyArgs) -> Result<()> {
+    use cli::args::SafetyAction;
+    use safety::rule_engine::SafetyEngine;
+
+    let engine = SafetyEngine::load_default().context("Failed to load safety rules")?;
+
+    match args.action {
+        SafetyAction::List => {
+            let counts = engine.rule_counts();
+            if cli.global.format == cli::args::OutputFormat::Json
+                || cli.global.format == cli::args::OutputFormat::JsonPretty
+            {
+                let output = serde_json::json!({
+                    "total_rules": engine.rules().len(),
+                    "counts_by_rating": counts,
+                    "rules": engine.rules().iter().map(|r| serde_json::json!({
+                        "name": r.name,
+                        "description": r.description,
+                        "rating": r.rating.label(),
+                        "paths": r.paths,
+                        "confidence": r.confidence,
+                        "category": r.category,
+                        "upstream_commit": r.upstream_commit,
+                    })).collect::<Vec<_>>()
+                });
+                if cli.global.format == cli::args::OutputFormat::JsonPretty {
+                    println!("{}", serde_json::to_string_pretty(&output)?);
+                } else {
+                    println!("{}", serde_json::to_string(&output)?);
+                }
+            } else {
+                println!("Safety Rules ({} total)", engine.rules().len());
+                println!(
+                    "  Safe: {} | Review: {} | Protected: {}",
+                    counts.get("safe").copied().unwrap_or(0),
+                    counts.get("review").copied().unwrap_or(0),
+                    counts.get("protected").copied().unwrap_or(0),
+                );
+                println!();
+                for rule in engine.rules() {
+                    println!(
+                        "  [{}] {} (confidence: {}/100)",
+                        rule.rating.label(),
+                        rule.name,
+                        rule.confidence,
+                    );
+                    println!("    {}", rule.description);
+                    for path in &rule.paths {
+                        println!("    → {}", path);
+                    }
+                    println!();
+                }
+            }
+        }
+        SafetyAction::Classify => {
+            let path = args
+                .path
+                .context("--path is required for --action classify")?;
+            match engine.classify(&path) {
+                Some(classification) => {
+                    if cli.global.format == cli::args::OutputFormat::Json
+                        || cli.global.format == cli::args::OutputFormat::JsonPretty
+                    {
+                        let output = serde_json::json!({
+                            "path": classification.path,
+                            "rating": classification.rating.label(),
+                            "rule": classification.rule_name,
+                            "description": classification.rule_description,
+                            "confidence": classification.confidence,
+                            "category": classification.category,
+                            "preselected": classification.preselected,
+                            "explanation": classification.explanation(),
+                        });
+                        if cli.global.format == cli::args::OutputFormat::JsonPretty {
+                            println!("{}", serde_json::to_string_pretty(&output)?);
+                        } else {
+                            println!("{}", serde_json::to_string(&output)?);
+                        }
+                    } else {
+                        println!("Path: {}", classification.path);
+                        println!("Rating: {}", classification.rating.label());
+                        println!("Rule: {}", classification.rule_name);
+                        println!("Description: {}", classification.rule_description);
+                        println!("Confidence: {}/100", classification.confidence);
+                        println!("Preselected: {}", classification.preselected);
+                    }
+                }
+                None => {
+                    if cli.global.format == cli::args::OutputFormat::Json
+                        || cli.global.format == cli::args::OutputFormat::JsonPretty
+                    {
+                        println!(
+                            "{}",
+                            serde_json::json!({
+                                "path": path,
+                                "rating": "unclassified",
+                                "rule": null,
+                                "description": "No matching safety rule found",
+                                "confidence": 0,
+                                "preselected": false
+                            })
+                        );
+                    } else {
+                        println!("Path: {}", path);
+                        println!("Rating: unclassified (no matching rule)");
+                    }
+                }
+            }
+        }
+        SafetyAction::Preview => {
+            let counts = engine.rule_counts();
+            let profile_rules: Vec<_> = engine
+                .rules()
+                .iter()
+                .filter(|r| args.profile == "all" || r.category.as_deref() == Some(&args.profile))
+                .collect();
+
+            if cli.global.format == cli::args::OutputFormat::Json
+                || cli.global.format == cli::args::OutputFormat::JsonPretty
+            {
+                let output = serde_json::json!({
+                    "profile": args.profile,
+                    "total_rules": engine.rules().len(),
+                    "matching_rules": profile_rules.len(),
+                    "safe_rules": counts.get("safe").copied().unwrap_or(0),
+                    "review_rules": counts.get("review").copied().unwrap_or(0),
+                    "protected_rules": counts.get("protected").copied().unwrap_or(0),
+                    "rules": profile_rules.iter().map(|r| serde_json::json!({
+                        "name": r.name,
+                        "rating": r.rating.label(),
+                        "description": r.description,
+                        "confidence": r.confidence,
+                    })).collect::<Vec<_>>()
+                });
+                if cli.global.format == cli::args::OutputFormat::JsonPretty {
+                    println!("{}", serde_json::to_string_pretty(&output)?);
+                } else {
+                    println!("{}", serde_json::to_string(&output)?);
+                }
+            } else {
+                println!("Cleanup Preview (profile: {})", args.profile);
+                println!(
+                    "  {} rules match (of {} total)",
+                    profile_rules.len(),
+                    engine.rules().len()
+                );
+                println!();
+                for rule in &profile_rules {
+                    println!(
+                        "  [{}] {} — {}",
+                        rule.rating.label(),
+                        rule.name,
+                        rule.description
+                    );
+                }
+            }
+        }
+    }
+
     Ok(())
 }

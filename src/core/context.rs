@@ -21,6 +21,7 @@ impl ScanContext {
             follow_symlinks: cli.global.follow_symlinks,
             exclude_patterns: cli.global.exclude.clone(),
             cache_dir: cli.global.cache_dir.clone(),
+            resource_mode: cli.global.resource_mode.clone(),
         };
 
         let progress = Arc::new(ProgressReporter::new(cli.global.quiet));

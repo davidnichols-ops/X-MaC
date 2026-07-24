@@ -28,6 +28,9 @@ struct ProcessMemoryEntry: Codable, Hashable, Identifiable {
 struct RamBoostView: View {
     @EnvironmentObject var runner: XMacRunner
 
+    // Kill confirmation state
+    @State private var pendingKill: (pid: Int, name: String, force: Bool)? = nil
+
     // Boost state
     @State private var beforeStats: MemoryStatsSnapshot? = nil
     @State private var afterStats: MemoryStatsSnapshot? = nil
@@ -108,7 +111,7 @@ struct RamBoostView: View {
             refreshTimer?.invalidate()
             refreshTimer = nil
         }
-        .onChange(of: autoRefresh) { enabled in
+        .onChange(of: autoRefresh) { _, enabled in
             if enabled {
                 refreshTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { _ in
                     Task { await runner.runOptimize(topN: 15) }
@@ -449,7 +452,7 @@ struct RamBoostView: View {
                     actionButton(pred: pred)
                     if proc != nil && (pred.action == "terminate" || pred.action == "suspend") {
                         Button {
-                            killProcess(pid: pred.pid, name: pred.processName, force: pred.action == "terminate")
+                            pendingKill = (pid: pred.pid, name: pred.processName, force: pred.action == "terminate")
                         } label: {
                             HStack(spacing: 4) {
                                 Image(systemName: pred.action == "terminate" ? "xmark.octagon.fill" : "pause.circle.fill")
@@ -464,6 +467,26 @@ struct RamBoostView: View {
                             .clipShape(Capsule())
                         }
                         .buttonStyle(.plain)
+                        .confirmationDialog(
+                            pred.action == "terminate" ? "Kill \(pred.processName) (PID \(pred.pid))?" : "Suspend \(pred.processName) (PID \(pred.pid))?",
+                            isPresented: Binding(
+                                get: { pendingKill?.pid == pred.pid },
+                                set: { if !$0 { pendingKill = nil } }
+                            ),
+                            titleVisibility: .visible
+                        ) {
+                            Button(pred.action == "terminate" ? "Kill Process" : "Suspend Process", role: .destructive) {
+                                if let pk = pendingKill {
+                                    killProcess(pid: pk.pid, name: pk.name, force: pk.force)
+                                }
+                                pendingKill = nil
+                            }
+                            Button("Cancel", role: .cancel) { pendingKill = nil }
+                        } message: {
+                            Text(pred.action == "terminate"
+                                ? "This will send SIGKILL to \(pred.processName). The process will be immediately terminated. Unsaved work may be lost."
+                                : "This will send SIGTERM to \(pred.processName). The process may shut down gracefully.")
+                        }
                     }
                 }
                 .padding(.leading, 38)
@@ -973,14 +996,11 @@ struct RamBoostView: View {
     // MARK: - Actions
 
     private func killProcess(pid: Int, name: String, force: Bool) {
-        let signal = force ? "SIGKILL" : "SIGTERM"
-        let task = Process()
-        task.launchPath = "/bin/kill"
-        task.arguments = [force ? "-9" : "-15", "\(pid)"]
-        try? task.run()
-        // Refresh after a short delay
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-            Task { await runner.runOptimize(topN: 15) }
+        Task {
+            await runner.killProcess(pid: pid, force: force)
+            // Refresh after a short delay
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            await runner.runOptimize(topN: 15)
         }
     }
 

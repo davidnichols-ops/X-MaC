@@ -34,6 +34,14 @@ pub enum EngineId {
     Map,
     Depth,
     Envmap,
+    Duplicate,
+    Startup,
+    Privacy,
+    Maintain,
+    Optimize,
+    Graph,
+    Diag,
+    Disk,
     All,
 }
 
@@ -72,6 +80,125 @@ pub enum Category {
     DocumentVersion,
     SystemMaintenance,
     RamOptimization,
+    // Phase 1: Filesystem Discovery
+    StorageHotspot,
+    CloudSync,
+    ICloudDrive,
+    RemovableMedia,
+    NetworkMount,
+    // Phase 2: Cache Analysis
+    ShaderCache,
+    ThumbnailCache,
+    PreviewCache,
+    FontCache,
+    CorruptedCache,
+    // Phase 3: Log Management
+    CrashReport,
+    DiagnosticLog,
+    InstallerLog,
+    UpdateLog,
+    BrowserLog,
+    OversizedLog,
+    DebugFile,
+    DeveloperLog,
+    SimulatorLog,
+    PackageManagerLog,
+    DockerLog,
+    // Phase 5: Application Intelligence
+    AppLeftover,
+    BrokenUninstall,
+    OldInstaller,
+    DmgFile,
+    PkgFile,
+    UnsignedApp,
+    SuspiciousApp,
+    DuplicateApp,
+    AppInventory,
+    SavedAppState,
+    AppPlugin,
+    AppExtension,
+    LoginHelper,
+    // Phase 6: Startup & Background
+    LoginItem,
+    LaunchAgent,
+    LaunchDaemon,
+    BackgroundHelper,
+    UpdateAgent,
+    TelemetryProcess,
+    ZombieProcess,
+    FrozenApp,
+    // Phase 7: macOS Database Maintenance
+    ApfsValidation,
+    SmartData,
+    FilesystemAnomaly,
+    StalePreference,
+    BrokenAlias,
+    // Phase 8: Privacy & Security
+    BrowserHistory,
+    Cookie,
+    DownloadHistory,
+    AutofillData,
+    RecentDocument,
+    AppHistory,
+    ChatTrace,
+    TrackingData,
+    Credential,
+    Malware,
+    Adware,
+    BrowserHijacker,
+    AccessibilityPermission,
+    DiskAccessPermission,
+    VulnerableApp,
+    OutdatedSoftware,
+    RiskyExtension,
+    ExifData,
+    SuspiciousProcess,
+    SecurityEvent,
+    Quarantine,
+    SecurityReport,
+    // Phase 9: Memory & Performance
+    MemoryPressure,
+    GpuUsage,
+    ThermalState,
+    BatteryHealth,
+    EnergyImpact,
+    FanActivity,
+    // Phase 10: AI / Next-Gen
+    StorageForecast,
+    MemoryLeak,
+    PerformanceRegression,
+    // Twin: Hardware
+    HardwareProfile,
+    // Twin: Software Genome
+    SoftwareInventory,
+    Framework,
+    DynamicLibrary,
+    KernelExtension,
+    SystemExtension,
+    Font,
+    DevTool,
+    Sdk,
+    VirtualMachine,
+    AiModel,
+    Dataset,
+    // Twin: Process Intelligence
+    ProcessTree,
+    ProcessAnomaly,
+    ProcessFingerprint,
+    // Twin: Memory Intelligence
+    MemoryFragmentation,
+    MemoryContention,
+    // Twin: Energy
+    BatteryAging,
+    ThermalEfficiency,
+    SleepEfficiency,
+    // Twin: App Agent
+    AppHealthScore,
+    AppCrashPrediction,
+    // Twin: Reasoning
+    SystemHealthScore,
+    OptimizationPlan,
+    TrustScore,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -90,6 +217,20 @@ pub struct Finding {
     pub remediation_hint: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size_bytes: Option<u64>,
+    /// Safety classification from the rule engine (safe/review/protected).
+    /// Populated by the safety engine during preflight. None means unclassified.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub safety_rating: Option<String>,
+    /// Human-readable explanation of why this file is safe/risky to remove.
+    /// Includes the rule name, confidence, and description.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub safety_explanation: Option<String>,
+    /// The safety rule that matched this finding (if any).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub safety_rule: Option<String>,
+    /// Confidence score 0-100 from the safety rule.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub safety_confidence: Option<u8>,
 }
 
 impl Finding {
@@ -113,6 +254,10 @@ impl Finding {
             discovered_at: SystemTime::now(),
             remediation_hint: None,
             size_bytes: None,
+            safety_rating: None,
+            safety_explanation: None,
+            safety_rule: None,
+            safety_confidence: None,
         }
     }
 
@@ -128,6 +273,22 @@ impl Finding {
 
     pub fn with_metadata(mut self, key: impl Into<String>, value: serde_json::Value) -> Self {
         self.metadata.insert(key.into(), value);
+        self
+    }
+
+    /// Attach a safety classification to this finding.
+    #[allow(dead_code)]
+    pub fn with_safety(
+        mut self,
+        rating: &str,
+        rule_name: &str,
+        explanation: &str,
+        confidence: u8,
+    ) -> Self {
+        self.safety_rating = Some(rating.to_string());
+        self.safety_rule = Some(rule_name.to_string());
+        self.safety_explanation = Some(explanation.to_string());
+        self.safety_confidence = Some(confidence);
         self
     }
 }
@@ -149,6 +310,9 @@ pub struct ScanConfig {
     pub follow_symlinks: bool,
     pub exclude_patterns: Vec<String>,
     pub cache_dir: Option<PathBuf>,
+    /// Resource mode: "eco", "balanced", or "turbo".
+    /// Controls engine-level parallelism and CPU strain.
+    pub resource_mode: String,
 }
 
 impl Default for ScanConfig {
@@ -159,6 +323,7 @@ impl Default for ScanConfig {
             follow_symlinks: false,
             exclude_patterns: Vec::new(),
             cache_dir: None,
+            resource_mode: "balanced".to_string(),
         }
     }
 }
@@ -179,6 +344,14 @@ pub struct EngineBreakdown {
     pub map: u64,
     pub depth: u64,
     pub envmap: u64,
+    pub duplicate: u64,
+    pub startup: u64,
+    pub privacy: u64,
+    pub maintain: u64,
+    pub optimize: u64,
+    pub graph: u64,
+    pub diag: u64,
+    pub disk: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -218,8 +391,19 @@ impl ScanReport {
             map: 0,
             depth: 0,
             envmap: 0,
+            duplicate: 0,
+            startup: 0,
+            privacy: 0,
+            maintain: 0,
+            optimize: 0,
+            graph: 0,
+            diag: 0,
+            disk: 0,
         };
         let mut category_map: HashMap<String, u64> = HashMap::new();
+        // op 52: Estimate reclaimable space — sum the size bytes of findings
+        // whose categories represent deletable space, excluding informational
+        // categories (SystemInfo, LargeFile) that do not map to deletable items.
         let mut reclaimable: u64 = 0;
 
         for f in findings {
@@ -236,6 +420,14 @@ impl ScanReport {
                 EngineId::Map => engine_bd.map += 1,
                 EngineId::Depth => engine_bd.depth += 1,
                 EngineId::Envmap => engine_bd.envmap += 1,
+                EngineId::Duplicate => engine_bd.duplicate += 1,
+                EngineId::Startup => engine_bd.startup += 1,
+                EngineId::Privacy => engine_bd.privacy += 1,
+                EngineId::Maintain => engine_bd.maintain += 1,
+                EngineId::Optimize => engine_bd.optimize += 1,
+                EngineId::Graph => engine_bd.graph += 1,
+                EngineId::Diag => engine_bd.diag += 1,
+                EngineId::Disk => engine_bd.disk += 1,
                 EngineId::All => {}
             }
             let cat = serde_json::to_string(&f.category)

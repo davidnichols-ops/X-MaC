@@ -91,6 +91,13 @@ impl CleanEngine {
         if self.args.large_files && !cc.large_files {
             self.args.large_files = false;
         }
+        if self.args.orphans && !cc.orphans {
+            self.args.orphans = false;
+        }
+        // Apply config resource mode only if the CLI left the default.
+        if self.args.resource_mode == "balanced" && !cc.resource_mode.is_empty() {
+            self.args.resource_mode = cc.resource_mode.clone();
+        }
         if !cc.dedup {
             self.args.dedup = false;
         } else {
@@ -1279,145 +1286,159 @@ impl Engine for CleanEngine {
     }
 
     async fn scan(&self, ctx: Arc<ScanContext>) -> std::result::Result<EngineStats, EngineError> {
+        use futures::stream::StreamExt;
+        use std::future::Future;
+
         let start = Instant::now();
         let mut items_scanned = 0u64;
         let mut findings_count = 0u64;
 
-        let (cache_findings, cache_items) = self.scan_caches(&ctx).await;
-        items_scanned += cache_items;
-        findings_count += cache_findings.len() as u64;
-        for finding in cache_findings {
-            ctx.emit(finding).await;
+        // Build the set of category keys to scan. If `--only` is specified,
+        // only those categories run; otherwise the normal toggle flags apply.
+        let only_set: std::collections::HashSet<String> =
+            self.args.only.iter().map(|s| s.to_lowercase()).collect();
+        let has_only = !only_set.is_empty();
+
+        // Determine parallelism budget from resource_mode.
+        // eco = 1 (sequential), balanced = 2, turbo = 4.
+        // These are intentionally conservative — each scan category spawns
+        // blocking threads via spawn_blocking for WalkDir, so the actual
+        // thread count is higher than these numbers.
+        let max_concurrent: usize = match self.args.resource_mode.as_str() {
+            "eco" => 1,
+            "turbo" => 4,
+            _ => 2, // balanced
+        };
+
+        // Each scan task returns (Vec<Finding>, u64). We collect the enabled
+        // tasks, then run them with bounded concurrency.
+        // All tasks are I/O-bound (directory walks, stat calls), so overlapping
+        // them reduces wall-clock time without spiking CPU.
+        let ctx_ref = &ctx;
+
+        // Helper macro to conditionally include a task.
+        macro_rules! maybe_task {
+            ($key:expr, $toggle:expr, $fut:expr) => {
+                if has_only {
+                    if only_set.contains($key) {
+                        Some(Box::pin($fut)
+                            as std::pin::Pin<
+                                Box<dyn Future<Output = (Vec<Finding>, u64)> + Send>,
+                            >)
+                    } else {
+                        None
+                    }
+                } else if $toggle {
+                    Some(Box::pin($fut)
+                        as std::pin::Pin<
+                            Box<dyn Future<Output = (Vec<Finding>, u64)> + Send>,
+                        >)
+                } else {
+                    None
+                }
+            };
         }
 
-        if self.args.xcode {
-            let (xcode_findings, xcode_items) = self.scan_xcode(&ctx).await;
-            items_scanned += xcode_items;
-            findings_count += xcode_findings.len() as u64;
-            for finding in xcode_findings {
-                ctx.emit(finding).await;
+        // Collect enabled tasks into a Vec. Categories marked "always" run
+        // unless --only excludes them.
+        let enabled: Vec<std::pin::Pin<Box<dyn Future<Output = (Vec<Finding>, u64)> + Send>>> = [
+            maybe_task!("cache", true, self.scan_caches(ctx_ref)),
+            maybe_task!("xcode_artifact", self.args.xcode, self.scan_xcode(ctx_ref)),
+            maybe_task!("orphan_file", self.args.orphans, self.scan_orphans(ctx_ref)),
+            maybe_task!(
+                "duplicate_file",
+                self.args.dedup,
+                self.scan_duplicates(ctx_ref)
+            ),
+            maybe_task!(
+                "package_manager_cache",
+                self.args.pkg_caches,
+                self.scan_pkg_caches(ctx_ref)
+            ),
+            maybe_task!("docker", self.args.docker, self.scan_docker_caches(ctx_ref)),
+            maybe_task!("temp_file", self.args.temp, self.scan_temp_files(ctx_ref)),
+            maybe_task!(
+                "build_artifact",
+                self.args.build_artifacts,
+                self.scan_build_artifacts(ctx_ref)
+            ),
+            maybe_task!("log", true, self.scan_rotated_logs(ctx_ref)),
+            maybe_task!(
+                "browser_cache",
+                self.args.browser,
+                self.scan_browser_caches(ctx_ref)
+            ),
+            maybe_task!("mail_attachment", self.args.mail, self.scan_mail(ctx_ref)),
+            maybe_task!(
+                "ios_backup",
+                self.args.ios_backups,
+                self.scan_ios_backups(ctx_ref)
+            ),
+            maybe_task!(
+                "language_file",
+                self.args.languages,
+                self.scan_language_files(ctx_ref)
+            ),
+            maybe_task!("trash_bin", self.args.trash, self.scan_trash(ctx_ref)),
+            maybe_task!(
+                "large_file",
+                self.args.large_files,
+                self.scan_large_files(ctx_ref)
+            ),
+            maybe_task!(
+                "document_version",
+                true,
+                self.scan_document_versions(ctx_ref)
+            ),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+
+        // If no tasks are enabled (e.g., --only with an unknown category), return early.
+        if enabled.is_empty() {
+            return Ok(EngineStats {
+                engine: self.id(),
+                duration: start.elapsed(),
+                items_scanned: 0,
+                findings_count: 0,
+                errors_count: 0,
+            });
+        }
+
+        // Emit helper: accumulate stats and stream findings.
+        macro_rules! emit_results {
+            ($findings:expr, $items:expr) => {
+                items_scanned += $items;
+                findings_count += $findings.len() as u64;
+                for finding in $findings {
+                    ctx.emit(finding).await;
+                }
+            };
+        }
+
+        if max_concurrent <= 1 {
+            // Eco mode: run sequentially — lowest CPU strain.
+            // Futures don't execute until awaited, so collecting them into a
+            // Vec and awaiting one-by-one gives true sequential execution.
+            for fut in enabled {
+                let (findings, items) = fut.await;
+                emit_results!(findings, items);
             }
-        }
-
-        let (orphan_findings, orphan_items) = self.scan_orphans(&ctx).await;
-        items_scanned += orphan_items;
-        findings_count += orphan_findings.len() as u64;
-        for finding in orphan_findings {
-            ctx.emit(finding).await;
-        }
-
-        if self.args.dedup {
-            let (dup_findings, dup_items) = self.scan_duplicates(&ctx).await;
-            items_scanned += dup_items;
-            findings_count += dup_findings.len() as u64;
-            for finding in dup_findings {
-                ctx.emit(finding).await;
+        } else {
+            // Balanced/Turbo: run with **bounded** concurrency via
+            // `buffer_unordered(max_concurrent)`. This ensures at most
+            // `max_concurrent` scan categories are polled at once.
+            //
+            // CRITICAL: FuturesUnordered polls ALL futures simultaneously,
+            // which — combined with spawn_blocking inside each scan method —
+            // can spawn dozens of blocking threads and saturate all CPU cores.
+            // buffer_unordered(N) only polls N futures at a time, giving real
+            // CPU bounding while still overlapping I/O waits.
+            let mut stream = futures::stream::iter(enabled).buffer_unordered(max_concurrent);
+            while let Some((findings, items)) = stream.next().await {
+                emit_results!(findings, items);
             }
-        }
-
-        if self.args.pkg_caches {
-            let (pkg_findings, pkg_items) = self.scan_pkg_caches(&ctx).await;
-            items_scanned += pkg_items;
-            findings_count += pkg_findings.len() as u64;
-            for finding in pkg_findings {
-                ctx.emit(finding).await;
-            }
-        }
-
-        if self.args.docker {
-            let (docker_findings, docker_items) = self.scan_docker_caches(&ctx).await;
-            items_scanned += docker_items;
-            findings_count += docker_findings.len() as u64;
-            for finding in docker_findings {
-                ctx.emit(finding).await;
-            }
-        }
-
-        if self.args.temp {
-            let (temp_findings, temp_items) = self.scan_temp_files(&ctx).await;
-            items_scanned += temp_items;
-            findings_count += temp_findings.len() as u64;
-            for finding in temp_findings {
-                ctx.emit(finding).await;
-            }
-        }
-
-        if self.args.build_artifacts {
-            let (build_findings, build_items) = self.scan_build_artifacts(&ctx).await;
-            items_scanned += build_items;
-            findings_count += build_findings.len() as u64;
-            for finding in build_findings {
-                ctx.emit(finding).await;
-            }
-        }
-
-        let (log_findings, log_items) = self.scan_rotated_logs(&ctx).await;
-        items_scanned += log_items;
-        findings_count += log_findings.len() as u64;
-        for finding in log_findings {
-            ctx.emit(finding).await;
-        }
-
-        if self.args.browser {
-            let (f, i) = self.scan_browser_caches(&ctx).await;
-            items_scanned += i;
-            findings_count += f.len() as u64;
-            for finding in f {
-                ctx.emit(finding).await;
-            }
-        }
-
-        if self.args.mail {
-            let (f, i) = self.scan_mail(&ctx).await;
-            items_scanned += i;
-            findings_count += f.len() as u64;
-            for finding in f {
-                ctx.emit(finding).await;
-            }
-        }
-
-        if self.args.ios_backups {
-            let (f, i) = self.scan_ios_backups(&ctx).await;
-            items_scanned += i;
-            findings_count += f.len() as u64;
-            for finding in f {
-                ctx.emit(finding).await;
-            }
-        }
-
-        if self.args.languages {
-            let (f, i) = self.scan_language_files(&ctx).await;
-            items_scanned += i;
-            findings_count += f.len() as u64;
-            for finding in f {
-                ctx.emit(finding).await;
-            }
-        }
-
-        if self.args.trash {
-            let (f, i) = self.scan_trash(&ctx).await;
-            items_scanned += i;
-            findings_count += f.len() as u64;
-            for finding in f {
-                ctx.emit(finding).await;
-            }
-        }
-
-        if self.args.large_files {
-            let (f, i) = self.scan_large_files(&ctx).await;
-            items_scanned += i;
-            findings_count += f.len() as u64;
-            for finding in f {
-                ctx.emit(finding).await;
-            }
-        }
-
-        // Document versions — always scanned (low cost, few paths)
-        let (dv_findings, dv_items) = self.scan_document_versions(&ctx).await;
-        items_scanned += dv_items;
-        findings_count += dv_findings.len() as u64;
-        for finding in dv_findings {
-            ctx.emit(finding).await;
         }
 
         Ok(EngineStats {
@@ -1457,6 +1478,9 @@ impl CleanEngine {
             trash: true,
             large_files: true,
             min_large_size: "100M".to_string(),
+            orphans: true,
+            only: Vec::new(),
+            resource_mode: "balanced".to_string(),
             paths: Vec::new(),
         }
     }

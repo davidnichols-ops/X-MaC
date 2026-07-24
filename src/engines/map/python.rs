@@ -20,6 +20,9 @@ impl PythonScanner {
         }
     }
 
+    /// op 293: Manage Python environments — scan for venv, conda, poetry,
+    /// pipenv, and uv environments plus global Python installations,
+    /// reporting versions and disk usage.
     pub async fn scan(&self, _ctx: &ScanContext) -> anyhow::Result<Vec<Finding>> {
         let mut findings = Vec::new();
         let search_paths = self.get_search_paths();

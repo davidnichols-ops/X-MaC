@@ -5,6 +5,7 @@ use tokio::signal;
 use tokio::time::interval;
 
 use crate::config::store::ConfigManager;
+use crate::intelligence::system_awareness::SystemSnapshot;
 
 /// The background daemon — runs on a schedule, collects telemetry,
 /// checks automation rules, and performs proactive optimization.
@@ -12,6 +13,21 @@ pub struct Daemon {
     config: ConfigManager,
     interval_secs: u64,
     verbose: bool,
+    /// Rolling history of recent system snapshots for baseline computation.
+    history: Vec<SystemSnapshot>,
+    /// Cached baseline metrics derived from `history` (op 275).
+    baseline: Option<BaselineMetrics>,
+}
+
+/// Baseline metrics computed from recent snapshot history (op 275).
+#[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
+pub struct BaselineMetrics {
+    pub avg_memory_utilization: f64,
+    pub avg_cpu_utilization_pct: f64,
+    pub avg_disk_utilization: f64,
+    pub avg_health_score: f64,
+    pub samples: usize,
 }
 
 /// Cached resolution of the xmac binary path. Computed once on first
@@ -25,6 +41,8 @@ impl Daemon {
             config,
             interval_secs,
             verbose,
+            history: Vec::new(),
+            baseline: None,
         }
     }
 
@@ -441,6 +459,47 @@ impl Daemon {
         let _ = std::fs::remove_file(pid_file);
         Ok(())
     }
+
+    /// op 275: Maintain historical baseline — collect a fresh snapshot,
+    /// append it to the rolling history, and recompute baseline metrics
+    /// (averages of memory, CPU, disk utilization, and health score) from
+    /// the recent history window. Keeps at most 100 samples.
+    #[allow(dead_code)]
+    pub fn maintain_historical_baseline(&mut self) -> &BaselineMetrics {
+        let snapshot = crate::intelligence::SystemSnapshot::collect();
+        self.history.push(snapshot);
+        if self.history.len() > 100 {
+            self.history.remove(0);
+        }
+
+        let n = self.history.len();
+        let (mem, cpu, disk, health) =
+            self.history
+                .iter()
+                .fold((0.0f64, 0.0f64, 0.0f64, 0.0f64), |(m, c, d, h), s| {
+                    (
+                        m + s.memory.utilization,
+                        c + s.cpu.utilization_pct,
+                        d + s.disk.overall_utilization,
+                        h + s.health_score,
+                    )
+                });
+        let n_f = n as f64;
+        self.baseline = Some(BaselineMetrics {
+            avg_memory_utilization: if n > 0 { mem / n_f } else { 0.0 },
+            avg_cpu_utilization_pct: if n > 0 { cpu / n_f } else { 0.0 },
+            avg_disk_utilization: if n > 0 { disk / n_f } else { 0.0 },
+            avg_health_score: if n > 0 { health / n_f } else { 0.0 },
+            samples: n,
+        });
+        self.baseline.as_ref().unwrap()
+    }
+
+    /// Return the most recently computed baseline metrics, if any.
+    #[allow(dead_code)]
+    pub fn baseline(&self) -> Option<&BaselineMetrics> {
+        self.baseline.as_ref()
+    }
 }
 
 #[cfg(test)]
@@ -480,5 +539,21 @@ mod tests {
         let tmp = std::env::temp_dir().join("xmac_test_daemon_stop_nonexistent.pid");
         let _ = std::fs::remove_file(&tmp);
         assert!(Daemon::stop(&tmp).is_err());
+    }
+
+    #[test]
+    fn test_maintain_historical_baseline() {
+        let mgr = ConfigManager::load();
+        let mut daemon = Daemon::new(mgr, 60, false);
+        // Initially there is no baseline.
+        assert!(daemon.baseline().is_none());
+        let baseline = daemon.maintain_historical_baseline();
+        assert_eq!(baseline.samples, 1);
+        assert!(baseline.avg_health_score >= 0.0 && baseline.avg_health_score <= 100.0);
+        assert!(baseline.avg_memory_utilization >= 0.0);
+        // A second sample should average the two.
+        let baseline = daemon.maintain_historical_baseline();
+        assert_eq!(baseline.samples, 2);
+        assert!(daemon.baseline().is_some());
     }
 }

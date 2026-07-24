@@ -18,8 +18,17 @@ private func gnnLog(_ msg: String) {
 ///   - pressure (3): normal, warn, critical (softmax)
 ///
 /// Total output: 11 values per node.
+///
+/// Thread safety: model state is protected by NSLock for concurrent access.
 final class MemoryGNNManager {
-    private var model: MLModel?
+    private let stateLock = NSLock()
+    private var _model: MLModel?
+
+    private var model: MLModel? {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return _model
+    }
 
     // Output layout: [action(6), risk(1), growth(1), pressure(3)] = 11
     static let featureCount = 24
@@ -38,7 +47,12 @@ final class MemoryGNNManager {
     // MARK: - Model Loading
 
     private func loadModel() -> MLModel? {
-        if let m = model { return m }
+        stateLock.lock()
+        if let m = _model {
+            stateLock.unlock()
+            return m
+        }
+        stateLock.unlock()
 
         let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("XMacMemoryGNN", isDirectory: true)
@@ -48,7 +62,9 @@ final class MemoryGNNManager {
             do {
                 let m = try MLModel(contentsOf: compiledCacheURL)
                 gnnLog("[MemoryGNN] Compiled model loaded from cache.")
-                model = m
+                stateLock.lock()
+                _model = m
+                stateLock.unlock()
                 return m
             } catch {
                 gnnLog("[MemoryGNN] Cached model failed, recompiling...")
@@ -68,7 +84,9 @@ final class MemoryGNNManager {
             try? FileManager.default.copyItem(at: compiledURL, to: compiledCacheURL)
             let m = try MLModel(contentsOf: compiledCacheURL)
             gnnLog("[MemoryGNN] Model compiled and loaded.")
-            model = m
+            stateLock.lock()
+            _model = m
+            stateLock.unlock()
             return m
         } catch {
             gnnLog("[MemoryGNN] Compilation failed: \(error)")

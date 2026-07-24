@@ -75,6 +75,12 @@ pub struct GlobalArgs {
     #[arg(long, default_value = "4", global = true)]
     pub concurrency: usize,
 
+    /// Resource mode controls scan parallelism and CPU strain.
+    /// eco = sequential (lowest CPU), balanced = limited parallelism,
+    /// turbo = full parallelism (fastest, higher CPU).
+    #[arg(long, default_value = "balanced", global = true)]
+    pub resource_mode: String,
+
     /// Exclude paths matching glob pattern (repeatable).
     #[arg(long, value_name = "GLOB", global = true)]
     pub exclude: Vec<String>,
@@ -194,6 +200,48 @@ pub enum Commands {
     /// for tab-completion of xmac commands and flags.
     /// Example: `xmac completions --shell zsh > ~/.zsh/completions/_xmac`
     Completions(CompletionsArgs),
+
+    /// Digital Twin — collect a complete system snapshot and query the
+    /// reasoning engine. Use subcommands to ask questions, predict problems,
+    /// simulate actions, or get recommendations.
+    Twin(TwinArgs),
+
+    /// Run the MCP (Model Context Protocol) server. Exposes the Digital Twin
+    /// as a structured environment for AI agents (Claude, GPT, local models).
+    /// The server reads JSON-RPC from stdin and writes to stdout.
+    Mcp,
+
+    /// Safety — classify file paths by risk level and list loaded safety
+    /// rules. Every file targeted for cleanup traces to a named rule with
+    /// a rating (safe/review/protected).
+    Safety(SafetyArgs),
+
+    /// Find duplicate files via BLAKE3 hashing and perceptual image
+    /// fingerprinting. A standalone version of `clean --dedup` focused
+    /// only on duplicate detection.
+    Dedup(DedupArgs),
+
+    /// Scan for privacy and security issues: browser data exposure,
+    /// malware/adware signatures, app permissions, and security posture
+    /// (Gatekeeper, SIP, FileVault, firmware password).
+    Privacy(PrivacyArgs),
+
+    /// Scan startup items: Login Items, LaunchAgents, LaunchDaemons,
+    /// and background helpers. Identifies startup bottlenecks, zombies,
+    /// and frozen apps.
+    Startup(StartupArgs),
+
+    /// Undo a previous cleanup by restoring trashed files to their
+    /// original locations. Uses the cleanup history to find what was
+    /// moved to Trash. By default restores the most recent transaction;
+    /// use --transaction-id to target a specific one.
+    Undo(UndoArgs),
+
+    /// AI Insights — collects a Digital Twin snapshot and runs multiple
+    /// reasoning methods to produce a comprehensive system health report.
+    /// Shows health score, predictions, regressions, unusual behavior,
+    /// and recommended actions in a single readable summary.
+    Insights(InsightsArgs),
 }
 
 impl Commands {
@@ -221,6 +269,14 @@ impl Commands {
             Commands::Advisor(_) => crate::core::types::EngineId::All,
             Commands::History(_) => crate::core::types::EngineId::All,
             Commands::Completions(_) => crate::core::types::EngineId::All,
+            Commands::Twin(_) => crate::core::types::EngineId::All,
+            Commands::Mcp => crate::core::types::EngineId::All,
+            Commands::Safety(_) => crate::core::types::EngineId::All,
+            Commands::Dedup(_) => crate::core::types::EngineId::Duplicate,
+            Commands::Privacy(_) => crate::core::types::EngineId::Privacy,
+            Commands::Startup(_) => crate::core::types::EngineId::Startup,
+            Commands::Undo(_) => crate::core::types::EngineId::All,
+            Commands::Insights(_) => crate::core::types::EngineId::All,
         }
     }
 }
@@ -352,6 +408,23 @@ pub struct CleanArgs {
     /// Minimum size for large file detection (e.g. 100M, 500M, 1G).
     #[arg(long, default_value = "100M")]
     pub min_large_size: String,
+
+    /// Detect orphaned application support directories (left by uninstalled apps).
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub orphans: bool,
+
+    /// Scan ONLY the specified categories (skip all others).
+    /// Accepts a comma-separated list of category names:
+    /// cache, orphan_file, package_manager_cache, build_artifact, temp_file,
+    /// xcode_artifact, browser_cache, log, trash_bin, large_file, mail_attachment,
+    /// ios_backup, language_file, document_version, duplicate_file, docker.
+    #[arg(long, value_delimiter = ',')]
+    pub only: Vec<String>,
+
+    /// Resource usage mode controls scan parallelism and CPU strain.
+    /// eco = sequential (lowest CPU), balanced = limited parallelism, turbo = full parallelism.
+    #[arg(long, default_value = "balanced")]
+    pub resource_mode: String,
 
     /// Directory to scan (defaults to home directory).
     #[arg(value_name = "PATH")]
@@ -589,6 +662,12 @@ pub struct PurgeArgs {
     /// Minimum file size to include in the purge (e.g. 1M, 100M).
     #[arg(long, default_value = "1M")]
     pub min_size: String,
+
+    /// Verify each file hasn't been modified since scan before moving to
+    /// Trash. Skips files that were changed between scan and execution
+    /// (TOCTOU protection). Recommended for safety.
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub verify: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -847,4 +926,226 @@ pub enum ShellArg {
     Fish,
     Elvish,
     PowerShell,
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Twin command
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Arguments for the `twin` command — Digital Twin snapshot and reasoning.
+#[derive(Args, Debug, Clone)]
+pub struct TwinArgs {
+    /// Twin subcommand: collect, ask, predict, simulate, recommend, query,
+    /// benchmark, monitor. Defaults to `collect` (full snapshot).
+    #[arg(long, default_value = "collect")]
+    pub action: TwinAction,
+
+    /// Question to ask the reasoning engine (used with --action ask).
+    #[arg(long, value_name = "QUESTION")]
+    pub question: Option<String>,
+
+    /// Action to simulate (used with --action simulate).
+    #[arg(long, value_name = "ACTION_DESC")]
+    pub simulate: Option<String>,
+
+    /// Query dimension: health, memory, disk, battery, process, trust
+    /// (used with --action query).
+    #[arg(long, value_name = "DIMENSION")]
+    pub query: Option<String>,
+
+    /// Start time for `what-changed` query (ISO 8601 or relative like "7d", "24h").
+    #[arg(long, value_name = "TIMESTAMP")]
+    pub since: Option<String>,
+
+    /// End time for `what-changed` query (defaults to now).
+    #[arg(long, value_name = "TIMESTAMP")]
+    pub until: Option<String>,
+
+    /// Duration to run observers (used with --action observe).
+    /// Format: "60s", "5m", "1h". Defaults to "60s".
+    #[arg(long, value_name = "DURATION", default_value = "60s")]
+    pub duration: String,
+}
+
+/// Sub-actions for the `twin` command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum TwinAction {
+    /// Collect a full Digital Twin snapshot (default).
+    Collect,
+    /// Ask the reasoning engine a question.
+    Ask,
+    /// Predict future problems.
+    Predict,
+    /// Simulate an action and assess risk.
+    Simulate,
+    /// Get optimization recommendations.
+    Recommend,
+    /// Query a specific dimension.
+    Query,
+    /// Generate anonymized benchmark data.
+    Benchmark,
+    /// Produce a continuous monitoring plan.
+    Monitor,
+    /// Initialize the persistent twin database (SQLite event store).
+    InitDb,
+    /// Query "what changed?" between two timestamps (--since, --until).
+    WhatChanged,
+    /// Run compaction on the event store (prune raw events older than 7 days).
+    Compact,
+    /// Run observers for a duration (--duration). Feeds events into the store.
+    Observe,
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Safety command
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Arguments for the `safety` command.
+#[derive(Args, Debug, Clone)]
+pub struct SafetyArgs {
+    /// Safety action: classify a path, list all rules, or preview cleanup.
+    #[arg(long, default_value = "list")]
+    pub action: SafetyAction,
+
+    /// Path to classify (used with --action classify).
+    #[arg(long, value_name = "PATH")]
+    pub path: Option<String>,
+
+    /// Cleanup profile to preview (used with --action preview).
+    #[arg(long, value_name = "PROFILE", default_value = "all")]
+    pub profile: String,
+}
+
+/// Actions for the `safety` command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum SafetyAction {
+    /// Classify a single path (--path required).
+    Classify,
+    /// List all loaded safety rules.
+    List,
+    /// Preview cleanup for a profile (--profile).
+    Preview,
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Dedup command
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Arguments for the `dedup` command — find duplicate files.
+#[derive(Args, Debug, Clone)]
+pub struct DedupArgs {
+    /// Directories to scan for duplicates. Defaults to ~/Downloads,
+    /// ~/Documents, ~/Desktop.
+    #[arg(value_name = "PATH")]
+    pub paths: Vec<PathBuf>,
+
+    /// Minimum file size to consider (e.g. 1K, 1M, 100M). Default: 1K.
+    #[arg(long, default_value = "1K")]
+    pub min_size: String,
+
+    /// Also detect similar (not just identical) images using perceptual
+    /// hashing.
+    #[arg(long)]
+    pub similar: bool,
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Privacy command
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Arguments for the `privacy` command — privacy & security scan.
+#[derive(Args, Debug, Clone)]
+pub struct PrivacyArgs {
+    /// Scan browser data locations (history, cookies, caches).
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub browser_data: bool,
+
+    /// Scan for known malware and adware signatures.
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub malware: bool,
+
+    /// Audit app permissions (TCC database, microphone, camera, etc.).
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub permissions: bool,
+
+    /// Audit overall security posture (Gatekeeper, SIP, FileVault, etc.).
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub posture: bool,
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Startup command
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Arguments for the `startup` command — startup items scan.
+#[derive(Args, Debug, Clone)]
+pub struct StartupArgs {
+    /// Scan Login Items (System Settings > General > Login Items).
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub login_items: bool,
+
+    /// Scan LaunchAgents (per-user and system-wide).
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub launch_agents: bool,
+
+    /// Scan LaunchDaemons (system-wide background services).
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub launch_daemons: bool,
+
+    /// Detect zombie processes and frozen apps.
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub health: bool,
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Undo command
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Arguments for the `undo` command — restore trashed files.
+#[derive(Args, Debug, Clone)]
+pub struct UndoArgs {
+    /// Restore a specific transaction by ID. If omitted, restores the
+    /// most recent transaction.
+    #[arg(long, value_name = "ID")]
+    pub transaction_id: Option<String>,
+
+    /// Show what would be restored without actually moving files.
+    #[arg(long)]
+    pub dry_run: bool,
+
+    /// List recent transactions instead of restoring.
+    #[arg(long)]
+    pub list: bool,
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Insights command
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Arguments for the `insights` command — AI system health report.
+#[derive(Args, Debug, Clone)]
+pub struct InsightsArgs {
+    /// Include workflow change recommendations (learned from usage patterns).
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub workflows: bool,
+
+    /// Include hardware upgrade recommendations.
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub hardware: bool,
+
+    /// Include software change recommendations.
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub software: bool,
+
+    /// Include unusual behavior detection.
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub unusual: bool,
+
+    /// Include emerging failure detection.
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub emerging: bool,
+
+    /// Include unique problem detection (problems specific to this Mac).
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub unique: bool,
 }

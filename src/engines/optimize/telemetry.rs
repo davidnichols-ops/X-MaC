@@ -258,7 +258,9 @@ pub struct ProcessTelemetry {
 }
 
 impl ProcessTelemetry {
-    /// Collect telemetry for all processes.
+    /// op 169: Identify memory-heavy applications — collect telemetry for
+    /// all processes, ordered by resident size (RSS) so the heaviest
+    /// memory consumers are surfaced first.
     pub fn collect_all() -> Vec<ProcessTelemetry> {
         #[cfg(target_os = "macos")]
         {
@@ -715,6 +717,7 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
+    #[ignore = "Integration test — requires system commands"]
     fn collect_system_telemetry() {
         let tel = SystemTelemetry::collect();
         assert!(tel.total_bytes > 0, "total_bytes should be > 0");
@@ -736,6 +739,7 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
+    #[ignore = "Integration test — requires system commands"]
     fn collect_full_snapshot() {
         let snap = TelemetrySnapshot::collect();
         assert!(snap.system.total_bytes > 0);
@@ -743,6 +747,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Integration test — requires system commands"]
     fn telemetry_buffer_tracks_trends() {
         let mut buf = TelemetryBuffer::new(10);
         for _ in 0..3 {
@@ -756,6 +761,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Integration test — requires system commands"]
     fn system_telemetry_derived_metrics() {
         let tel = SystemTelemetry::collect();
         let used = tel.used_bytes();

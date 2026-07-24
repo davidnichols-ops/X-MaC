@@ -95,6 +95,37 @@ impl OptimizationProfile {
             Self::Custom => 0.80,
         }
     }
+
+    /// Minimum file size in bytes for duplicate detection.
+    pub fn dedup_min_size(&self) -> u64 {
+        match self {
+            Self::Conservative => 10 * 1024 * 1024,
+            Self::Balanced
+            | Self::Development
+            | Self::Gaming
+            | Self::VideoEditing
+            | Self::Custom => 1024,
+            Self::Aggressive => 1024,
+        }
+    }
+
+    /// Whether duplicate detection is enabled by default for this profile.
+    pub fn dedup_enabled(&self) -> bool {
+        match self {
+            Self::Conservative => false,
+            Self::Balanced
+            | Self::Development
+            | Self::Gaming
+            | Self::VideoEditing
+            | Self::Aggressive
+            | Self::Custom => true,
+        }
+    }
+
+    /// Whether similar-image detection (perceptual hashing) is enabled.
+    pub fn dedup_similar_images(&self) -> bool {
+        matches!(self, Self::Aggressive)
+    }
 }
 
 /// A named preset that can be applied to the config.

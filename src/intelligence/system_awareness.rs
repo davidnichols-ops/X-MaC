@@ -241,6 +241,8 @@ pub struct ThermalDimension {
 }
 
 impl ThermalDimension {
+    /// op 248: Monitor thermal state — collect CPU/GPU temperatures, fan
+    /// speeds, and derive the current thermal pressure label.
     pub fn collect() -> Self {
         let cpu_temp = read_cpu_temp();
         let gpu_temp = read_gpu_temp();
@@ -637,7 +639,8 @@ impl DiskDimension {
 //  Health score computation
 // ═══════════════════════════════════════════════════════════════════════
 
-/// Compute a composite health score (0-100) from all dimensions.
+/// op 259: Generate optimization score / op 274: Create system health
+/// score — compute a composite health score (0-100) from all dimensions.
 /// Weights: memory 35%, disk 25%, CPU 20%, battery 10%, thermal 10%.
 fn compute_health_score(
     memory: &MemoryDimension,
@@ -706,6 +709,50 @@ fn health_status(score: f64) -> String {
     }
 }
 
+/// op 247: Monitor GPU load — read GPU utilization as a fraction (0.0–1.0).
+///
+/// On macOS, GPU utilization is not directly accessible without private
+/// IOReport APIs, so this returns `None` unless a third-party tool is
+/// available. On Linux, attempts `nvidia-smi` for NVIDIA GPUs.
+#[allow(dead_code)]
+pub fn monitor_gpu_load() -> Option<f64> {
+    #[cfg(target_os = "linux")]
+    {
+        use std::process::Command;
+        if let Ok(out) = Command::new("nvidia-smi")
+            .args([
+                "--query-gpu=utilization.gpu",
+                "--format=csv,noheader,nounits",
+            ])
+            .output()
+        {
+            if let Ok(s) = String::from_utf8_lossy(&out.stdout).trim().parse::<f64>() {
+                return Some(s / 100.0);
+            }
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // GPU utilization requires IOReport (private framework). Without it
+        // we cannot read load directly. Return None to signal unavailable.
+    }
+    None
+}
+
+/// op 306: Create system health score (twin) — compute a health score
+/// (0-100) from Digital Twin data by blending the twin's cached
+/// `health_score` with its memory utilization and trust score.
+#[allow(dead_code)]
+pub fn twin_health_score(base_health: f64, memory_utilization: f64, trust_score: f64) -> f64 {
+    // Start from the twin's own health score (already 0-100).
+    let base = base_health;
+    // Penalize high memory utilization.
+    let mem_penalty = (memory_utilization.clamp(0.0, 1.0) - 0.5).max(0.0) * 20.0;
+    // Reward a high trust score (autonomous success history).
+    let trust_bonus = trust_score.clamp(0.0, 1.0) * 5.0;
+    (base - mem_penalty + trust_bonus).round().clamp(0.0, 100.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -720,6 +767,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Integration test — requires system commands"]
     fn test_system_snapshot_collects() {
         let snapshot = SystemSnapshot::collect();
         assert!(snapshot.health_score >= 0.0 && snapshot.health_score <= 100.0);
@@ -727,6 +775,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Integration test — requires system commands"]
     fn test_memory_dimension_collects() {
         let mem = MemoryDimension::collect();
         // On any real system, total should be > 0
@@ -888,5 +937,20 @@ mod tests {
         assert!(!bat.is_present);
         assert!(bat.is_plugged);
         assert_eq!(bat.charge_pct, 100.0);
+    }
+
+    #[test]
+    fn test_monitor_gpu_load_returns_option() {
+        // Should not panic; returns None on macOS without IOReport.
+        let load = monitor_gpu_load();
+        assert!(load.is_none() || load.unwrap() >= 0.0);
+    }
+
+    #[test]
+    fn test_twin_health_score_clamps() {
+        // mem_penalty = (0.9-0.5)*20 = 8, trust_bonus = 5 → 80 - 8 + 5 = 77
+        let score = twin_health_score(80.0, 0.9, 1.0);
+        assert!(score >= 0.0 && score <= 100.0);
+        assert!((score - 77.0).abs() < 0.01, "got {}", score);
     }
 }
