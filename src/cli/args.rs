@@ -994,6 +994,14 @@ pub enum TwinAction {
     Compact,
     /// Run observers for a duration (--duration). Feeds events into the store.
     Observe,
+    /// Check graph integrity — detect orphan nodes, duplicates, stale entries.
+    Integrity,
+    /// Explain a recommendation with evidence (--question describes the recommendation).
+    Explain,
+    /// Inspect a specific entity in the knowledge graph (--query is the entity ID).
+    Inspect,
+    /// Run GNN vs rules engine benchmark on a controlled corpus.
+    GnnBenchmark,
 }
 
 // ═══════════════════════════════════════════════════════════════════════

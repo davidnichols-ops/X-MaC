@@ -31,6 +31,29 @@ pub struct ChangeReport {
     pub configuration_changes: Vec<ConfigChange>,
     pub security_alerts: Vec<SecurityAlert>,
     pub timeline: Vec<TimelineEntry>,
+    /// [134] Temporal confidence — how confident the system is in this report.
+    #[serde(default)]
+    pub temporal_confidence: TemporalConfidence,
+}
+
+/// [134] Temporal confidence metadata for a change report.
+///
+/// The system should know not only what exists but what changed, when, and
+/// how confident it is. This struct captures the confidence dimensions.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TemporalConfidence {
+    /// Overall confidence in the report (0.0–1.0).
+    pub confidence: f64,
+    /// Number of distinct event sources that contributed.
+    pub source_count: usize,
+    /// Whether any events were dropped or corrupted.
+    pub has_gaps: bool,
+    /// Description of any data gaps.
+    pub gap_description: Option<String>,
+    /// Duration covered in milliseconds.
+    pub duration_ms: i64,
+    /// Events per second (density).
+    pub event_density: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -302,6 +325,42 @@ pub async fn what_changed_between(
     let mut top_mem: Vec<(String, u64)> = mem_consumers.into_iter().collect();
     top_mem.sort_by_key(|b| std::cmp::Reverse(b.1));
 
+    // [134] Compute temporal confidence.
+    let duration_ms = end_ms - start_ms;
+    let source_count: usize = {
+        let mut sources: Vec<&str> = events.iter().map(|e| e.source.as_str()).collect();
+        sources.sort();
+        sources.dedup();
+        sources.len()
+    };
+    let event_density = if duration_ms > 0 {
+        events.len() as f64 / (duration_ms as f64 / 1000.0)
+    } else {
+        0.0
+    };
+    // Confidence is higher when there are more sources and no gaps.
+    // Base 0.5, +0.2 for multiple sources, +0.2 for reasonable density, -0.3 for gaps.
+    let mut confidence: f64 = 0.5;
+    if source_count >= 2 {
+        confidence += 0.2;
+    }
+    if source_count >= 3 {
+        confidence += 0.1;
+    }
+    if event_density > 0.0 && event_density < 100.0 {
+        confidence += 0.2;
+    }
+    confidence = confidence.min(0.95_f64);
+    let has_gaps = events.is_empty() && duration_ms > 60_000;
+    let gap_description = if has_gaps {
+        Some(format!(
+            "No events recorded in a {} second window — observers may not have been running.",
+            duration_ms / 1000
+        ))
+    } else {
+        None
+    };
+
     Ok(ChangeReport {
         start_ms,
         end_ms,
@@ -326,6 +385,14 @@ pub async fn what_changed_between(
         configuration_changes: config_changes,
         security_alerts,
         timeline,
+        temporal_confidence: TemporalConfidence {
+            confidence,
+            source_count,
+            has_gaps,
+            gap_description,
+            duration_ms,
+            event_density,
+        },
     })
 }
 
@@ -458,6 +525,23 @@ pub fn format_report(report: &ChangeReport) -> String {
                 "  {} [{}] {}\n",
                 time, entry.severity, entry.description
             ));
+        }
+    }
+
+    // [134] Temporal confidence.
+    let tc = &report.temporal_confidence;
+    if tc.confidence > 0.0 {
+        out.push_str(&format!(
+            "\nTemporal confidence: {:.0}% ({} sources",
+            tc.confidence * 100.0,
+            tc.source_count
+        ));
+        if tc.has_gaps {
+            out.push_str(", GAPS DETECTED");
+        }
+        out.push_str(&format!(", {:.1} events/s)\n", tc.event_density));
+        if let Some(desc) = &tc.gap_description {
+            out.push_str(&format!("  ⚠ {}\n", desc));
         }
     }
 

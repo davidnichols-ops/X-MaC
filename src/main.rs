@@ -1955,6 +1955,86 @@ async fn run_twin(cli: &Cli, args: cli::args::TwinArgs) -> Result<()> {
                 );
             }
         }
+        TwinAction::Integrity => {
+            eprintln!("Collecting twin and checking graph integrity...");
+            let twin = twin::DigitalTwin::collect();
+            let kg = twin::knowledge_graph::KnowledgeGraph::from_twin(&twin);
+            let report = twin::integrity::check_graph(&kg);
+            if json_out {
+                print_json(&report, true)?;
+            } else {
+                print!("{}", twin::integrity::format_report(&report));
+            }
+        }
+        TwinAction::Explain => {
+            let recommendation = args
+                .question
+                .as_deref()
+                .unwrap_or("Explain the current system state and recommendations.");
+            eprintln!("Collecting twin and building explanation...");
+            let twin = twin::DigitalTwin::collect();
+            let builder = twin::explanation::ExplanationBuilder::new(&twin);
+            // Route to the right explainer based on keywords in the recommendation.
+            let explanation = if recommendation.to_lowercase().contains("cleanup")
+                || recommendation.to_lowercase().contains("delete")
+                || recommendation.to_lowercase().contains("duplicate")
+                || recommendation.to_lowercase().contains("storage")
+            {
+                builder.explain_cleanup(recommendation)
+            } else if recommendation.to_lowercase().contains("process")
+                || recommendation.to_lowercase().contains("quit")
+                || recommendation.to_lowercase().contains("kill")
+            {
+                // Find the highest-CPU process to explain.
+                let worst_pid = twin
+                    .processes
+                    .process_tree
+                    .iter()
+                    .max_by(|a, b| {
+                        a.cpu_pct
+                            .partial_cmp(&b.cpu_pct)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                    .map(|p| p.pid)
+                    .unwrap_or(0);
+                builder.explain_process_action(recommendation, worst_pid)
+            } else {
+                builder.explain_system_health(recommendation)
+            };
+            if json_out {
+                print_json(&explanation, true)?;
+            } else {
+                print!("{}", twin::explanation::format_explanation(&explanation));
+            }
+        }
+        TwinAction::Inspect => {
+            let entity_id = args.query.as_deref().unwrap_or("hw:root");
+            eprintln!("Collecting twin and inspecting entity '{}'...", entity_id);
+            let twin = twin::DigitalTwin::collect();
+            let kg = twin::knowledge_graph::KnowledgeGraph::from_twin(&twin);
+            let builder = twin::explanation::ExplanationBuilder::new(&twin).with_graph(&kg);
+            match builder.inspect_entity(entity_id) {
+                Some(inspection) => {
+                    if json_out {
+                        print_json(&inspection, true)?;
+                    } else {
+                        print!("{}", twin::explanation::format_inspection(&inspection));
+                    }
+                }
+                None => {
+                    eprintln!("Entity '{}' not found in the knowledge graph.", entity_id);
+                }
+            }
+        }
+        TwinAction::GnnBenchmark => {
+            eprintln!("Running GNN vs rules engine benchmark...");
+            let comparison = twin::gnn_benchmark::run_benchmark();
+            if json_out {
+                print_json(&comparison, true)?;
+            } else {
+                print!("{}", twin::gnn_benchmark::format_comparison(&comparison));
+            }
+        }
     }
 
     Ok(())
