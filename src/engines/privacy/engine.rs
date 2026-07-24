@@ -2093,7 +2093,7 @@ pub fn identify_risky_software(apps: &[InstalledApp]) -> Vec<RiskyApp> {
 /// system TCC database. Returns a report of granted/denied entries.
 #[allow(dead_code)]
 pub fn manage_permissions() -> PermissionReport {
-    let mut entries = Vec::new();
+    let mut entries: Vec<PermissionEntry> = Vec::new();
 
     #[cfg(target_os = "macos")]
     {

@@ -1018,8 +1018,7 @@ fn find_cloud_storage_dir(home: &std::path::Path, prefix: &str) -> Option<PathBu
 /// **Op 29:** Save scan results to a JSON cache file.
 #[allow(dead_code)]
 pub fn save_scan_cache(cache: &ScanCache, cache_path: &std::path::Path) -> std::io::Result<()> {
-    let json = serde_json::to_string_pretty(cache)
-        .map_err(std::io::Error::other)?;
+    let json = serde_json::to_string_pretty(cache).map_err(std::io::Error::other)?;
     std::fs::write(cache_path, json)
 }
 
@@ -1034,16 +1033,19 @@ pub fn load_scan_cache(cache_path: &std::path::Path) -> Option<ScanCache> {
 /// Returns the list of paths that have been added, modified, or removed
 /// since the cache was written. Only changed directories need to be rescanned.
 #[allow(dead_code)]
-pub fn incremental_rescan(
-    path: &std::path::Path,
-    cached: &ScanCache,
-) -> IncrementalScanResult {
+pub fn incremental_rescan(path: &std::path::Path, cached: &ScanCache) -> IncrementalScanResult {
     let current = DiskEngine::build_scan_cache(path);
 
-    let cached_map: HashMap<&str, &ScanCacheEntry> =
-        cached.entries.iter().map(|e| (e.path.as_str(), e)).collect();
-    let current_map: HashMap<&str, &ScanCacheEntry> =
-        current.entries.iter().map(|e| (e.path.as_str(), e)).collect();
+    let cached_map: HashMap<&str, &ScanCacheEntry> = cached
+        .entries
+        .iter()
+        .map(|e| (e.path.as_str(), e))
+        .collect();
+    let current_map: HashMap<&str, &ScanCacheEntry> = current
+        .entries
+        .iter()
+        .map(|e| (e.path.as_str(), e))
+        .collect();
 
     let mut added = Vec::new();
     let mut modified = Vec::new();
@@ -1324,10 +1326,7 @@ mod tests {
             let path = dir.path().join(format!("file_{i}.txt"));
             fs::write(&path, format!("content {i}")).unwrap();
             let t = SystemTime::now() - std::time::Duration::from_secs(i * 60);
-            std::fs::File::open(&path)
-                .unwrap()
-                .set_modified(t)
-                .unwrap();
+            std::fs::File::open(&path).unwrap().set_modified(t).unwrap();
         }
         let ranked = DiskEngine::rank_oldest_files(dir.path(), 3);
         assert_eq!(ranked.len(), 3);
@@ -1365,10 +1364,7 @@ mod tests {
             let path = dir.path().join(format!("f_{i}.txt"));
             fs::write(&path, format!("data {i}")).unwrap();
             let t = SystemTime::now() - std::time::Duration::from_secs(i * 120);
-            std::fs::File::open(&path)
-                .unwrap()
-                .set_modified(t)
-                .unwrap();
+            std::fs::File::open(&path).unwrap().set_modified(t).unwrap();
         }
         let ranked = DiskEngine::rank_unused_files(dir.path(), 2);
         assert_eq!(ranked.len(), 2);

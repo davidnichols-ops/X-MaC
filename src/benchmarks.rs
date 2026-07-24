@@ -315,14 +315,13 @@ mod tests {
         let cache_dir = TempDir::new().expect("cache dir");
         let cache_path = cache_dir.path().join(".xmac_scan_cache.json");
         let start = Instant::now();
-        crate::engines::disk::engine::save_scan_cache(&cache, &cache_path)
-            .expect("save cache");
+        crate::engines::disk::engine::save_scan_cache(&cache, &cache_path).expect("save cache");
         let save_secs = start.elapsed().as_secs_f64();
 
         // Load cache
         let start = Instant::now();
-        let loaded = crate::engines::disk::engine::load_scan_cache(&cache_path)
-            .expect("load cache");
+        let loaded =
+            crate::engines::disk::engine::load_scan_cache(&cache_path).expect("load cache");
         let load_secs = start.elapsed().as_secs_f64();
 
         // Incremental rescan (no changes)
@@ -349,8 +348,7 @@ mod tests {
         let dir = tmp.path().join("new_dir");
         std::fs::create_dir_all(&dir).expect("mkdir");
         for i in 0..100 {
-            std::fs::write(dir.join(format!("new_{}.bin", i)), vec![0u8; 1024])
-                .expect("write");
+            std::fs::write(dir.join(format!("new_{}.bin", i)), vec![0u8; 1024]).expect("write");
         }
 
         let start = Instant::now();

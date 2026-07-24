@@ -2860,7 +2860,9 @@ mod tests {
     };
     use crate::twin::memory::MemoryIntelligence;
     use crate::twin::model::DigitalTwin;
-    use crate::twin::process::{ProcessAnomaly, ProcessInfo, ProcessIntelligenceGraph, ProcessNode};
+    use crate::twin::process::{
+        ProcessAnomaly, ProcessInfo, ProcessIntelligenceGraph, ProcessNode,
+    };
     use crate::twin::software_genome::SoftwareGenome;
     use std::collections::HashMap;
 
@@ -3315,7 +3317,11 @@ mod tests {
 
         let engine = ReasoningEngine::new(twin);
         let health = engine.compute_system_health();
-        assert!(health < 90.0, "thermal pressure should lower health, got {}", health);
+        assert!(
+            health < 90.0,
+            "thermal pressure should lower health, got {}",
+            health
+        );
     }
 
     #[test]

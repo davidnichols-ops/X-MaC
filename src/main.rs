@@ -606,11 +606,7 @@ async fn run_purge(cli: &Cli, args: &cli::args::PurgeArgs) -> Result<()> {
     // 4. Save transaction to history (skip in dry-run mode).
     if !args.dry_run && transaction.successful_count() > 0 {
         use cleanup::history::{load_history, save_history};
-        let history_path = config::ConfigManager::load()
-            .config()
-            .history
-            .path
-            .clone();
+        let history_path = config::ConfigManager::load().config().history.path.clone();
         let mut history = load_history(&history_path);
         history.add_transaction(transaction.clone());
         if let Err(e) = save_history(&history, &history_path) {
@@ -641,10 +637,7 @@ async fn run_purge(cli: &Cli, args: &cli::args::PurgeArgs) -> Result<()> {
             crate::util::disk::format_bytes(transaction.successful_bytes())
         );
         if skipped_modified > 0 {
-            eprintln!(
-                "  Skipped (modified): {}",
-                skipped_modified
-            );
+            eprintln!("  Skipped (modified): {}", skipped_modified);
         }
         for action in &transaction.actions {
             let status = if action.success { "OK" } else { "SKIP" };
@@ -674,11 +667,7 @@ fn run_undo(cli: &Cli, args: &cli::args::UndoArgs) -> Result<()> {
     use cleanup::history::load_history;
     use cli::args::OutputFormat;
 
-    let history_path = config::ConfigManager::load()
-        .config()
-        .history
-        .path
-        .clone();
+    let history_path = config::ConfigManager::load().config().history.path.clone();
     let history = load_history(&history_path);
 
     // --list: show recent transactions and exit.
@@ -694,8 +683,7 @@ fn run_undo(cli: &Cli, args: &cli::args::UndoArgs) -> Result<()> {
             }
             return Ok(());
         }
-        if cli.global.format == OutputFormat::Json
-            || cli.global.format == OutputFormat::JsonPretty
+        if cli.global.format == OutputFormat::Json || cli.global.format == OutputFormat::JsonPretty
         {
             let json = match cli.global.format {
                 OutputFormat::JsonPretty => serde_json::to_string_pretty(&history.transactions)?,
@@ -813,11 +801,7 @@ fn run_undo(cli: &Cli, args: &cli::args::UndoArgs) -> Result<()> {
                 restored += 1;
             }
             Err(e) => {
-                eprintln!(
-                    "  [FAIL] {} — {}",
-                    action.original_path.display(),
-                    e
-                );
+                eprintln!("  [FAIL] {} — {}", action.original_path.display(), e);
                 failed += 1;
             }
         }
@@ -840,8 +824,8 @@ fn run_undo(cli: &Cli, args: &cli::args::UndoArgs) -> Result<()> {
 async fn run_insights(cli: &Cli, args: &cli::args::InsightsArgs) -> Result<()> {
     use cli::args::OutputFormat;
 
-    let json_out = cli.global.format == OutputFormat::Json
-        || cli.global.format == OutputFormat::JsonPretty;
+    let json_out =
+        cli.global.format == OutputFormat::Json || cli.global.format == OutputFormat::JsonPretty;
 
     eprintln!("Collecting Digital Twin snapshot...");
     let twin = twin::DigitalTwin::collect();
@@ -1000,10 +984,7 @@ async fn run_insights(cli: &Cli, args: &cli::args::InsightsArgs) -> Result<()> {
         println!("  SOFTWARE CHANGES");
         println!("  ───────────────────────────────────────────────────");
         for s in &software {
-            println!(
-                "  • {} {} ({} priority)",
-                s.kind, s.target, s.priority
-            );
+            println!("  • {} {} ({} priority)", s.kind, s.target, s.priority);
             println!("    {}", s.recommendation);
             println!("    reason: {}", s.reason);
         }

@@ -149,6 +149,7 @@ mod tests {
             follow_symlinks: false,
             cache_dir: None,
             fix_script: None,
+            resource_mode: "balanced".to_string(),
         };
 
         let mut writer = x_mac::cli::output::OutputWriter::new(&global_args);

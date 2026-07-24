@@ -45,8 +45,8 @@ impl FileSnapshot {
     /// Returns Ok(()) if the file is unchanged, or an error message if the
     /// file has been modified or removed.
     pub fn verify(&self, path: &Path) -> Result<(), String> {
-        let metadata = std::fs::symlink_metadata(path)
-            .map_err(|e| format!("cannot read metadata: {e}"))?;
+        let metadata =
+            std::fs::symlink_metadata(path).map_err(|e| format!("cannot read metadata: {e}"))?;
         if metadata.len() != self.size_bytes {
             return Err(format!(
                 "size changed: {} -> {} (file was modified after scan)",

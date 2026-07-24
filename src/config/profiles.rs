@@ -100,9 +100,11 @@ impl OptimizationProfile {
     pub fn dedup_min_size(&self) -> u64 {
         match self {
             Self::Conservative => 10 * 1024 * 1024,
-            Self::Balanced | Self::Development | Self::Gaming | Self::VideoEditing | Self::Custom => {
-                1024
-            }
+            Self::Balanced
+            | Self::Development
+            | Self::Gaming
+            | Self::VideoEditing
+            | Self::Custom => 1024,
             Self::Aggressive => 1024,
         }
     }
@@ -111,8 +113,12 @@ impl OptimizationProfile {
     pub fn dedup_enabled(&self) -> bool {
         match self {
             Self::Conservative => false,
-            Self::Balanced | Self::Development | Self::Gaming | Self::VideoEditing
-            | Self::Aggressive | Self::Custom => true,
+            Self::Balanced
+            | Self::Development
+            | Self::Gaming
+            | Self::VideoEditing
+            | Self::Aggressive
+            | Self::Custom => true,
         }
     }
 

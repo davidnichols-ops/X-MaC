@@ -249,8 +249,7 @@ impl HardwareHistory {
     /// Save the history to a JSON file at `path`.
     #[allow(dead_code)]
     pub fn save(&self, path: &std::path::Path) -> std::io::Result<()> {
-        let json = serde_json::to_string_pretty(self)
-            .map_err(std::io::Error::other)?;
+        let json = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
         std::fs::write(path, json)
     }
 
@@ -887,8 +886,8 @@ fn parse_smart_attributes(device: &str) -> (Option<f64>, Option<u64>) {
     let temp = parse_smart_attribute_value(&output, "Temperature_Celsius")
         .or_else(|| parse_smart_attribute_value(&output, "Temperature"))
         .and_then(|s| s.parse::<f64>().ok());
-    let hours = parse_smart_attribute_value(&output, "Power_On_Hours")
-        .and_then(|s| s.parse::<u64>().ok());
+    let hours =
+        parse_smart_attribute_value(&output, "Power_On_Hours").and_then(|s| s.parse::<u64>().ok());
     (temp, hours)
 }
 
@@ -1572,7 +1571,10 @@ fn parse_usb_topology(output: &str) -> Vec<UsbNode> {
     for line in output.lines() {
         let trimmed = line.trim_start();
         // Device header lines look like: "+-o FaceTime HD Camera  <class IOUSBDevice>"
-        if let Some(rest) = trimmed.strip_prefix("+-o ").or_else(|| trimmed.strip_prefix("\\-o ")) {
+        if let Some(rest) = trimmed
+            .strip_prefix("+-o ")
+            .or_else(|| trimmed.strip_prefix("\\-o "))
+        {
             let name = rest
                 .split_whitespace()
                 .next()
@@ -1652,11 +1654,8 @@ fn parse_wifi_info(output: &str) -> Option<WifiInfo> {
         }
     }
     let start = wifi_start?;
-    let interface = parse_profiler_value(
-        &lines[start..].join("\n"),
-        "BSD Name",
-    )
-    .unwrap_or_else(|| "en0".to_string());
+    let interface = parse_profiler_value(&lines[start..].join("\n"), "BSD Name")
+        .unwrap_or_else(|| "en0".to_string());
     let card_type = parse_profiler_value(&lines[start..].join("\n"), "Card Type");
     let mac_address = parse_profiler_value(&lines[start..].join("\n"), "MAC Address");
     // SSID appears under "Current Network Information:" as a sub-line.
@@ -2291,7 +2290,10 @@ mod tests {
             let displays = parse_display_info(output);
             assert_eq!(displays.len(), 2);
             assert!(displays[0].is_builtin);
-            assert_eq!(displays[0].resolution.as_deref(), Some("3024 x 1964 Retina"));
+            assert_eq!(
+                displays[0].resolution.as_deref(),
+                Some("3024 x 1964 Retina")
+            );
             assert_eq!(displays[0].color_depth.as_deref(), Some("32-Bit Color"));
             assert!(!displays[1].is_builtin);
             assert_eq!(displays[1].resolution.as_deref(), Some("1920 x 1080"));
@@ -2343,10 +2345,7 @@ mod tests {
     #[test]
     fn test_hardware_history_save_load_roundtrip() {
         let dir = std::env::temp_dir();
-        let path = dir.join(format!(
-            "xmac_hw_history_test_{}.json",
-            std::process::id()
-        ));
+        let path = dir.join(format!("xmac_hw_history_test_{}.json", std::process::id()));
         // Clean up any leftover file.
         let _ = std::fs::remove_file(&path);
 
