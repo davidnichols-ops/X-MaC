@@ -48,7 +48,7 @@ jobs:
 
       - name: Clippy
         if: matrix.check == 'clippy'
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings
 
       - name: Test
         if: matrix.check == 'test'

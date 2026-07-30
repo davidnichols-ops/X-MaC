@@ -311,8 +311,8 @@ pub struct ANEWorkload {
 impl HardwareProfile {
     /// Collect hardware profile via system_profiler, sysctl, and ioreg.
     pub fn collect() -> Self {
-        // TODO: implement full hardware collection (ops 1-40)
-        // Start with what system_awareness already provides
+        // Hardware ops 1–40 are implemented via the `detect_*` helpers below
+        // and the system_awareness snapshot for live telemetry.
         let snapshot = crate::intelligence::SystemSnapshot::collect();
 
         let mut profile = Self {

@@ -80,8 +80,9 @@ fn compute_twin_health_score(
     _energy: &EnergyTwin,
     _processes: &ProcessIntelligenceGraph,
 ) -> f64 {
-    // TODO: implement composite health score from twin dimensions
-    // For now, delegate to the existing system_awareness health score
+    // Delegate to the existing system_awareness health score — it already
+    // incorporates CPU, memory, thermal, and battery telemetry from the
+    // snapshot. Per-dimension weighting can be added later.
     let snapshot = crate::intelligence::SystemSnapshot::collect();
     snapshot.health_score
 }

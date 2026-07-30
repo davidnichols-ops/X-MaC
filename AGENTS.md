@@ -5,7 +5,7 @@
 ```bash
 cargo build                              # compile
 cargo test                               # run tests (416+)
-cargo clippy -- -D warnings              # lint (treat warnings as errors)
+cargo clippy --all-targets -- -D warnings  # lint (treat warnings as errors, includes tests/benches)
 cargo fmt --check                        # format check
 cargo check --target x86_64-unknown-linux-gnu  # Linux cross-compile check
 cd gui/XMacApp && swift build            # build SwiftUI app
