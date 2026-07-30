@@ -4,7 +4,7 @@
 
 ```bash
 cargo build                              # compile
-cargo test                               # run tests (416+)
+cargo test                               # run tests (~760 lib + ~70 integration)
 cargo clippy --all-targets -- -D warnings  # lint (treat warnings as errors, includes tests/benches)
 cargo fmt --check                        # format check
 cargo check --target x86_64-unknown-linux-gnu  # Linux cross-compile check
