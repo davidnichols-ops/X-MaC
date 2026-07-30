@@ -440,8 +440,8 @@ mod tests {
         let input = vec![10.0; 4];
         let out = dct_1d(&input, 4);
         assert!((out[0] - 40.0).abs() < 1e-9);
-        for k in 1..4 {
-            assert!(out[k].abs() < 1e-9, "k={} out={}", k, out[k]);
+        for (k, val) in out.iter().enumerate().skip(1) {
+            assert!(val.abs() < 1e-9, "k={} out={}", k, val);
         }
     }
 
@@ -450,12 +450,12 @@ mod tests {
         let matrix = vec![vec![5.0; 4]; 4];
         let out = dct_2d(&matrix, 4);
         assert!((out[0][0] - 80.0).abs() < 1e-9);
-        for r in 0..4 {
-            for c in 0..4 {
+        for (r, row) in out.iter().enumerate() {
+            for (c, val) in row.iter().enumerate() {
                 if r == 0 && c == 0 {
                     continue;
                 }
-                assert!(out[r][c].abs() < 1e-9, "[{}][{}] = {}", r, c, out[r][c]);
+                assert!(val.abs() < 1e-9, "[{}][{}] = {}", r, c, val);
             }
         }
     }

@@ -768,7 +768,8 @@ mod tests {
         let avail = tel.available_bytes();
         assert!(used + avail <= tel.total_bytes + tel.wired_bytes); // rough check
         let util = tel.utilization();
-        assert!(util >= 0.0 && util <= 1.0);
+        assert!(util >= 0.0);
+        assert!(util <= 1.0);
     }
 
     #[test]

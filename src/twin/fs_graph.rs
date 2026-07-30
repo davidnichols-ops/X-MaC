@@ -2288,10 +2288,10 @@ mod tests {
         let events = curr.track_evolution(&prev);
         assert!(events
             .iter()
-            .any(|e| e.kind == "added" && e.path == PathBuf::from("/Users/test/new.txt")));
+            .any(|e| e.kind == "added" && e.path == Path::new("/Users/test/new.txt")));
         assert!(events
             .iter()
-            .any(|e| e.kind == "removed" && e.path == PathBuf::from("/Users/test/old.txt")));
+            .any(|e| e.kind == "removed" && e.path == Path::new("/Users/test/old.txt")));
         assert!(events.iter().any(|e| e.kind == "grown"));
     }
 

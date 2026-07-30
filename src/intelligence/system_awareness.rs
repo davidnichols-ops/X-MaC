@@ -773,13 +773,18 @@ mod tests {
         assert!(snapshot.health_score >= 0.0 && snapshot.health_score <= 100.0);
         assert!(!snapshot.status.is_empty());
     }
-
     #[test]
     #[ignore = "Integration test — requires system commands"]
     fn test_memory_dimension_collects() {
         let mem = MemoryDimension::collect();
-        // On any real system, total should be > 0
-        assert!(mem.total_bytes > 0 || mem.total_bytes == 0); // stub on non-macOS
+        // On macOS, MemoryDimension::collect should return a positive total_bytes.
+        // On non-macOS, the stub returns 0. Both are acceptable outcomes.
+        if cfg!(target_os = "macos") {
+            assert!(
+                mem.total_bytes > 0,
+                "expected macOS to report positive memory"
+            );
+        }
     }
 
     #[test]
@@ -950,7 +955,8 @@ mod tests {
     fn test_twin_health_score_clamps() {
         // mem_penalty = (0.9-0.5)*20 = 8, trust_bonus = 5 → 80 - 8 + 5 = 77
         let score = twin_health_score(80.0, 0.9, 1.0);
-        assert!(score >= 0.0 && score <= 100.0);
+        assert!(score >= 0.0);
+        assert!(score <= 100.0);
         assert!((score - 77.0).abs() < 0.01, "got {}", score);
     }
 }

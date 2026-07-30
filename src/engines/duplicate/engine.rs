@@ -1956,8 +1956,10 @@ mod tests {
         use crate::config::profiles::OptimizationProfile;
         use crate::config::Config;
 
-        let mut config = Config::default();
-        config.profile = OptimizationProfile::Aggressive;
+        let config = Config {
+            profile: OptimizationProfile::Aggressive,
+            ..Config::default()
+        };
         let engine = DuplicateEngine::new().with_config(&config);
         assert!(engine.similar_images);
         assert!(engine.enabled);
@@ -1969,8 +1971,10 @@ mod tests {
         use crate::config::profiles::OptimizationProfile;
         use crate::config::Config;
 
-        let mut config = Config::default();
-        config.profile = OptimizationProfile::Conservative;
+        let config = Config {
+            profile: OptimizationProfile::Conservative,
+            ..Config::default()
+        };
         let engine = DuplicateEngine::new().with_config(&config);
         assert_eq!(engine.min_size, 10 * 1024 * 1024);
         assert!(!engine.similar_images);
