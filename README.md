@@ -21,7 +21,65 @@
 
 X-MaC is a free, open-source Mac cleaner that combines a fast Rust scan engine, a Graph Neural Network safety scorer, and a native SwiftUI app — all running entirely on your device. Nothing ever leaves your Mac.
 
-> **Status:** Active development. The CLI is stable and fully functional. The GUI is feature-complete but not yet notarized for distribution. Two GNN models are trained and exported to CoreML: the file safety scorer (99.76% validation accuracy on 27-class node classification) and the memory optimization model (6 action classes + pressure prediction). Looking for contributors — see [GOOD_FIRST_ISSUES.md](GOOD_FIRST_ISSUES.md).
+> **Status:** v1 scope is frozen — see [`SCOPE_FREEZE.md`](SCOPE_FREEZE.md). Three v1 capabilities are locked: find safely-deletable duplicates, explain why your disk is full, and a system health scan with recommendations. Other engines (GNN auto-scoring, privacy recommendations, hardware reasoning, perceptual similarity beyond exact duplicates) are deferred to v2 or archived. The CLI is stable; the GUI is feature-complete but not yet notarized.
+
+## The 3 things X-MaC does in v1
+
+X-MaC v1 has exactly three user-visible capabilities. Everything else is either
+deferred to v2 or archived.
+
+### 1. Find safely-deletable duplicate files
+
+```bash
+xmac dedup ~/Downloads --min-size 1M
+xmac dedup ~/Photos --similar        # v2: perceptual image similarity
+```
+
+Walks a directory tree, groups files by BLAKE3 hash, returns a reviewable
+list of duplicate clusters with a recommended file to keep (newest +
+highest-priority path). **Nothing is deleted by `xmac dedup`** — review the
+JSON output and use `xmac purge` to act on it.
+
+### 2. Explain why your disk is full
+
+```bash
+xmac disk ~/Projects --explain
+xmac disk / --top 50 --by category
+```
+
+Categorizes what's on your disk — caches, dev artifacts, media, archives,
+applications, backups, duplicates, unknown — and shows the top reclaimable
+items per category with the evidence behind each recommendation.
+
+### 3. System health scan + recommendations
+
+```bash
+xmac scan --recommend
+xmac doctor --severity medium
+```
+
+Runs a privacy-redacted scan of your system (OS, packages, apps, startup
+items, disk) and produces a prioritized list of recommendations. Each
+recommendation shows what-it-is, why-it-matters, the evidence, a safety
+rating, the proposed action, and the undo path.
+
+### Shared guarantees
+
+All three capabilities share the same contract:
+
+- **Read-only by default.** No filesystem modification unless you run `xmac purge <plan>`.
+- **Always show evidence.** Every recommendation cites the file, path, process, or setting behind it.
+- **Always reversible.** Destructive actions go through the safety state machine: PREVIEW → APPROVED → EXECUTING → VERIFIED → ROLLBACK AVAILABLE.
+- **No AI confidence overrides safety.** A high-confidence model recommendation still passes the same action policy.
+
+For the full contract, see [`docs/PRODUCT_TRUTH_TABLE.md`](docs/PRODUCT_TRUTH_TABLE.md).
+For the scope decision and what's NOT v1, see [`SCOPE_FREEZE.md`](SCOPE_FREEZE.md).
+For the dead-code survey that backs the scope decision, see [`docs/DEAD_CODE_SURVEY.md`](docs/DEAD_CODE_SURVEY.md).
+
+## Features (full list)
+
+The CLI exposes the three v1 capabilities above plus the broader scan
+surface (most used internally by v1):
 
 ## Why X-MaC?
 
