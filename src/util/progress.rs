@@ -1,12 +1,10 @@
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
-#[allow(dead_code)]
 pub struct ProgressReporter {
     quiet: bool,
     multi_progress: Option<MultiProgress>,
 }
 
-#[allow(dead_code)]
 impl ProgressReporter {
     pub fn new(quiet: bool) -> Self {
         Self {

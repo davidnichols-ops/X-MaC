@@ -13,6 +13,7 @@ use crate::core::engine::Engine;
 use crate::core::error::EngineError;
 use crate::core::types::{Category, EngineId, EngineStats, Finding, Severity, Target};
 use crate::util::backup;
+use crate::util::progress::ProgressReporter;
 
 use super::cluster::{DuplicateCluster, FileEntry};
 use super::hasher;
@@ -614,23 +615,57 @@ impl DuplicateEngine {
         let start = Instant::now();
         let _ = start; // used for timing if needed later
 
+        // Wire real progress (task #150): bar length is the actual candidate
+        // count from the file walk, not a hardcoded denominator. Items are
+        // incremented as the hash pipeline advances — no fake percentages.
+        let progress = ProgressReporter::new(false);
+        let spinner = progress.create_spinner("Scanning for duplicate files…");
+
         // Step 1: Scan candidates
         let candidates = self.scan_candidates(include_hidden, follow_symlinks);
         let items_scanned = candidates.len() as u64;
 
+        // Replace the spinner with a real progress bar whose length is the
+        // number of files we will actually hash. Bar can only be created
+        // once we know the count, so we retire the spinner first.
+        let bar = progress.create_bar(
+            items_scanned.max(1),
+            &format!("Hashing {} candidate files…", items_scanned),
+        );
+
+        if let Some(ref pb) = spinner {
+            pb.finish_and_clear();
+        }
+
         if candidates.is_empty() {
+            if let Some(ref pb) = bar {
+                pb.finish_with_message("No candidates to scan.");
+            }
             return (Vec::new(), items_scanned);
         }
 
         // Step 2: Group by size
         let size_groups = Self::group_by_size(candidates);
+        let mut hashed: u64 = 0;
 
         // Step 3-6: Hash and cluster
         let mut all_clusters = Vec::new();
 
         for size_group in size_groups {
+            let group_size = size_group.len() as u64;
+
             // Step 3: Partial hash
             let partial_hashed = self.hash_partial_group(size_group).await;
+            hashed += group_size;
+            if let Some(ref pb) = bar {
+                pb.set_position(hashed.min(items_scanned));
+                pb.set_message(format!(
+                    "Hashed {}/{} files ({} clusters so far)",
+                    hashed.min(items_scanned),
+                    items_scanned,
+                    all_clusters.len()
+                ));
+            }
             if partial_hashed.is_empty() {
                 continue;
             }
@@ -659,6 +694,12 @@ impl DuplicateEngine {
         }
 
         if !all_files.is_empty() {
+            if let Some(ref pb) = bar {
+                pb.set_message(format!(
+                    "Fingerprinting {} image files…",
+                    all_files.len()
+                ));
+            }
             self.fingerprint_images(&mut all_files).await;
         }
 
@@ -676,6 +717,15 @@ impl DuplicateEngine {
                 })
                 .collect();
             all_clusters.append(&mut similar_dup_clusters);
+        }
+
+        if let Some(ref pb) = bar {
+            pb.finish_with_message(format!(
+                "Done: {} clusters from {} files in {:?}",
+                all_clusters.len(),
+                items_scanned,
+                start.elapsed()
+            ));
         }
 
         (all_clusters, items_scanned)
