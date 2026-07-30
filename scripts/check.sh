@@ -7,8 +7,8 @@ cd "$(git rev-parse --show-toplevel)"
 echo "=== cargo fmt --check ==="
 cargo fmt --check
 
-echo "=== cargo clippy ==="
-cargo clippy -- -D warnings
+echo "=== cargo clippy (all targets) ==="
+cargo clippy --all-targets -- -D warnings
 
 echo "=== cargo test ==="
 cargo test
