@@ -1119,6 +1119,8 @@ async fn run_quick(
             top: 20,
             min_size: "100M".to_string(),
             paths: args.paths.clone(),
+            explain: false,
+            group_by: cli::args::DiskGroupBy::Path,
         };
         let disk_engine = engines::disk::DiskEngine::new(disk_args);
         let ctx_clone = ctx.clone();

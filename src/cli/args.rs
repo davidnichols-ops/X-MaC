@@ -615,6 +615,24 @@ pub struct DiskArgs {
     /// Directory to analyze (defaults to home).
     #[arg(value_name = "PATH")]
     pub paths: Vec<PathBuf>,
+
+    /// Emit a category breakdown (caches / dev artifacts / media / archives
+    /// / applications / backups / duplicates / unknown) showing what's
+    /// eating your disk and the evidence per category. This is the
+    /// "explain why my disk is full" mode for X-MaC capability #2.
+    #[arg(long)]
+    pub explain: bool,
+
+    /// Group the output by category instead of by path. Implies --explain.
+    #[arg(long, value_enum, default_value = "path")]
+    pub group_by: DiskGroupBy,
+}
+
+#[derive(clap::ValueEnum, Clone, Debug, Default, PartialEq, Eq)]
+pub enum DiskGroupBy {
+    #[default]
+    Path,
+    Category,
 }
 
 /// Arguments for the `graph` command — file system graph extraction.

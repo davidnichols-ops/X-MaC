@@ -294,6 +294,37 @@ async fn dir_size_fast_async(path: PathBuf) -> u64 {
         .unwrap_or(0)
 }
 
+/// Aggregated stats for one capability-#2 bucket.
+#[derive(Debug, Default, Clone)]
+struct BucketStats {
+    total_bytes: u64,
+    item_count: u64,
+    /// Largest paths seen (kept small — at most 100 entries).
+    top_paths: Vec<(std::path::PathBuf, u64)>,
+}
+
+/// Record a single path into the per-bucket aggregator. Keeps at most
+/// 100 paths per bucket, sorted descending by size.
+fn record_bucket(
+    buckets: &mut std::collections::BTreeMap<
+        crate::engines::disk::classifier::Bucket,
+        BucketStats,
+    >,
+    path: &std::path::Path,
+    size: u64,
+) {
+    let bucket = crate::engines::disk::classifier::classify(path);
+    let entry = buckets.entry(bucket).or_default();
+    entry.total_bytes += size;
+    entry.item_count += 1;
+    entry.top_paths.push((path.to_path_buf(), size));
+    // Sort descending by size, then truncate. The list is small in
+    // practice (top-N largest paths), so doing this on every push is
+    // fine.
+    entry.top_paths.sort_by_key(|(_, s)| std::cmp::Reverse(*s));
+    entry.top_paths.truncate(100);
+}
+
 /// Simple MIME type lookup from a lowercase file extension (no external
 /// crate dependency). Falls back to `application/octet-stream` for
 /// unknown extensions.
@@ -577,6 +608,14 @@ impl Engine for DiskEngine {
         let mut items_scanned = 0u64;
         let mut findings_count = 0u64;
 
+        // Per-bucket aggregation for capability #2 (`--explain` / `--by category`).
+        // We always populate the buckets so the user can opt-in to the
+        // category breakdown without paying a second-scan cost.
+        let mut buckets: std::collections::BTreeMap<
+            crate::engines::disk::classifier::Bucket,
+            BucketStats,
+        > = std::collections::BTreeMap::new();
+
         let min_size = byte_unit::Byte::from_str(&self.args.min_size)
             .map(|b| b.get_bytes() as u64)
             .unwrap_or(100 * 1024 * 1024);
@@ -706,6 +745,8 @@ impl Engine for DiskEngine {
                     items_scanned += 1;
                     if size >= min_size {
                         entries.push((path.clone(), size, *is_dir));
+                        // Track per-bucket totals for --explain (#2)
+                        record_bucket(&mut buckets, path, size);
                     }
                 }
             }
@@ -778,6 +819,8 @@ impl Engine for DiskEngine {
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_else(|| path.to_string_lossy().to_string());
 
+                record_bucket(&mut buckets, &path, size);
+
                 let finding = Finding::new(
                     EngineId::All,
                     Severity::Info,
@@ -802,6 +845,84 @@ impl Engine for DiskEngine {
             }
         }
 
+        // ---- Capability #2 aggregate: per-category breakdown ----
+        // Emit a single SystemInfo finding with a JSON `hint` describing
+        // the bucket totals. Only when --explain is set OR --by category
+        // is set (so a user can opt-in without paying for the aggregation
+        // on every disk run).
+        if self.args.explain || self.args.group_by == crate::cli::args::DiskGroupBy::Category {
+            let total: u64 = buckets.values().map(|s| s.total_bytes).sum();
+            let mut buckets_json = serde_json::Map::new();
+            for (bucket, stats) in &buckets {
+                let pct = if total > 0 {
+                    (stats.total_bytes as f64 / total as f64) * 100.0
+                } else {
+                    0.0
+                };
+                let top_items: Vec<serde_json::Value> = stats
+                    .top_paths
+                    .iter()
+                    .take(self.args.top)
+                    .map(|(p, s)| {
+                        serde_json::json!({
+                            "path": p.to_string_lossy(),
+                            "size": s,
+                        })
+                    })
+                    .collect();
+                buckets_json.insert(
+                    bucket.label().to_string(),
+                    serde_json::json!({
+                        "total_bytes": stats.total_bytes,
+                        "percent": pct,
+                        "item_count": stats.item_count,
+                        "top_items": top_items,
+                    }),
+                );
+            }
+            let payload = serde_json::json!({
+                "capability": "explain_disk_usage",
+                "total_classified_bytes": total,
+                "buckets": buckets_json,
+            });
+            let payload_str = payload.to_string();
+            let summary = if buckets.is_empty() {
+                "No large files or directories found above the minimum size.".to_string()
+            } else {
+                let top_bucket = buckets
+                    .iter()
+                    .max_by_key(|(_, s)| s.total_bytes)
+                    .map(|(b, _)| b.label())
+                    .unwrap_or("unknown");
+                format!(
+                    "{} buckets classified, top bucket: {} ({} bytes)",
+                    buckets.len(),
+                    top_bucket,
+                    buckets
+                        .iter()
+                        .max_by_key(|(_, s)| s.total_bytes)
+                        .map(|(_, s)| s.total_bytes)
+                        .unwrap_or(0)
+                )
+            };
+            let explain_finding = Finding::new(
+                EngineId::All,
+                Severity::Info,
+                Category::SystemInfo,
+                Target::Path(std::path::PathBuf::from("/")),
+                format!("Disk breakdown by category: {}", summary),
+                format!(
+                    "Capability #2 — explain why my disk is full. {} \
+                     categories classified. See hint JSON for per-bucket \
+                     totals and top reclaimable items.",
+                    buckets.len()
+                ),
+            )
+            .with_hint(payload_str);
+            ctx.emit(explain_finding).await;
+            findings_count += 1;
+        }
+
         Ok(EngineStats {
             engine: self.id(),
             duration: start.elapsed(),
@@ -818,6 +939,8 @@ impl Default for DiskEngine {
             top: 20,
             min_size: "100M".to_string(),
             paths: Vec::new(),
+            explain: false,
+            group_by: crate::cli::args::DiskGroupBy::Path,
         })
     }
 }
@@ -1092,6 +1215,8 @@ mod tests {
             top: 5,
             min_size: "500M".to_string(),
             paths: vec![PathBuf::from("/tmp")],
+            explain: false,
+            group_by: crate::cli::args::DiskGroupBy::Path,
         };
         let engine = DiskEngine::new(args);
         assert_eq!(engine.id(), EngineId::All);
