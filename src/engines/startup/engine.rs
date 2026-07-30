@@ -838,6 +838,7 @@ mod tests {
             tx,
             progress: std::sync::Arc::new(crate::util::progress::ProgressReporter::new(true)),
             macos: std::sync::Arc::new(MacosUtils::new()),
+            cancelled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
 
         let engine = StartupEngine::new();

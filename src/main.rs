@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use std::sync::Arc;
 use std::time::Instant;
+use tokio::signal;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
@@ -35,6 +36,33 @@ async fn main() -> Result<()> {
     let (tx, mut rx) = mpsc::channel::<Finding>(1000);
 
     let ctx = Arc::new(ScanContext::new(&cli, tx).await?);
+
+    // Install Ctrl-C / SIGTERM handler that flips the cancellation flag.
+    // Engines poll `ctx.is_cancelled()` and unwind cleanly — no half-written
+    // state, no orphan threads (MAOS #151). The handler holds only the
+    // AtomicBool (not the full Arc<ScanContext>) so dropping the runtime
+    // is not blocked by this task waiting for a signal.
+    {
+        let cancel_flag = Arc::clone(&ctx.cancelled);
+        tokio::spawn(async move {
+            let mut sigterm = match signal::unix::signal(signal::unix::SignalKind::terminate()) {
+                Ok(s) => s,
+                Err(e) => {
+                    warn!("Could not install SIGTERM handler: {}", e);
+                    return;
+                }
+            };
+            tokio::select! {
+                _ = signal::ctrl_c() => {
+                    warn!("Received SIGINT — requesting graceful cancellation…");
+                }
+                _ = sigterm.recv() => {
+                    warn!("Received SIGTERM — requesting graceful cancellation…");
+                }
+            }
+            cancel_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        });
+    }
 
     let output_writer = Arc::new(tokio::sync::Mutex::new(OutputWriter::new(&cli.global)));
 
@@ -157,9 +185,14 @@ async fn main() -> Result<()> {
             let min_size = byte_unit::Byte::from_str(&args.min_size)
                 .map(|b| b.get_bytes() as u64)
                 .unwrap_or(1024);
-            let engine = engines::duplicate::DuplicateEngine::new()
+            let mut engine = engines::duplicate::DuplicateEngine::new()
                 .with_scan_paths(args.paths.clone())
                 .with_min_size(min_size);
+            // MAOS #152: if --cache is passed, enable the persistent
+            // scan cache so re-runs skip unchanged files.
+            if let Some(ref cache_path) = args.cache {
+                engine = engine.with_cache_path(cache_path.clone());
+            }
             vec![engine.run(ctx.clone()).await]
         }
         cli::args::Commands::Privacy(args) => {

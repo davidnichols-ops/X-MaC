@@ -1055,6 +1055,12 @@ pub struct DedupArgs {
     /// hashing.
     #[arg(long)]
     pub similar: bool,
+
+    /// Use a persistent cache to skip unchanged files on re-scan.
+    /// Cache path defaults to `~/.local/share/xmac/dedup-cache.json`.
+    /// Honors MAOS task #152 (resumable / incremental scans).
+    #[arg(long, value_name = "PATH")]
+    pub cache: Option<PathBuf>,
 }
 
 // ═══════════════════════════════════════════════════════════════════════

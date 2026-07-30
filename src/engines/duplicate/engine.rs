@@ -85,6 +85,8 @@ pub struct DuplicateEngine {
     similar_images: bool,
     /// Whether duplicate detection is enabled.
     enabled: bool,
+    /// Optional path to a persistent scan cache (MAOS #152).
+    cache_path: Option<PathBuf>,
 }
 
 impl Default for DuplicateEngine {
@@ -102,6 +104,7 @@ impl Default for DuplicateEngine {
             whitelist: DEFAULT_WHITELIST.iter().map(|s| s.to_string()).collect(),
             similar_images: false,
             enabled: true,
+            cache_path: None,
         }
     }
 }
@@ -169,6 +172,13 @@ impl DuplicateEngine {
     #[allow(dead_code)]
     pub fn with_whitelist_entry(mut self, entry: impl Into<String>) -> Self {
         self.whitelist.push(entry.into());
+        self
+    }
+
+    /// Set the persistent scan cache path. When set, unchanged files are
+    /// skipped on re-scan via cached BLAKE3 hashes (MAOS #152).
+    pub fn with_cache_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.cache_path = Some(path.into());
         self
     }
 
@@ -329,16 +339,48 @@ impl DuplicateEngine {
     }
 
     /// Generate full BLAKE3 hashes for files that share a partial hash.
-    /// (op 86)
-    async fn hash_full_group(&self, group: Vec<FileEntry>) -> Vec<FileEntry> {
+    /// (op 86) If a `ScanDatabase` is provided and the file is unchanged
+    /// since the last scan, the cached hash is reused — no re-hashing.
+    /// This is the foundation of MAOS #152 (resumable / incremental scans).
+    async fn hash_full_group(
+        &self,
+        group: Vec<FileEntry>,
+        cache: Option<Arc<std::sync::Mutex<ScanDatabase>>>,
+    ) -> Vec<FileEntry> {
         let sem = Arc::new(tokio::sync::Semaphore::new(self.concurrency));
         let mut handles = Vec::with_capacity(group.len());
 
         for file in group {
             let sem = Arc::clone(&sem);
+            let cache = cache.clone();
             handles.push(tokio::spawn(async move {
                 let _permit = sem.acquire().await.ok()?;
+
+                // Cache fast-path: if the cache has an unchanged entry for
+                // this file, reuse its hash instead of re-reading + re-hashing.
+                if let Some(ref cache) = cache {
+                    if let Some(cached_hash) = {
+                        let db = cache.lock().ok()?;
+                        db.is_unchanged(&file.path, file.size, file.modified)
+                            .then(|| db.hash_for(&file.path).map(|s| s.to_string()))
+                            .flatten()
+                    } {
+                        return Some(FileEntry {
+                            blake3_hash: Some(cached_hash),
+                            ..file
+                        });
+                    }
+                }
+
                 let hash = hasher::full_hash(&file.path).await.ok()?;
+
+                // Record the fresh hash so the next scan can reuse it.
+                if let Some(ref cache) = cache {
+                    if let Ok(mut db) = cache.lock() {
+                        db.record(file.path.clone(), hash.clone(), file.size, file.modified);
+                    }
+                }
+
                 Some(FileEntry {
                     blake3_hash: Some(hash),
                     ..file
@@ -611,9 +653,20 @@ impl DuplicateEngine {
         &self,
         include_hidden: bool,
         follow_symlinks: bool,
+        ctx: Option<&ScanContext>,
     ) -> (Vec<DuplicateCluster>, u64) {
         let start = Instant::now();
         let _ = start; // used for timing if needed later
+
+        // Optional persistent cache for resumable / incremental scans
+        // (MAOS #152). If `cache_path` is Some, load the existing database
+        // (tolerating missing/corrupt files) and save the updated one at
+        // the end. Cached hashes are reused for unchanged files.
+        let cache: Option<Arc<std::sync::Mutex<ScanDatabase>>> =
+            self.cache_path.as_ref().map(|p| {
+                let db = ScanDatabase::load(p).unwrap_or_default();
+                Arc::new(std::sync::Mutex::new(db))
+            });
 
         // Wire real progress (task #150): bar length is the actual candidate
         // count from the file walk, not a hardcoded denominator. Items are
@@ -637,11 +690,16 @@ impl DuplicateEngine {
             pb.finish_and_clear();
         }
 
-        if candidates.is_empty() {
-            if let Some(ref pb) = bar {
-                pb.finish_with_message("No candidates to scan.");
+        // Cooperative cancellation (MAOS #151). If the user hits Ctrl-C,
+        // the SIGINT handler set ctx.cancelled — bail before the heavy
+        // hashing work starts.
+        if let Some(c) = ctx {
+            if c.is_cancelled() {
+                if let Some(ref pb) = bar {
+                    pb.finish_with_message("Cancelled before hashing started.");
+                }
+                return (Vec::new(), items_scanned);
             }
-            return (Vec::new(), items_scanned);
         }
 
         // Step 2: Group by size
@@ -652,6 +710,21 @@ impl DuplicateEngine {
         let mut all_clusters = Vec::new();
 
         for size_group in size_groups {
+            // Cooperative cancellation (MAOS #151) — check at the top of
+            // every size group so a long scan can bail mid-stream.
+            if let Some(c) = ctx {
+                if c.is_cancelled() {
+                    if let Some(ref pb) = bar {
+                        pb.finish_with_message(format!(
+                            "Cancelled after {} clusters from {} files.",
+                            all_clusters.len(),
+                            items_scanned
+                        ));
+                    }
+                    return (all_clusters, hashed);
+                }
+            }
+
             let group_size = size_group.len() as u64;
 
             // Step 3: Partial hash
@@ -674,8 +747,8 @@ impl DuplicateEngine {
             let partial_groups = Self::group_by_partial_hash(partial_hashed);
 
             for partial_group in partial_groups {
-                // Step 5: Full hash
-                let full_hashed = self.hash_full_group(partial_group).await;
+                // Step 5: Full hash (with optional cache, MAOS #152)
+                let full_hashed = self.hash_full_group(partial_group, cache.clone()).await;
                 if full_hashed.is_empty() {
                     continue;
                 }
@@ -728,6 +801,20 @@ impl DuplicateEngine {
             ));
         }
 
+        // Persist the cache so the next scan can resume without re-hashing
+        // unchanged files (MAOS #152).
+        if let (Some(path), Some(cache)) = (&self.cache_path, &cache) {
+            if let Ok(db) = cache.lock() {
+                if let Err(e) = db.save(path) {
+                    tracing::warn!(
+                        "Failed to save dedup cache to {}: {}",
+                        path.display(),
+                        e
+                    );
+                }
+            }
+        }
+
         (all_clusters, items_scanned)
     }
 }
@@ -757,9 +844,13 @@ impl Engine for DuplicateEngine {
         let follow_symlinks = ctx.config.follow_symlinks;
 
         let (clusters, items_scanned) = self
-            .detect_duplicates(include_hidden, follow_symlinks)
+            .detect_duplicates(include_hidden, follow_symlinks, Some(&ctx))
             .await;
 
+        // Whether or not the user cancelled, emit whatever clusters we
+        // already built — partial results are more useful than nothing.
+        // Cancellation only stops further work, it doesn't discard what
+        // we already verified.
         let findings = Self::clusters_to_findings(&clusters);
         let findings_count = findings.len() as u64;
 
@@ -772,7 +863,7 @@ impl Engine for DuplicateEngine {
             duration: start.elapsed(),
             items_scanned,
             findings_count,
-            errors_count: 0,
+            errors_count: if ctx.is_cancelled() { 1 } else { 0 },
         })
     }
 }
@@ -1556,7 +1647,7 @@ mod tests {
             .with_min_size(1)
             .with_concurrency(2);
 
-        let (clusters, items_scanned) = engine.detect_duplicates(false, false).await;
+        let (clusters, items_scanned) = engine.detect_duplicates(false, false, None).await;
 
         assert_eq!(items_scanned, 3);
         assert_eq!(clusters.len(), 1);
@@ -1579,7 +1670,7 @@ mod tests {
             .with_min_size(1)
             .with_concurrency(2);
 
-        let (clusters, items_scanned) = engine.detect_duplicates(false, false).await;
+        let (clusters, items_scanned) = engine.detect_duplicates(false, false, None).await;
 
         assert_eq!(items_scanned, 3);
         assert!(clusters.is_empty());
@@ -1614,7 +1705,7 @@ mod tests {
             .with_min_size(1)
             .with_concurrency(2);
 
-        let (clusters, _) = engine.detect_duplicates(false, false).await;
+        let (clusters, _) = engine.detect_duplicates(false, false, None).await;
 
         assert_eq!(clusters.len(), 1);
         let cluster = &clusters[0];
@@ -1633,7 +1724,7 @@ mod tests {
             .with_scan_paths(vec![tmp.path().to_path_buf()])
             .with_min_size(1);
 
-        let (clusters, items_scanned) = engine.detect_duplicates(false, false).await;
+        let (clusters, items_scanned) = engine.detect_duplicates(false, false, None).await;
         assert_eq!(items_scanned, 0);
         assert!(clusters.is_empty());
     }
@@ -1653,7 +1744,7 @@ mod tests {
             .with_min_size(1)
             .with_whitelist_entry(dir.to_string_lossy().to_string());
 
-        let (clusters, items_scanned) = engine.detect_duplicates(false, false).await;
+        let (clusters, items_scanned) = engine.detect_duplicates(false, false, None).await;
         assert_eq!(items_scanned, 0);
         assert!(clusters.is_empty());
     }

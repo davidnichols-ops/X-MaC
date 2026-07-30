@@ -254,7 +254,7 @@ mod tests {
             .with_min_size(1);
 
         let start = Instant::now();
-        let (clusters, items_scanned) = engine.detect_duplicates(false, false).await;
+        let (clusters, items_scanned) = engine.detect_duplicates(false, false, None).await;
         let elapsed = start.elapsed();
 
         let dup_count: usize = clusters.iter().map(|c| c.files.len()).sum();
@@ -285,7 +285,7 @@ mod tests {
             .with_min_size(1);
 
         let start = Instant::now();
-        let (clusters, items_scanned) = engine.detect_duplicates(false, false).await;
+        let (clusters, items_scanned) = engine.detect_duplicates(false, false, None).await;
         let elapsed = start.elapsed();
 
         println!(
