@@ -941,6 +941,8 @@ mod tests {
             top: 10,
             min_size: "100B".to_string(),
             paths: vec![tmp.path().to_path_buf()],
+            explain: false,
+            group_by: x_mac::cli::args::DiskGroupBy::Path,
         });
 
         let cli = x_mac::cli::args::Cli::parse_from(vec!["x-mac", "disk"]);
