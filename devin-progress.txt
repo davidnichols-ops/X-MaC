@@ -1,5 +1,15 @@
 # X-MaC Digital Twin — Devin Progress Log
 
+## Session 2 — 2026-08-05 — Dedup --benchmark (Feature #2)
+
+- Implemented: `xmac dedup --benchmark` self-benchmark subcommand
+- Tests passing: 788 lib + 778 binary + 7 daemon + 78 integration = 1,651 total, 0 failures
+- Fixed issues: None — new feature, no regressions
+- Next priority: Feature #3 — Publish Homebrew tap for xmac CLI (v1 DoD requirement)
+- Guards: PR_READY (test + lint evidence captured in .nonstop/)
+- Benchmark results: 10K files scanned in 0.79s, 12.6K files/sec, 256 duplicate groups found
+- MAOS task 632 completed
+
 ## Session 1 — 2026-08-05 — 500K Benchmark (Feature #1)
 
 - Implemented: Extended benchmark suite to 500K+ file corpus (v1 DoD blocker)
