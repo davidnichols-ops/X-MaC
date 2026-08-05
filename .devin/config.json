@@ -1,0 +1,30 @@
+{
+  "project_name": "X-MaC",
+  "project_description": "Building a cutting-edge macOS system intelligence — evolving X-MaC from a cleaner/optimizer into a full macOS Digital Twin with 630+ technical operations across hardware modeling, software genome, filesystem intelligence, process intelligence, unified memory, energy/battery, application intelligence, and AI reasoning.",
+  "mcp_servers": {
+    "maos": {
+      "description": "Mac AI OS context engine — use for context retrieval, memory search, workspace summaries, task management, and action execution",
+      "tools": [
+        "maos_get_context",
+        "maos_search_memory",
+        "maos_workspace_summary",
+        "maos_create_task",
+        "maos_list_tasks",
+        "maos_run_action"
+      ],
+      "resources": [
+        "maos://context/current",
+        "maos://workspace/current",
+        "maos://session/latest",
+        "maos://tasks/open"
+      ]
+    }
+  },
+  "git_safety": {
+    "protected_branches": ["main", "origin/main"],
+    "work_branch_prefix": "digital-twin/",
+    "push_disabled": true,
+    "push_url": "DISABLED",
+    "note": "Push URL is disabled to prevent accidental pushes to main. All work happens on feature branches."
+  }
+}

@@ -50,6 +50,11 @@ pub struct ZenStep {
 /// 5. Run safe maintenance tasks
 /// 6. Collect system snapshot (health after)
 /// 7. Produce summary
+///
+/// op 277: Compare before/after states — captures health and memory
+/// snapshots before and after optimization to measure the delta.
+/// op 278: Compare system states — produces the before/after comparison
+/// summary that powers the Zen Mode result display.
 pub async fn run_zen(cli: &crate::cli::args::Cli, args: &ZenArgs) -> anyhow::Result<ZenResult> {
     let start = Instant::now();
     let mut steps = Vec::new();

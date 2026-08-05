@@ -149,6 +149,7 @@ mod tests {
             follow_symlinks: false,
             cache_dir: None,
             fix_script: None,
+            resource_mode: "balanced".to_string(),
         };
 
         let mut writer = x_mac::cli::output::OutputWriter::new(&global_args);
@@ -535,6 +536,50 @@ mod tests {
                     .contains(&x_mac::cli::args::ScanEngineIdArg::Envmap));
             }
             _ => panic!("Expected Scan command"),
+        }
+    }
+
+    #[test]
+    fn test_scan_privacy_on_by_default() {
+        let args = vec!["x-mac", "scan"];
+        let cli = x_mac::cli::args::Cli::parse_from(args);
+        match cli.command {
+            x_mac::cli::args::Commands::Scan(scan_args) => {
+                assert!(scan_args.privacy, "privacy should be on by default");
+                assert!(
+                    scan_args.health_summary,
+                    "health_summary should be on by default"
+                );
+            }
+            _ => panic!("Expected Scan command"),
+        }
+    }
+
+    #[test]
+    fn test_scan_skip_privacy() {
+        let args = vec!["x-mac", "scan", "--skip", "privacy"];
+        let cli = x_mac::cli::args::Cli::parse_from(args);
+        match cli.command {
+            x_mac::cli::args::Commands::Scan(scan_args) => {
+                assert!(scan_args
+                    .skip
+                    .contains(&x_mac::cli::args::ScanEngineIdArg::Privacy));
+            }
+            _ => panic!("Expected Scan command"),
+        }
+    }
+
+    #[test]
+    fn test_doctor_inherits_scan_args() {
+        let args = vec!["x-mac", "doctor", "--skip", "privacy"];
+        let cli = x_mac::cli::args::Cli::parse_from(args);
+        match cli.command {
+            x_mac::cli::args::Commands::Doctor(scan_args) => {
+                assert!(scan_args
+                    .skip
+                    .contains(&x_mac::cli::args::ScanEngineIdArg::Privacy));
+            }
+            _ => panic!("Expected Doctor command"),
         }
     }
 
@@ -940,6 +985,8 @@ mod tests {
             top: 10,
             min_size: "100B".to_string(),
             paths: vec![tmp.path().to_path_buf()],
+            explain: false,
+            group_by: x_mac::cli::args::DiskGroupBy::Path,
         });
 
         let cli = x_mac::cli::args::Cli::parse_from(vec!["x-mac", "disk"]);
@@ -1044,5 +1091,110 @@ mod tests {
         // The finding is filtered out entirely (no fix to apply), so it
         // shouldn't appear as a review-required fix either.
         assert!(!script.contains("big.iso"));
+    }
+
+    #[test]
+    fn test_cli_purge_preview_flag() {
+        let args = vec!["x-mac", "purge", "--preview"];
+        let cli = x_mac::cli::args::Cli::parse_from(args);
+        match cli.command {
+            x_mac::cli::args::Commands::Purge(purge_args) => {
+                assert!(purge_args.preview);
+                assert!(!purge_args.yes);
+            }
+            _ => panic!("Expected Purge command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_purge_yes_flag() {
+        let args = vec!["x-mac", "purge", "--yes"];
+        let cli = x_mac::cli::args::Cli::parse_from(args);
+        match cli.command {
+            x_mac::cli::args::Commands::Purge(purge_args) => {
+                assert!(purge_args.yes);
+                assert!(!purge_args.preview);
+            }
+            _ => panic!("Expected Purge command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_purge_dry_run_and_yes() {
+        let args = vec!["x-mac", "purge", "--dry-run", "--yes"];
+        let cli = x_mac::cli::args::Cli::parse_from(args);
+        match cli.command {
+            x_mac::cli::args::Commands::Purge(purge_args) => {
+                assert!(purge_args.dry_run);
+                assert!(purge_args.yes);
+            }
+            _ => panic!("Expected Purge command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_zen_no_clean_no_maintain() {
+        let args = vec!["x-mac", "zen", "--no-clean", "--no-maintain"];
+        let cli = x_mac::cli::args::Cli::parse_from(args);
+        match cli.command {
+            x_mac::cli::args::Commands::Zen(zen_args) => {
+                assert!(zen_args.no_clean);
+                assert!(zen_args.no_maintain);
+                assert!(!zen_args.no_memory, "memory optimization should still run");
+                assert!(!zen_args.dry_run);
+                assert!(!zen_args.execute);
+            }
+            _ => panic!("Expected Zen command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_zen_dry_run() {
+        let args = vec!["x-mac", "zen", "--dry-run"];
+        let cli = x_mac::cli::args::Cli::parse_from(args);
+        match cli.command {
+            x_mac::cli::args::Commands::Zen(zen_args) => {
+                assert!(zen_args.dry_run);
+                assert!(!zen_args.execute);
+            }
+            _ => panic!("Expected Zen command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_zen_execute() {
+        let args = vec!["x-mac", "zen", "--execute"];
+        let cli = x_mac::cli::args::Cli::parse_from(args);
+        match cli.command {
+            x_mac::cli::args::Commands::Zen(zen_args) => {
+                assert!(zen_args.execute);
+                assert!(!zen_args.dry_run);
+            }
+            _ => panic!("Expected Zen command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_dedup_benchmark_flag() {
+        let args = vec!["x-mac", "dedup", "--benchmark"];
+        let cli = x_mac::cli::args::Cli::parse_from(args);
+        match cli.command {
+            x_mac::cli::args::Commands::Dedup(dedup_args) => {
+                assert!(dedup_args.benchmark);
+            }
+            _ => panic!("Expected Dedup command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_dedup_default_no_benchmark() {
+        let args = vec!["x-mac", "dedup"];
+        let cli = x_mac::cli::args::Cli::parse_from(args);
+        match cli.command {
+            x_mac::cli::args::Commands::Dedup(dedup_args) => {
+                assert!(!dedup_args.benchmark);
+            }
+            _ => panic!("Expected Dedup command"),
+        }
     }
 }

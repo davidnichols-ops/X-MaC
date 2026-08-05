@@ -40,6 +40,9 @@ impl Engine for ConflictEngine {
         Ok(())
     }
 
+    /// op 76: Identify conflicting software — scan for PATH, environment,
+    /// and port conflicts that indicate overlapping or conflicting
+    /// software installations.
     async fn scan(&self, ctx: Arc<ScanContext>) -> std::result::Result<EngineStats, EngineError> {
         let start = Instant::now();
         let mut items_scanned = 0u64;
@@ -142,21 +145,21 @@ mod tests {
     fn test_path_scanner_new_and_default() {
         let scanner = PathConflictScanner::new();
         let _ = scanner;
-        let default = PathConflictScanner::default();
+        let default = PathConflictScanner;
         let _ = default;
     }
 
     #[test]
     fn test_env_scanner_new_and_default() {
         let _ = EnvConflictScanner::new();
-        let _ = EnvConflictScanner::default();
+        let _ = EnvConflictScanner;
     }
 
     #[test]
     fn test_port_scanner_new_and_default() {
         let scanner = PortConflictScanner::new(vec![80, 443]);
         let _ = scanner;
-        let default = PortConflictScanner::default();
+        let default = PortConflictScanner::new(vec![]);
         let _ = default;
     }
 

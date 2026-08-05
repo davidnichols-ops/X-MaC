@@ -4,8 +4,8 @@ import Combine
 // MARK: - Stderr logging helper
 
 private func logStderr(_ message: String) {
-    message.withCString { cstr in
-        fputs(cstr, stderr)
+    message.withCString { cstr -> Void in
+        _ = fputs(cstr, stderr)
     }
 }
 
@@ -49,6 +49,36 @@ final class XMacRunner: ObservableObject {
     @Published var cleanupMessage: String?
     @Published var binaryPathOverride: String? = nil
     @Published var scanProgress: Double = 0
+    @Published var cleanScanScope: CleanScanScope = .all
+    @Published var isGNNScoring = false
+    @Published var gnnScoredFindings: Set<String> = []
+
+    // Digital Twin data
+    @Published var digitalTwin: DigitalTwin?
+    @Published var twinLoading = false
+    @Published var twinError: String?
+    @Published var twinRecommendations: TwinRecommendations?
+    @Published var twinReasoningResult: ReasoningResult?
+    @Published var twinSandboxResult: SandboxResult?
+    @Published var twinPredictions: [String] = []
+    @Published var twinQueryResult: QueryResult?
+    @Published var twinBenchmark: BenchmarkData?
+    @Published var twinMonitoringPlan: MonitoringPlan?
+
+    // What Changed? data
+    @Published var whatChanged: WhatChangedReport?
+    @Published var whatChangedLoading = false
+    @Published var whatChangedError: String?
+
+    // Generic scan results for unwired commands
+    @Published var conflictFindings: [Finding] = []
+    @Published var envmapFindings: [Finding] = []
+    @Published var depthFindings: [Finding] = []
+    @Published var quickFindings: [Finding] = []
+    @Published var fullScanFindings: [Finding] = []
+    @Published var purgeResult: String?
+    @Published var configJson: String?
+    @Published var configProfiles: [ConfigProfile] = []
 
     // Universal activity log — tracks all operations across the app
     @Published var activityLog: [ActivityLogEntry] = []
@@ -56,7 +86,7 @@ final class XMacRunner: ObservableObject {
     @Published var showActivityBanner: Bool = false
 
     enum ScanMode: String {
-        case dashboard, idle, full, clean, maintain, disk, neural, apps, settings, history, automation, ramBoost, zen, advisor
+        case idle, full, clean, maintain, disk, neural, zen, advisor
     }
 
     private var appSettings: AppSettings?
@@ -64,6 +94,13 @@ final class XMacRunner: ObservableObject {
     private var currentScanTask: Task<Void, Never>?
     private var binaryPathObserver: NSObjectProtocol?
     private var currentProcess: Process?
+
+    deinit {
+        if let observer = binaryPathObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        currentScanTask?.cancel()
+    }
 
     func configure(settings: AppSettings, profiles: ProfileStore) {
         appSettings = settings
@@ -136,7 +173,7 @@ final class XMacRunner: ObservableObject {
         lastActivity = nil
     }
 
-    private let xmacPath: String = {
+    let xmacPath: String = {
         // Look for the bundled binary first (inside the .app bundle), then
         // fall back to installed locations, then PATH.
         let bundleDir = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/xmac").path
@@ -161,6 +198,13 @@ final class XMacRunner: ObservableObject {
     func startCleanScan() {
         guard !isScanning else { return }
         beginScan(mode: .clean, phase: "Scanning for reclaimable space...", task: runCleanScan)
+    }
+
+    func startCleanScan(scope: CleanScanScope) {
+        guard !isScanning else { return }
+        cleanScanScope = scope
+        let phase = scope == .all ? "Scanning for reclaimable space..." : "Scanning \(scope.label)..."
+        beginScan(mode: .clean, phase: phase, task: runCleanScan)
     }
 
     func startMaintainScan() {
@@ -210,44 +254,321 @@ final class XMacRunner: ObservableObject {
         }
     }
 
-    func openDashboard() {
-        guard !isScanning else { return }
-        scanMode = .dashboard
+    // MARK: - Digital Twin
+
+    func collectTwinIfNeeded() {
+        if digitalTwin == nil && !twinLoading {
+            collectTwin()
+        }
     }
 
-    func openSettings() {
-        guard !isScanning else { return }
-        scanMode = .settings
+    // MARK: - Scan Commands (for detail views)
+
+    func runDepthScan() {
+        depthFindings = []
+        Task {
+            await runCommand([xmacPath, "--format", "json", "depth"])
+            depthFindings = findings
+        }
     }
 
-    func openHistory() {
-        guard !isScanning else { return }
-        scanMode = .history
+    func runQuickScan() {
+        quickFindings = []
+        Task {
+            await runCommand([xmacPath, "--format", "json", "quick"])
+            quickFindings = findings
+        }
     }
 
-    func openApps() {
-        guard !isScanning else { return }
-        scanMode = .apps
+    // MARK: - Config
+
+    func runConfigShow() {
+        Task {
+            let result = try? await runProcess([xmacPath, "--format", "json", "config", "show"])
+            if let (stdout, _) = result {
+                configJson = stdout
+            }
+        }
     }
 
-    func openAutomation() {
-        guard !isScanning else { return }
-        scanMode = .automation
+    func runConfigProfiles() {
+        Task {
+            let result = try? await runProcess([xmacPath, "--format", "json", "config", "profiles"])
+            if let (stdout, _) = result,
+               let data = stdout.data(using: .utf8),
+               let profiles = try? JSONDecoder().decode([ConfigProfile].self, from: data) {
+                configProfiles = profiles
+            }
+        }
     }
 
-    func openRamBoost() {
-        guard !isScanning else { return }
-        scanMode = .ramBoost
+    // MARK: - Digital Twin Data Loading
+
+    func collectTwin() {
+        twinLoading = true
+        twinError = nil
+        Task {
+            let result = await trackOperation("Digital Twin Collect") { () async throws -> DigitalTwin in
+                let args = [self.xmacPath, "--format", "json", "twin", "--action", "collect"]
+                let (stdout, _) = try await self.runProcess(args)
+                guard let data = stdout.data(using: .utf8) else {
+                    throw XMacError.invalidOutput("twin collect: no data")
+                }
+                return try JSONDecoder().decode(DigitalTwin.self, from: data)
+            }
+            switch result {
+            case .success(let twin):
+                self.digitalTwin = twin
+                self.twinLoading = false
+            case .failure(let err):
+                self.twinError = err.localizedDescription
+                self.twinLoading = false
+            }
+        }
     }
 
-    func openZen() {
-        guard !isScanning else { return }
-        scanMode = .zen
+    func askTwin(question: String) {
+        twinReasoningResult = nil
+        Task {
+            let result = await trackOperation("Twin Ask") { () async throws -> ReasoningResult in
+                let args = [self.xmacPath, "--format", "json", "twin", "--action", "ask", "--question", question]
+                let (stdout, _) = try await self.runProcess(args)
+                guard let data = stdout.data(using: .utf8) else {
+                    throw XMacError.invalidOutput("twin ask: no data")
+                }
+                return try JSONDecoder().decode(ReasoningResult.self, from: data)
+            }
+            if case .success(let r) = result { self.twinReasoningResult = r }
+        }
     }
 
-    func openAdvisor() {
-        guard !isScanning else { return }
-        scanMode = .advisor
+    func predictTwin() {
+        twinPredictions = []
+        Task {
+            let result = await trackOperation("Twin Predict") { () async throws -> [String] in
+                let args = [self.xmacPath, "--format", "json", "twin", "--action", "predict"]
+                let (stdout, _) = try await self.runProcess(args)
+                guard let data = stdout.data(using: .utf8) else {
+                    throw XMacError.invalidOutput("twin predict: no data")
+                }
+                return try JSONDecoder().decode([String].self, from: data)
+            }
+            if case .success(let r) = result { self.twinPredictions = r }
+        }
+    }
+
+    func simulateTwin(action: String) {
+        twinSandboxResult = nil
+        Task {
+            let result = await trackOperation("Twin Simulate") { () async throws -> SandboxResult in
+                let args = [self.xmacPath, "--format", "json", "twin", "--action", "simulate", "--simulate", action]
+                let (stdout, _) = try await self.runProcess(args)
+                guard let data = stdout.data(using: .utf8) else {
+                    throw XMacError.invalidOutput("twin simulate: no data")
+                }
+                return try JSONDecoder().decode(SandboxResult.self, from: data)
+            }
+            if case .success(let r) = result { self.twinSandboxResult = r }
+        }
+    }
+
+    func recommendTwin() {
+        twinRecommendations = nil
+        Task {
+            let result = await trackOperation("Twin Recommend") { () async throws -> TwinRecommendations in
+                let args = [self.xmacPath, "--format", "json", "twin", "--action", "recommend"]
+                let (stdout, _) = try await self.runProcess(args)
+                guard let data = stdout.data(using: .utf8) else {
+                    throw XMacError.invalidOutput("twin recommend: no data")
+                }
+                return try JSONDecoder().decode(TwinRecommendations.self, from: data)
+            }
+            if case .success(let r) = result { self.twinRecommendations = r }
+        }
+    }
+
+    func queryTwin(dimension: String) {
+        twinQueryResult = nil
+        Task {
+            let result = await trackOperation("Twin Query") { () async throws -> QueryResult in
+                let args = [self.xmacPath, "--format", "json", "twin", "--action", "query", "--query", dimension]
+                let (stdout, _) = try await self.runProcess(args)
+                guard let data = stdout.data(using: .utf8) else {
+                    throw XMacError.invalidOutput("twin query: no data")
+                }
+                return try JSONDecoder().decode(QueryResult.self, from: data)
+            }
+            if case .success(let r) = result { self.twinQueryResult = r }
+        }
+    }
+
+    func benchmarkTwin() {
+        twinBenchmark = nil
+        Task {
+            let result = await trackOperation("Twin Benchmark") { () async throws -> BenchmarkData in
+                let args = [self.xmacPath, "--format", "json", "twin", "--action", "benchmark"]
+                let (stdout, _) = try await self.runProcess(args)
+                guard let data = stdout.data(using: .utf8) else {
+                    throw XMacError.invalidOutput("twin benchmark: no data")
+                }
+                return try JSONDecoder().decode(BenchmarkData.self, from: data)
+            }
+            if case .success(let r) = result { self.twinBenchmark = r }
+        }
+    }
+
+    func monitorTwin() {
+        twinMonitoringPlan = nil
+        Task {
+            let result = await trackOperation("Twin Monitor") { () async throws -> MonitoringPlan in
+                let args = [self.xmacPath, "--format", "json", "twin", "--action", "monitor"]
+                let (stdout, _) = try await self.runProcess(args)
+                guard let data = stdout.data(using: .utf8) else {
+                    throw XMacError.invalidOutput("twin monitor: no data")
+                }
+                return try JSONDecoder().decode(MonitoringPlan.self, from: data)
+            }
+            if case .success(let r) = result { self.twinMonitoringPlan = r }
+        }
+    }
+
+    // MARK: - What Changed?
+
+    func queryWhatChanged(since: String) {
+        whatChanged = nil
+        whatChangedError = nil
+        whatChangedLoading = true
+        Task {
+            let result = await trackOperation("What Changed?") { () async throws -> WhatChangedReport in
+                let args = [self.xmacPath, "--format", "json", "twin", "--action", "what-changed", "--since", since]
+                let (stdout, _) = try await self.runProcess(args)
+                guard let data = stdout.data(using: .utf8) else {
+                    throw XMacError.invalidOutput("twin what-changed: no data")
+                }
+                return try JSONDecoder().decode(WhatChangedReport.self, from: data)
+            }
+            switch result {
+            case .success(let report):
+                self.whatChanged = report
+                self.whatChangedLoading = false
+            case .failure(let err):
+                self.whatChangedError = err.localizedDescription
+                self.whatChangedLoading = false
+            }
+        }
+    }
+
+    // MARK: - Safety Rules & Path Classification
+
+    @Published var safetyRules: SafetyRulesResponse?
+    @Published var safetyRulesLoading = false
+    @Published var pathClassification: PathClassification?
+    @Published var pathClassificationLoading = false
+
+    func loadSafetyRules() {
+        safetyRulesLoading = true
+        Task {
+            let result = await trackOperation("Load Safety Rules") { () async throws -> SafetyRulesResponse in
+                let args = [self.xmacPath, "--format", "json", "safety", "--action", "list"]
+                let (stdout, _) = try await self.runProcess(args)
+                guard let data = stdout.data(using: .utf8) else {
+                    throw XMacError.invalidOutput("safety list: no data")
+                }
+                return try JSONDecoder().decode(SafetyRulesResponse.self, from: data)
+            }
+            switch result {
+            case .success(let rules):
+                self.safetyRules = rules
+                self.safetyRulesLoading = false
+            case .failure(let err):
+                self.error = err.localizedDescription
+                self.safetyRulesLoading = false
+            }
+        }
+    }
+
+    func classifyPath(_ path: String) {
+        pathClassificationLoading = true
+        Task {
+            let result = await trackOperation("Classify Path") { () async throws -> PathClassification in
+                let args = [self.xmacPath, "--format", "json", "safety", "--action", "classify", "--path", path]
+                let (stdout, _) = try await self.runProcess(args)
+                guard let data = stdout.data(using: .utf8) else {
+                    throw XMacError.invalidOutput("safety classify: no data")
+                }
+                return try JSONDecoder().decode(PathClassification.self, from: data)
+            }
+            switch result {
+            case .success(let classification):
+                self.pathClassification = classification
+                self.pathClassificationLoading = false
+            case .failure(let err):
+                self.error = err.localizedDescription
+                self.pathClassificationLoading = false
+            }
+        }
+    }
+
+    // MARK: - Twin DB Management
+
+    @Published var twinDbInitialized = false
+    @Published var twinDbMessage: String?
+
+    func initTwinDb() {
+        Task {
+            let result = await trackOperation("Init Twin DB") { () async throws -> String in
+                let args = [self.xmacPath, "twin", "--action", "init-db"]
+                let (_, stderr) = try await self.runProcess(args)
+                return stderr
+            }
+            switch result {
+            case .success(let msg):
+                self.twinDbMessage = msg
+                self.twinDbInitialized = true
+            case .failure(let err):
+                self.twinDbMessage = err.localizedDescription
+            }
+        }
+    }
+
+    func compactTwinDb() {
+        Task {
+            let result = await trackOperation("Compact Twin DB") { () async throws -> String in
+                let args = [self.xmacPath, "twin", "--action", "compact"]
+                let (_, stderr) = try await self.runProcess(args)
+                return stderr
+            }
+            switch result {
+            case .success(let msg):
+                self.twinDbMessage = msg
+            case .failure(let err):
+                self.twinDbMessage = err.localizedDescription
+            }
+        }
+    }
+
+    // MARK: - Observer
+
+    @Published var isObserving = false
+    @Published var observeMessage: String?
+
+    func runObservers(duration: String) {
+        isObserving = true
+        Task {
+            let result = await trackOperation("Observe \(duration)") { () async throws -> String in
+                let args = [self.xmacPath, "twin", "--action", "observe", "--duration", duration]
+                let (_, stderr) = try await self.runProcess(args)
+                return stderr
+            }
+            switch result {
+            case .success(let msg):
+                self.observeMessage = msg
+                self.isObserving = false
+            case .failure(let err):
+                self.observeMessage = err.localizedDescription
+                self.isObserving = false
+            }
+        }
     }
 
     // MARK: - Zen Mode
@@ -331,19 +652,31 @@ final class XMacRunner: ObservableObject {
         selectedGNNPaths.removeAll()
         cleanupResults.removeAll()
         cleanupMessage = nil
+        gnnScoredFindings.removeAll()
     }
 
     func toggleSelection(path: String) {
         if selectedPaths.contains(path) {
             selectedPaths.remove(path)
         } else if isSafeCleanupPath(path) {
-            selectedPaths.insert(path)
+            // Block protected items from selection
+            let isProtected = findings.contains { f in
+                f.target.value == path && f.safety_rating?.lowercased() == "protected"
+            }
+            if !isProtected {
+                selectedPaths.insert(path)
+            }
         }
     }
 
     func selectAllSafeFindings() {
         selectedPaths = Set(findings.compactMap { finding in
-            guard let path = finding.target.value as String?, isSafeCleanupPath(path) else { return nil }
+            let path = finding.target.value
+            guard isSafeCleanupPath(path) else { return nil }
+            // Exclude protected items
+            if let rating = finding.safety_rating?.lowercased(), rating == "protected" {
+                return nil
+            }
             return path
         })
     }
@@ -450,21 +783,212 @@ final class XMacRunner: ObservableObject {
         return url.path.hasPrefix(home.path + "/") || url.path.hasPrefix(temporary.path + "/")
     }
 
+    // MARK: - GNN-Augmented Safety Scoring
+
+    /// Run the on-device GNN model over all findings to augment their
+    /// safety ratings with neural network predictions. This builds a mini-graph
+    /// from the findings, runs CoreML inference, and merges the scores back.
+    /// Works across all engines (clean, disk, conflict, map, etc.) — not just
+    /// clean findings.
+    func scoreFindingsWithGNN() {
+        guard !isGNNScoring, !findings.isEmpty else { return }
+        isGNNScoring = true
+        logActivity("gnn-score", status: .started, message: "Scoring \(findings.count) findings with GNN...")
+
+        Task { @MainActor in
+            // Build a graph JSON from the clean findings for the GNN model.
+            let graphJSON = buildFindingsGraphJSON()
+
+            let manager = CoreMLGNNManager()
+            let response = await manager.predict(graphJSON: graphJSON)
+
+            if let resp = response {
+                // Merge GNN scores into findings' safety_rating.
+                for score in resp.scores {
+                    if let idx = findings.firstIndex(where: { $0.target.value == score.path }) {
+                        findings[idx].safety_rating = gnnSafetyLabel(score.safety_score)
+                        findings[idx].safety_explanation = score.explanation
+                        findings[idx].safety_confidence = Int((score.confidence ?? 0.5) * 100)
+                        gnnScoredFindings.insert(score.path)
+                    }
+                }
+                // Also store the GNN scores for the neural view.
+                gnnScores = resp.scores
+                gnnResponse = resp
+                purgePlan = resp.purge_plan
+                let summary = resp.summary
+                let safeCount = summary?.safe_files ?? 0
+                let reviewCount = summary?.review_files ?? 0
+                let dangerCount = summary?.danger_files ?? 0
+                logActivity("gnn-score", status: .success, message: "Scored \(resp.scores.count) findings — \(safeCount) safe, \(reviewCount) review, \(dangerCount) danger")
+            } else {
+                logActivity("gnn-score", status: .failed, message: "GNN inference failed — using rule-based scores")
+            }
+            isGNNScoring = false
+        }
+    }
+
+    /// Build a minimal graph JSON from all findings for GNN inference.
+    /// Each finding becomes a node with features derived from its path, size,
+    /// category, and engine. Edges connect files in the same directory.
+    /// Includes findings from all engines (clean, disk, conflict, map, etc.)
+    /// so the GNN can learn cross-engine patterns.
+    private func buildFindingsGraphJSON() -> String {
+        // Include all findings with a path target — skip non-path findings.
+        let scoredFindings = findings.filter { finding in
+            // Only score findings that have a path target (not port conflicts,
+            // env var conflicts, etc. which don't have filesystem paths).
+            finding.target.value.contains("/")
+        }
+        var nodes: [[String: Any]] = []
+        var edges: [[Int]] = []
+
+        // Group by parent directory to create edges.
+        var dirGroups: [String: [Int]] = [:]
+
+        for (i, finding) in scoredFindings.enumerated() {
+            let path = finding.target.value
+            let url = URL(fileURLWithPath: path)
+            let ext = url.pathExtension.lowercased()
+            let isDir = (try? FileManager.default.attributesOfItem(atPath: path)[.type] as? FileAttributeType) == .typeDirectory
+            let sizeBytes = finding.size_bytes ?? 0
+            let modified = finding.discovered_at.secs_since_epoch
+
+            // 16-feature vector matching the GNN model's input.
+            // Features: [is_dir, is_hidden, size_log, ext_hash, age_days_norm,
+            //            is_cache, is_temp, is_build, is_pkg_cache, is_xcode,
+            //            is_browser, is_log, is_trash, is_large, is_orphan, is_dup]
+            let category = finding.category
+            let features: [Double] = [
+                isDir ? 1.0 : 0.0,
+                path.contains("/.") ? 1.0 : 0.0,
+                sizeBytes > 0 ? log10(Double(sizeBytes)) / 12.0 : 0.0,
+                Double(ext.hashValue % 100) / 100.0,
+                modified > 0 ? min(Double(Int(Date().timeIntervalSince1970) - Int(modified)) / 31_536_000.0, 1.0) : 0.0,
+                category == "cache" ? 1.0 : 0.0,
+                category == "temp_file" ? 1.0 : 0.0,
+                category == "build_artifact" ? 1.0 : 0.0,
+                category == "package_manager_cache" ? 1.0 : 0.0,
+                category == "xcode_artifact" ? 1.0 : 0.0,
+                category == "browser_cache" ? 1.0 : 0.0,
+                category == "log" ? 1.0 : 0.0,
+                category == "trash_bin" ? 1.0 : 0.0,
+                category == "large_file" ? 1.0 : 0.0,
+                category == "orphan_file" ? 1.0 : 0.0,
+                category == "duplicate_file" ? 1.0 : 0.0,
+            ]
+
+            nodes.append([
+                "path": path,
+                "features": features,
+                "node_type": isDir ? "directory" : "file",
+                "extension": ext,
+                "size_bytes": sizeBytes,
+                "modified_secs": modified,
+                "engine": finding.engine,
+                "category": finding.category,
+                "severity": finding.severity,
+                "is_hidden": path.contains("/."),
+            ])
+
+            let parentDir = (path as NSString).deletingLastPathComponent
+            dirGroups[parentDir, default: []].append(i)
+        }
+
+        // Create edges between nodes in the same directory (siblings).
+        for (_, indices) in dirGroups {
+            for i in 0..<indices.count {
+                for j in (i + 1)..<indices.count {
+                    edges.append([indices[i], indices[j]])
+                    edges.append([indices[j], indices[i]])
+                }
+            }
+        }
+
+        let graph: [String: Any] = [
+            "nodes": nodes,
+            "edges": edges,
+        ]
+
+        if let data = try? JSONSerialization.data(withJSONObject: graph),
+           let str = String(data: data, encoding: .utf8) {
+            return str
+        }
+        return "{\"nodes\": [], \"edges\": []}"
+    }
+
+    private func gnnSafetyLabel(_ score: Double) -> String {
+        if score >= 0.7 { return "safe" }
+        if score >= 0.4 { return "review" }
+        return "protected"
+    }
+
     // MARK: - Scan implementations
 
     private func runFullScan() async {
         let start = Date()
-        scanProgress = 0.1
-        await runCommand(cleanCommand())
-        guard !Task.isCancelled else { return }
-        scanPhase = "Running maintenance..."
-        scanProgress = 0.45
-        await runCommand([xmacPath, "--format", "json", "maintain"])
-        guard !Task.isCancelled else { return }
-        scanPhase = "Analyzing disk usage..."
-        scanProgress = 0.75
-        await runCommand([xmacPath, "--format", "json", "disk", "--top", "30", "--min-size", "50M"])
-        finishScan(start: start, mode: "full")
+        let resourceMode = appSettings?.resourceMode ?? "balanced"
+
+        // In eco mode, run phases sequentially (lowest CPU strain).
+        // In balanced/turbo mode, run clean + maintain + disk concurrently
+        // since they use different resources:
+        //   - clean: disk I/O (WalkDir via spawn_blocking)
+        //   - maintain: command execution (DNS flush, Spotlight, etc.)
+        //   - disk: disk I/O (WalkDir via spawn_blocking)
+        // The Rust core already bounds internal parallelism per engine via
+        // the --resource-mode flag, so overlapping the three phases is safe.
+        if resourceMode == "eco" {
+            scanProgress = 0.1
+            scanPhase = "Scanning for reclaimable space..."
+            await runCommand(cleanCommand())
+            guard !Task.isCancelled else { return }
+            scanPhase = "Running maintenance..."
+            scanProgress = 0.45
+            await runCommand([xmacPath, "--format", "json", "--resource-mode", resourceMode, "maintain"])
+            guard !Task.isCancelled else { return }
+            scanPhase = "Analyzing disk usage..."
+            scanProgress = 0.75
+            await runCommand([xmacPath, "--format", "json", "--resource-mode", resourceMode, "disk", "--top", "30", "--min-size", "50M"])
+            finishScan(start: start, mode: "full")
+        } else {
+            // Balanced/Turbo: run all three phases concurrently.
+            // Each phase is a separate xmac process, so the OS schedules
+            // them independently. The Rust core bounds each process's
+            // internal parallelism via --resource-mode.
+            scanPhase = "Running full scan (clean + maintain + disk)..."
+            scanProgress = 0.1
+
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask {
+                    await self.runCommand(self.cleanCommand())
+                }
+                group.addTask {
+                    await self.runCommand([self.xmacPath, "--format", "json", "--resource-mode", resourceMode, "maintain"])
+                }
+                group.addTask {
+                    await self.runCommand([self.xmacPath, "--format", "json", "--resource-mode", resourceMode, "disk", "--top", "30", "--min-size", "50M"])
+                }
+                // Update progress as phases complete.
+                var completed = 0
+                for await _ in group {
+                    completed += 1
+                    scanProgress = 0.1 + Double(completed) * 0.3
+                    if completed < 3 {
+                        scanPhase = "Full scan: \(completed)/3 phases complete..."
+                    }
+                }
+            }
+
+            guard !Task.isCancelled else { return }
+            finishScan(start: start, mode: "full")
+
+            // Auto-score with GNN if enabled and we have findings.
+            if appSettings?.gnnAutoScore == true && !findings.isEmpty {
+                scanPhase = "Scoring findings with GNN..."
+                scanProgress = 0.95
+                scoreFindingsWithGNN()
+            }
+        }
     }
 
     private func runCleanScan() async {
@@ -473,6 +997,13 @@ final class XMacRunner: ObservableObject {
         await runCommand(cleanCommand())
         guard !Task.isCancelled else { return }
         finishScan(start: start, mode: "clean")
+
+        // Auto-score with GNN if enabled and we have findings.
+        if appSettings?.gnnAutoScore == true && !findings.isEmpty {
+            scanPhase = "Scoring findings with GNN..."
+            scanProgress = 0.95
+            scoreFindingsWithGNN()
+        }
     }
 
     private func cleanCommand() -> [String] {
@@ -482,6 +1013,7 @@ final class XMacRunner: ObservableObject {
         let includeHidden = profile?.includeHidden ?? appSettings?.includeHidden ?? false
         let followSymlinks = profile?.followSymlinks ?? appSettings?.followSymlinks ?? false
         let exclusions = profile?.excludedPaths ?? appSettings?.exclusionList ?? []
+        let resourceMode = appSettings?.resourceMode ?? "balanced"
 
         var command = [xmacPath, "--format", "json"]
         if includeHidden { command += ["--include-hidden"] }
@@ -490,21 +1022,37 @@ final class XMacRunner: ObservableObject {
             command += ["--exclude", exclusion]
         }
         command += ["clean", "--min-age", "\(age)d", "--min-size", "\(size)M", "--min-large-size", "100M"]
+
+        // Resource mode controls scan parallelism and CPU strain.
+        command += ["--resource-mode", resourceMode]
+
+        // Scope: if not "all", pass --only to scan just that category.
+        if let onlyKey = cleanScanScope.cliKey {
+            command += ["--only", onlyKey]
+        }
+
+        // Duplicates scope needs --dedup to actually run the BLAKE3 hasher.
+        if cleanScanScope == .duplicates {
+            command += ["--dedup"]
+        }
+
         return command
     }
 
     private func runMaintainScan() async {
         let start = Date()
+        let resourceMode = appSettings?.resourceMode ?? "balanced"
         scanProgress = 0.2
-        await runCommand([xmacPath, "--format", "json", "maintain"])
+        await runCommand([xmacPath, "--format", "json", "--resource-mode", resourceMode, "maintain"])
         guard !Task.isCancelled else { return }
         finishScan(start: start, mode: "maintain")
     }
 
     private func runDiskScan() async {
         let start = Date()
+        let resourceMode = appSettings?.resourceMode ?? "balanced"
         scanProgress = 0.2
-        await runCommand([xmacPath, "--format", "json", "disk", "--top", "40", "--min-size", "50M"])
+        await runCommand([xmacPath, "--format", "json", "--resource-mode", resourceMode, "disk", "--top", "40", "--min-size", "50M"])
         guard !Task.isCancelled else { return }
         finishScan(start: start, mode: "disk")
     }
@@ -516,7 +1064,7 @@ final class XMacRunner: ObservableObject {
         // decoding a 500KB nested graph through the Finding JSONValue enum.
         scanPhase = "Extracting file system graph..."
         scanProgress = 0.1
-        let maxNodes = appSettings?.neuralMaxNodes ?? 600
+        let maxNodes = appSettings?.neuralMaxNodes ?? 2000
         let graphDir = FileManager.default.temporaryDirectory.appendingPathComponent("xmac_gnn_\(UUID().uuidString)")
         var graphCommand = [xmacPath, "--format", "json"]
         if let settings = appSettings {
@@ -525,7 +1073,7 @@ final class XMacRunner: ObservableObject {
                 graphCommand += ["--exclude", exclusion]
             }
         }
-        graphCommand += ["graph", "--max-depth", "8", "--max-nodes", "\(maxNodes)", "--output-graph", graphDir.path]
+        graphCommand += ["graph", "--max-depth", "15", "--max-nodes", "\(maxNodes)", "/", "--output-graph", graphDir.path]
         let graphResult = await runCommandCollect(graphCommand)
 
         guard !Task.isCancelled else {
@@ -660,7 +1208,7 @@ final class XMacRunner: ObservableObject {
         }
     }
 
-    private func runProcess(_ args: [String]) async throws -> (String, String) {
+    func runProcess(_ args: [String]) async throws -> (String, String) {
         var args = args
         if let override = binaryPathOverride, !args.isEmpty, args[0].contains("xmac") {
             let bundlePath = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/xmac").path
@@ -744,6 +1292,50 @@ final class XMacRunner: ObservableObject {
                 logStderr("[XMacRunner] runProcess: cancelled by task\n")
             }
         }
+    }
+
+    /// Run an arbitrary shell command asynchronously (off the main thread).
+    /// Use this instead of direct Process() calls in views.
+    /// Returns (exitCode, stdout) — stderr is discarded.
+    func runShellCommand(_ args: [String], timeoutSecs: Double = 60) async -> (Int, String) {
+        guard !args.isEmpty else { return (-1, "Empty command") }
+
+        return await withTaskGroup(of: (Int, String).self) { group in
+            group.addTask {
+                let task = Process()
+                task.executableURL = URL(fileURLWithPath: args[0])
+                task.arguments = Array(args.dropFirst())
+                let pipe = Pipe()
+                task.standardOutput = pipe
+                task.standardError = Pipe() // discard stderr
+
+                do {
+                    try task.run()
+                } catch {
+                    return (-1, "Failed to launch: \(error.localizedDescription)")
+                }
+
+                task.waitUntilExit()
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                let output = String(data: data, encoding: .utf8) ?? "<binary output>"
+                return (Int(task.terminationStatus), output)
+            }
+
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(timeoutSecs * 1_000_000_000))
+                return (-1, "TIMEOUT after \(Int(timeoutSecs))s")
+            }
+
+            let result = await group.next() ?? (-1, "Unknown error")
+            group.cancelAll()
+            return result
+        }
+    }
+
+    /// Kill a process by PID. Does NOT block the main thread.
+    func killProcess(pid: Int, force: Bool) async {
+        let args = ["/bin/kill", force ? "-9" : "-15", "\(pid)"]
+        _ = await runShellCommand(args, timeoutSecs: 5)
     }
 
     // MARK: - Privileged Command Execution (sudo via AppleScript)

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ZenView: View {
     @EnvironmentObject var runner: XMacRunner
+    @State private var showingOptimizeConfirmation = false
 
     var body: some View {
         ScrollView {
@@ -67,7 +68,7 @@ struct ZenView: View {
                 .disabled(runner.isZenRunning)
 
                 Button {
-                    runner.runZen(execute: true)
+                    showingOptimizeConfirmation = true
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "bolt.fill")
@@ -83,6 +84,18 @@ struct ZenView: View {
                 .buttonStyle(.plain)
                 .xHeroGlow(XTheme.accent, radius: 12)
                 .disabled(runner.isZenRunning)
+                .confirmationDialog(
+                    "Run Zen Mode optimization?",
+                    isPresented: $showingOptimizeConfirmation,
+                    titleVisibility: .visible
+                ) {
+                    Button("Optimize Now", role: .destructive) {
+                        runner.runZen(execute: true)
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("This will execute maintenance tasks, purge inactive memory, and optimize system performance. Some changes may take a few moments to take effect.")
+                }
             }
         }
         .frame(maxWidth: .infinity)

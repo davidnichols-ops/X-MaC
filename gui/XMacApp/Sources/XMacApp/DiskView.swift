@@ -213,7 +213,7 @@ struct DiskView: View {
                 label: "Other Home Data",
                 subtitle: "Hidden files, dot-folders, and unlisted directories",
                 bytes: otherHome,
-                color: Color(white: 0.45),
+                color: XTheme.color.textSecondary,
                 icon: "ellipsis.circle.fill",
                 fraction: frac(otherHome)
             ))
@@ -224,7 +224,7 @@ struct DiskView: View {
             label: "Free Space",
             subtitle: "Available space on Macintosh HD",
             bytes: stats.free,
-            color: Color(white: 0.20),
+            color: XTheme.color.backgroundSecondary,
             icon: "circle.dashed",
             fraction: frac(stats.free)
         ))

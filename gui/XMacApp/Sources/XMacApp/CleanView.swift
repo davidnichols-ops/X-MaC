@@ -2,6 +2,7 @@ import SwiftUI
 
 struct CleanView: View {
     @EnvironmentObject var runner: XMacRunner
+    @EnvironmentObject var settings: AppSettings
     @State private var searchText: String = ""
     @State private var selectedCategories: Set<String> = []
     @State private var showingExportPanel = false
@@ -37,6 +38,19 @@ struct CleanView: View {
         }.sorted { $0.2 > $1.2 }
     }
 
+    private var safetyCounts: (safe: Int, review: Int, protected: Int, unclassified: Int) {
+        var safe = 0, review = 0, protected = 0, unclassified = 0
+        for f in cleanFindings {
+            switch f.safety_rating {
+            case "safe": safe += 1
+            case "review": review += 1
+            case "protected": protected += 1
+            default: unclassified += 1
+            }
+        }
+        return (safe, review, protected, unclassified)
+    }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
@@ -47,12 +61,60 @@ struct CleanView: View {
                 } else if cleanFindings.isEmpty {
                     EmptyScanView(message: "No reclaimable space found. Run a clean scan to see results.")
                 } else {
-                    CleanReclaimCard(
-                        reclaimable: totalReclaimable,
-                        selectedReclaimable: selectedReclaimable,
-                        count: cleanFindings.count,
-                        selectedCount: runner.selectedPaths.count
-                    )
+                    // GNN scoring indicator
+                    if runner.isGNNScoring {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .controlSize(.small)
+                                .tint(XTheme.anomaly)
+                            Text("Scoring findings with GNN...")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(XTheme.anomaly)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(XTheme.anomaly.opacity(0.1))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+
+                    // Current scope indicator
+                    if runner.cleanScanScope != .all {
+                        HStack(spacing: 6) {
+                            Image(systemName: runner.cleanScanScope.icon)
+                                .font(.system(size: 11))
+                                .foregroundStyle(XTheme.accent)
+                            Text("Scope: \(runner.cleanScanScope.label)")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(XTheme.accent)
+                            Spacer()
+                            Button("Scan All") {
+                                runner.startCleanScan(scope: .all)
+                            }
+                            .font(.system(size: 11))
+                            .buttonStyle(.borderless)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(XTheme.accent.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+
+                    HStack(spacing: 16) {
+                        CleanReclaimCard(
+                            reclaimable: totalReclaimable,
+                            selectedReclaimable: selectedReclaimable,
+                            count: cleanFindings.count,
+                            selectedCount: runner.selectedPaths.count
+                        )
+                        CleanSafetySummaryCard(
+                            safe: safetyCounts.safe,
+                            review: safetyCounts.review,
+                            protected: safetyCounts.protected,
+                            unclassified: safetyCounts.unclassified,
+                            gnnScoredCount: runner.gnnScoredFindings.count
+                        )
+                    }
 
                     CleanCategoryBreakdown(
                         breakdown: categoryBreakdown,
@@ -76,6 +138,29 @@ struct CleanView: View {
         }
         .background(XTheme.voidGradient)
         .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    ForEach(CleanScanScope.allCases) { scope in
+                        Button {
+                            runner.startCleanScan(scope: scope)
+                        } label: {
+                            Label(scope.label, systemImage: scope.icon)
+                        }
+                    }
+                } label: {
+                    Label("Scan", systemImage: "magnifyingglass.circle")
+                }
+                .disabled(runner.isScanning)
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    runner.scoreFindingsWithGNN()
+                } label: {
+                    Label("Score with GNN", systemImage: "brain")
+                }
+                .disabled(cleanFindings.isEmpty || runner.isGNNScoring || runner.isScanning)
+                .help("Run the on-device GNN model to augment safety ratings with neural network predictions")
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button("Export Report") {
                     showingExportPanel = true
@@ -134,6 +219,116 @@ struct CleanReclaimCard: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Safety Summary Card
+
+struct CleanSafetySummaryCard: View {
+    let safe: Int
+    let review: Int
+    let protected: Int
+    let unclassified: Int
+    var gnnScoredCount: Int = 0
+
+    private var total: Int { safe + review + protected + unclassified }
+
+    var body: some View {
+        XCard {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    XSectionHeader(title: "Safety Summary", icon: "shield.lefthalf.filled")
+                    Spacer()
+                    if gnnScoredCount > 0 {
+                        HStack(spacing: 3) {
+                            Image(systemName: "brain.fill")
+                                .font(.system(size: 9))
+                                .foregroundStyle(XTheme.anomaly)
+                            Text("GNN \(gnnScoredCount)")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(XTheme.anomaly)
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(XTheme.anomaly.opacity(0.12))
+                        .clipShape(Capsule())
+                    }
+                }
+
+                HStack(spacing: 12) {
+                    SafetyStat(
+                        label: "Safe",
+                        count: safe,
+                        icon: "checkmark.shield.fill",
+                        color: XTheme.safe
+                    )
+                    SafetyStat(
+                        label: "Review",
+                        count: review,
+                        icon: "exclamationmark.shield.fill",
+                        color: XTheme.medium
+                    )
+                    SafetyStat(
+                        label: "Protected",
+                        count: protected,
+                        icon: "xmark.shield.fill",
+                        color: XTheme.danger
+                    )
+                    SafetyStat(
+                        label: "Unclassified",
+                        count: unclassified,
+                        icon: "shield",
+                        color: XTheme.textTertiary
+                    )
+                }
+
+                if total > 0 {
+                    GeometryReader { geo in
+                        let safeRatio = CGFloat(safe) / CGFloat(total)
+                        let reviewRatio = CGFloat(review) / CGFloat(total)
+                        let protectedRatio = CGFloat(protected) / CGFloat(total)
+                        HStack(spacing: 2) {
+                            Rectangle()
+                                .fill(XTheme.safe)
+                                .frame(width: geo.size.width * safeRatio)
+                            Rectangle()
+                                .fill(XTheme.medium)
+                                .frame(width: geo.size.width * reviewRatio)
+                            Rectangle()
+                                .fill(XTheme.danger)
+                                .frame(width: geo.size.width * protectedRatio)
+                            Rectangle()
+                                .fill(XTheme.textTertiary)
+                                .frame(width: geo.size.width * (1 - safeRatio - reviewRatio - protectedRatio))
+                        }
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                    }
+                    .frame(height: 6)
+                }
+            }
+        }
+    }
+}
+
+private struct SafetyStat: View {
+    let label: String
+    let count: Int
+    let icon: String
+    let color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Image(systemName: icon)
+                .font(.system(size: 14))
+                .foregroundStyle(color)
+            Text("\(count)")
+                .font(.system(size: 18, weight: .bold))
+                .foregroundStyle(color)
+            Text(label)
+                .font(.system(size: 10))
+                .foregroundStyle(XTheme.textSecondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

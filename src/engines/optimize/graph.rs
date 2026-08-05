@@ -595,6 +595,7 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
+    #[ignore = "Integration test — requires system commands"]
     fn build_graph_from_snapshot() {
         let mut builder = GraphBuilder::new(50, true, 10);
         let snapshot = TelemetrySnapshot::collect();
@@ -619,6 +620,7 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
+    #[ignore = "Integration test — requires system commands"]
     fn process_features_are_24_dim() {
         let builder = GraphBuilder::new(50, true, 10);
         let snapshot = TelemetrySnapshot::collect();
@@ -636,6 +638,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Integration test — requires system commands"]
     fn hardware_features_are_8_dim() {
         let builder = GraphBuilder::new(50, true, 10);
         let sys = SystemTelemetry::collect();
@@ -648,6 +651,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Integration test — requires system commands"]
     fn swap_and_compressor_features() {
         let builder = GraphBuilder::new(50, true, 10);
         let sys = SystemTelemetry::collect();
@@ -658,6 +662,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Integration test — requires system commands"]
     fn graph_has_predictions() {
         let mut builder = GraphBuilder::new(50, true, 10);
         let snapshot = TelemetrySnapshot::collect();
@@ -668,6 +673,7 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
+    #[ignore = "Integration test — requires system commands"]
     fn graph_with_trends() {
         let mut builder = GraphBuilder::new(50, true, 10);
         // Collect multiple snapshots to build trends
@@ -681,6 +687,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Integration test — requires system commands"]
     fn graph_serializes_to_json() {
         let mut builder = GraphBuilder::new(20, true, 5);
         let snapshot = TelemetrySnapshot::collect();

@@ -11,7 +11,7 @@
 [![Swift](https://img.shields.io/badge/Swift-5.9+-orange?style=flat-square&logo=swift)](https://swift.org)
 [![Platform](https://img.shields.io/badge/macOS-13%2B-blue?style=flat-square&logo=apple)](https://www.apple.com/macos)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-410+-brightgreen?style=flat-square)](#testing)
+[![Tests](https://img.shields.io/badge/tests-870+-brightgreen?style=flat-square)](#testing)
 
 [Install](#installation) · [Features](#features) · [Architecture](#architecture) · [Contributing](CONTRIBUTING.md) · [Roadmap](ROADMAP.md)
 
@@ -21,7 +21,65 @@
 
 X-MaC is a free, open-source Mac cleaner that combines a fast Rust scan engine, a Graph Neural Network safety scorer, and a native SwiftUI app — all running entirely on your device. Nothing ever leaves your Mac.
 
-> **Status:** Active development. The CLI is stable and fully functional. The GUI is feature-complete but not yet notarized for distribution. Two GNN models are trained and exported to CoreML: the file safety scorer (99.76% validation accuracy on 27-class node classification) and the memory optimization model (6 action classes + pressure prediction). Looking for contributors — see [GOOD_FIRST_ISSUES.md](GOOD_FIRST_ISSUES.md).
+> **Status:** v1 scope is frozen — see [`SCOPE_FREEZE.md`](SCOPE_FREEZE.md). Three v1 capabilities are locked: find safely-deletable duplicates, explain why your disk is full, and a system health scan with recommendations. Other engines (GNN auto-scoring, privacy recommendations, hardware reasoning, perceptual similarity beyond exact duplicates) are deferred to v2 or archived. The CLI is stable; the GUI is feature-complete but not yet notarized.
+
+## The 3 things X-MaC does in v1
+
+X-MaC v1 has exactly three user-visible capabilities. Everything else is either
+deferred to v2 or archived.
+
+### 1. Find safely-deletable duplicate files
+
+```bash
+xmac dedup ~/Downloads --min-size 1M
+xmac dedup ~/Photos --similar        # v2: perceptual image similarity
+```
+
+Walks a directory tree, groups files by BLAKE3 hash, returns a reviewable
+list of duplicate clusters with a recommended file to keep (newest +
+highest-priority path). **Nothing is deleted by `xmac dedup`** — review the
+JSON output and use `xmac purge` to act on it.
+
+### 2. Explain why your disk is full
+
+```bash
+xmac disk ~/Projects --explain
+xmac disk / --top 50 --by category
+```
+
+Categorizes what's on your disk — caches, dev artifacts, media, archives,
+applications, backups, duplicates, unknown — and shows the top reclaimable
+items per category with the evidence behind each recommendation.
+
+### 3. System health scan + recommendations
+
+```bash
+xmac scan --recommend
+xmac doctor --severity medium
+```
+
+Runs a privacy-redacted scan of your system (OS, packages, apps, startup
+items, disk) and produces a prioritized list of recommendations. Each
+recommendation shows what-it-is, why-it-matters, the evidence, a safety
+rating, the proposed action, and the undo path.
+
+### Shared guarantees
+
+All three capabilities share the same contract:
+
+- **Read-only by default.** No filesystem modification unless you run `xmac purge <plan>`.
+- **Always show evidence.** Every recommendation cites the file, path, process, or setting behind it.
+- **Always reversible.** Destructive actions go through the safety state machine: PREVIEW → APPROVED → EXECUTING → VERIFIED → ROLLBACK AVAILABLE.
+- **No AI confidence overrides safety.** A high-confidence model recommendation still passes the same action policy.
+
+For the full contract, see [`docs/PRODUCT_TRUTH_TABLE.md`](docs/PRODUCT_TRUTH_TABLE.md).
+For the scope decision and what's NOT v1, see [`SCOPE_FREEZE.md`](SCOPE_FREEZE.md).
+For the dead-code survey that backs the scope decision, see [`docs/DEAD_CODE_SURVEY.md`](docs/DEAD_CODE_SURVEY.md).
+
+## Features (full list)
+
+The CLI exposes the three v1 capabilities above plus the broader scan
+surface (most used internally by v1):
 
 ## Why X-MaC?
 
@@ -45,9 +103,13 @@ X-MaC is a free, open-source Mac cleaner that combines a fast Rust scan engine, 
 xmac quick              # clean + maintain + disk overview in one shot
 xmac clean              # find reclaimable space (caches, build artifacts, browsers, Docker)
 xmac purge              # clean + delete with confirmation and undo
+xmac purge --preview    # show every file that will be moved, grouped by category
+xmac purge --yes        # skip confirmation (for automation / non-TTY)
 xmac disk               # disk usage breakdown with APFS-accurate stats
+xmac disk --explain     # categorize what's eating your disk (capability #2)
 xmac maintain           # flush DNS, reindex Spotlight, rebuild LaunchServices
-xmac scan               # full system scan (all engines)
+xmac scan               # full system scan (all engines including privacy)
+xmac doctor             # alias for scan — system health + recommendations (capability #3)
 xmac map                # map Python/Node/container environments
 xmac conflict           # detect PATH and environment conflicts
 xmac depth              # filesystem integrity (permissions, symlinks, dylibs)
@@ -59,6 +121,7 @@ xmac config             # manage config, profiles, settings
 xmac daemon             # background daemon with auto-purge and automation rules
 xmac history            # scan history and analytics
 xmac completions        # generate shell completions (zsh, bash, fish, elvish, powershell)
+xmac dedup --benchmark  # self-benchmark: create synthetic corpus, scan, report timing
 ```
 
 **Output formats:** `--format report` (default, human-readable), `--format json` (NDJSON, one finding per line), `--format json-pretty` (indented array), `--format csv` (spreadsheet export).
@@ -90,7 +153,10 @@ xmac completions        # generate shell completions (zsh, bash, fish, elvish, p
 ### Safe Cleanup
 
 - **Trash-first** — files go to Trash, never `rm -rf`
-- **Dry-run by default** — `xmac clean` scans but doesn't delete; `xmac purge` requires confirmation
+- **Trusted preview** — `xmac purge --preview` shows every file that will be moved, grouped by category with sizes and safety ratings, before any action
+- **Interactive confirmation** — `xmac purge` prompts before executing unless `--yes` is passed
+- **Dry-run mode** — `xmac purge --dry-run` simulates without touching the filesystem
+- **BLAKE3 verification** — `FileSnapshot` captures size, mtime, and optional BLAKE3 hash for cryptographic TOCTOU protection
 - **Undo support** — every cleanup transaction records undo metadata
 - **Verification** — post-cleanup verification confirms files were moved
 - **Preflight checks** — every candidate is validated before deletion
@@ -150,13 +216,15 @@ cargo build --release
 xmac quick
 ```
 
-### Homebrew (formula exists, tap not yet published)
+### Homebrew (CLI)
 
 ```bash
-# Once the tap is published:
 brew tap davidnichols-ops/xmac
-brew install xmac
+brew install xmac-cli
+xmac quick
 ```
+
+The tap is live at [github.com/davidnichols-ops/homebrew-xmac](https://github.com/davidnichols-ops/homebrew-xmac).
 
 ### Linux
 
@@ -276,12 +344,29 @@ X-MaC/
 ## Testing
 
 ```bash
-cargo test                  # run all 410 tests
-cargo test --lib            # library tests only (fast, 168 tests)
+cargo test                  # run all 870+ tests
+cargo test --lib            # library tests only (fast)
 cargo test -- --nocapture   # with output
 cargo clippy -- -D warnings # lint (zero warnings)
 cargo fmt --check           # format check
+cargo bench --bench scan_benchmark  # performance benchmarks
 ```
+
+### Benchmarks
+
+The benchmark suite measures scan throughput on synthetic directory trees,
+including a **500K+ file corpus** as required by the v1 Definition of Done.
+
+| Benchmark | Metric | Result (M4) |
+|-----------|--------|-------------|
+| `disk_walk/1000` | files/sec | 635K files/sec |
+| `disk_walk/10000` | files/sec | 491K files/sec |
+| `disk_walk/100000` | files/sec | 494K files/sec |
+| `disk_walk/500000` | total time | 9.3s (53.8K files/sec) |
+| `blake3_hash/1MB` | throughput | 1.71 GiB/s |
+| `file_snapshot/10000` | files/sec | 217K files/sec |
+
+Run with: `cargo bench --bench scan_benchmark`
 
 Test coverage:
 - **168 library tests** — engine logic, config, cleanup, intelligence, CLI

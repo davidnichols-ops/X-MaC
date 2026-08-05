@@ -1,0 +1,130 @@
+# X-MaC Digital Twin — Devin Progress Log
+
+## Session 3 — 2026-08-05 — Homebrew Tap (Feature #3)
+
+- Implemented: Published Homebrew tap for xmac CLI
+- Created davidnichols-ops/homebrew-xmac repo on GitHub
+- Added xmac-cli.rb formula (builds from source via cargo)
+- Tagged v2.1.1 with current HEAD (bc9542b)
+- Verified: brew tap davidnichols-ops/xmac && brew info xmac-cli works
+- Updated README with Homebrew install instructions
+- Tests passing: all tests pass, clippy clean, fmt clean
+- Next priority: Feature #4 — Notarization CI workflow for macOS app
+- Guards: clippy + fmt clean (no code changes, packaging only)
+- MAOS task 633 completed
+
+## Session 2 — 2026-08-05 — Dedup --benchmark (Feature #2)
+
+- Implemented: `xmac dedup --benchmark` self-benchmark subcommand
+- Tests passing: 788 lib + 778 binary + 7 daemon + 78 integration = 1,651 total, 0 failures
+- Fixed issues: None — new feature, no regressions
+- Next priority: Feature #3 — Publish Homebrew tap for xmac CLI (v1 DoD requirement)
+- Guards: PR_READY (test + lint evidence captured in .nonstop/)
+- Benchmark results: 10K files scanned in 0.79s, 12.6K files/sec, 256 duplicate groups found
+- MAOS task 632 completed
+
+## Session 1 — 2026-08-05 — 500K Benchmark (Feature #1)
+
+- Implemented: Extended benchmark suite to 500K+ file corpus (v1 DoD blocker)
+- Tests passing: 788 lib + 778 binary + 7 daemon + 76 integration = 1,649 total, 0 failures
+- Fixed issues: None — benchmark extension was additive
+- Next priority: Feature #2 — `xmac dedup --benchmark` self-benchmark subcommand
+- Guards: PR_READY (test + lint evidence captured in .nonstop/)
+- Benchmark results (M4):
+  - disk_walk/500000: 9.3s (53.8K files/sec)
+  - disk_walk/100000: 202ms (494K files/sec)
+  - blake3_hash/1MB: 570µs (1.71 GiB/s)
+  - file_snapshot/10000: 46ms (217K files/sec)
+- MAOS task 631 completed
+
+## Initial Project Analysis — 2026-08-05
+
+### Project Overview
+- Name: X-MaC (x-mac)
+- Type: macOS system cleaner, optimizer, and digital twin CLI + GUI
+- Tech Stack: Rust (core engine), Swift/SwiftUI (GUI), Python (GNN), CoreML (on-device inference)
+- Status: Active development — v1 scope freeze in effect, 3 capabilities being hardened
+- Version: 2.1.1
+- Lines of Rust: 58,805 across 112 files
+- Branch: digital-twin/integration
+
+### Directory Structure
+- `src/` — Rust core: 13 engines, cleanup, config, intelligence, CLI, twin
+- `src/twin/` — Digital twin: hardware, software_genome, fs_graph, process, memory, energy, reasoning
+- `gui/XMacApp/` — SwiftUI macOS app
+- `gnn/` — PyTorch GAT model + CoreML export
+- `benches/` — Criterion benchmark suite (scan_benchmark.rs)
+- `tests/` — Integration tests
+- `docs/` — Architecture, truth table, dead code survey, DoD
+- `packaging/homebrew/` — Homebrew formula
+
+### Dependencies (key)
+- clap 4.5 (CLI), tokio 1.38 (async), walkdir 2.5 (filesystem)
+- blake3 1.5 (hashing), rusqlite 0.40 (dedup cache), image 0.25 (perceptual hash)
+- criterion 0.5 (benchmarks, dev)
+
+### Test Status
+- Total tests: 1,649 executions across 4 test binaries
+  - Library: 788 passed, 0 failed, 48 ignored
+  - Binary: 778 passed, 0 failed, 48 ignored
+  - Daemon integration: 7 passed, 0 failed
+  - Integration tests: 76 passed, 0 failed
+- Failures: 0
+- Coverage: Not measured (Rust coverage tooling not configured)
+
+### Build Status
+- Build: PASS (cargo build clean)
+- Lint: PASS (cargo clippy --all-targets -- -D warnings, zero warnings)
+- Format: PASS (cargo fmt --check clean)
+- Linux cross-compile: FAIL (no x86_64-linux-gnu-gcc installed — environment issue, not code)
+
+### v1 Scope Freeze Status
+The SCOPE_FREEZE.md defines 3 capabilities that must be complete before v1:
+
+1. **Find safely-deletable duplicate files** (`xmac dedup`)
+   - CLI: DONE — end-to-end with BLAKE3 hashing, clustering, recommendations
+   - Preview: DONE — `xmac purge --preview` shows grouped candidates
+   - Reversible: DONE — trash-first + undo + BLAKE3 verification
+   - 500K benchmark: **MISSING** — benchmark only goes to 100K
+   - README: DONE
+
+2. **Explain why my disk is full** (`xmac disk --explain`)
+   - CLI: DONE — category breakdown with evidence
+   - Preview: N/A (read-only)
+   - Reversible: N/A (read-only)
+   - 500K benchmark: **MISSING** — benchmark only goes to 100K
+   - README: DONE
+
+3. **System health scan + recommendations** (`xmac doctor`)
+   - CLI: DONE — alias for scan with privacy engine + health summary
+   - Preview: N/A (read-only)
+   - Reversible: N/A (read-only)
+   - 500K benchmark: N/A (not a filesystem scan)
+   - README: DONE
+
+### v1 Definition of Done — Gaps
+1. **500K+ file benchmark** — benchmark suite exists but maxes at 100K. DoD requires 500K+.
+2. **Homebrew tap not published** — formula exists but `brew tap davidnichols-ops/xmac` not live.
+3. **macOS app not notarized** — signing docs exist, hardened runtime configured, but not notarized.
+4. **Product truth table review** — exists in docs/PRODUCT_TRUTH_TABLE.md, needs final review.
+5. **DoD review** — exists in docs/DOD.md, needs final review.
+
+### Discovered Requirements (from SCOPE_FREEZE + ROADMAP + GOOD_FIRST_ISSUES)
+- N/A — no TODOs in source code, scope freeze blocks new features
+- Remaining work is: hardening, benchmarks, packaging, docs
+
+### Issues to Address First
+1. Extend benchmark to 500K+ file corpus (DoD requirement)
+2. Publish Homebrew tap (DoD requirement)
+3. Notarize macOS app (DoD requirement)
+4. Final truth table + DoD review
+
+### Recommendations for feature_list.json
+1. Extend benchmark to 500K files (DoD blocker)
+2. Add `xmac dedup --benchmark` self-benchmark command
+3. Add Homebrew tap publishing workflow
+4. Add notarization CI workflow
+5. Final v1 DoD review + scope freeze lift
+6. Post-v1: Space Lens treemap (ROADMAP v2.2)
+7. Post-v1: HTML report export (ROADMAP v2.2)
+8. Post-v1: Scheduled scan UI (ROADMAP v2.2)

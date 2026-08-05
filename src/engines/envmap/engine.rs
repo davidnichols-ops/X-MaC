@@ -326,7 +326,7 @@ mod tests {
         assert_eq!(f.category, Category::SystemInfo);
         assert!(f.title.starts_with("System:"));
         // metadata should contain os_platform.
-        assert!(f.metadata.get("os_platform").is_some());
+        assert!(f.metadata.contains_key("os_platform"));
     }
 
     #[test]

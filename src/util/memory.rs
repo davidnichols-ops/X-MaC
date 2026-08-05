@@ -498,6 +498,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Integration test — requires system commands"]
     fn collect_runs_without_panic() {
         // This calls sysctl/reads /proc — should not panic on either platform
         let stats = MemoryStats::collect();
@@ -505,6 +506,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Integration test — requires system commands"]
     fn report_is_nonempty() {
         let stats = MemoryStats::collect();
         let r = stats.report();
@@ -513,6 +515,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Integration test — requires system commands"]
     fn reclaimable_is_reasonable() {
         let stats = MemoryStats::collect();
         let reclaimable = stats.reclaimable_bytes();

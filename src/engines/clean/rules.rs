@@ -63,6 +63,25 @@ impl Default for CleanRules {
                     description: "System log files",
                     category: Category::Log,
                 },
+                // Phase 5 ops 132-134: installer file detection
+                CleanRule {
+                    name: "dmg_files",
+                    pattern: "**/*.dmg",
+                    description: "Disk image files (installers)",
+                    category: Category::DmgFile,
+                },
+                CleanRule {
+                    name: "pkg_files",
+                    pattern: "**/*.pkg",
+                    description: "Package installer files",
+                    category: Category::PkgFile,
+                },
+                CleanRule {
+                    name: "old_installers",
+                    pattern: "**/*.{dmg,pkg,mpkg}",
+                    description: "Old installer files (DMG/PKG)",
+                    category: Category::OldInstaller,
+                },
             ],
         }
     }
@@ -98,6 +117,36 @@ pub const TEMP_FILE_NAMES: &[&str] = &[".DS_Store"];
 
 /// Editor swap file patterns.
 pub const SWAP_FILE_PATTERNS: &[&str] = &[".swp", ".swo"];
+
+/// Installer file extensions that can be cleaned up (op 132-134).
+pub const INSTALLER_EXTENSIONS: &[&str] = &[".dmg", ".pkg", ".mpkg"];
+
+/// Whether a file path looks like an installer (DMG / PKG / mpkg) — op 133/134.
+#[allow(dead_code)]
+pub fn is_installer_file(path: &std::path::Path) -> bool {
+    path.extension()
+        .map(|ext| {
+            let ext = ext.to_string_lossy().to_lowercase();
+            INSTALLER_EXTENSIONS.iter().any(|e| *e == format!(".{ext}"))
+        })
+        .unwrap_or(false)
+}
+
+/// Whether a file path is a DMG disk image — op 133.
+#[allow(dead_code)]
+pub fn is_dmg_file(path: &std::path::Path) -> bool {
+    path.extension()
+        .map(|ext| ext.eq_ignore_ascii_case("dmg"))
+        .unwrap_or(false)
+}
+
+/// Whether a file path is a PKG installer — op 134.
+#[allow(dead_code)]
+pub fn is_pkg_file(path: &std::path::Path) -> bool {
+    path.extension()
+        .map(|ext| ext.eq_ignore_ascii_case("pkg") || ext.eq_ignore_ascii_case("mpkg"))
+        .unwrap_or(false)
+}
 
 impl CleanRules {
     pub fn cache_paths(&self) -> Vec<PathBuf> {
@@ -410,5 +459,71 @@ impl CleanRules {
     /// Base.lproj is always preserved (it's not language-specific).
     pub fn keep_language_codes(&self) -> &[&'static str] {
         &["en", "English", "Base", "base"]
+    }
+
+    // ---- Installer file detection (op 132-134) -------------------------
+
+    /// Directories to scan for leftover installer files (DMG/PKG). On macOS
+    /// this includes the user's Downloads folder and Desktop; on Linux the
+    /// XDG downloads directory.
+    #[allow(dead_code)]
+    pub fn installer_scan_dirs(&self) -> Vec<PathBuf> {
+        let home = MacosUtils::home_dir();
+        if cfg!(target_os = "macos") {
+            vec![
+                home.join("Downloads"),
+                home.join("Desktop"),
+                home.join("Documents"),
+            ]
+        } else {
+            let xdg_download = std::env::var("XDG_DOWNLOAD_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| home.join("Downloads"));
+            vec![xdg_download]
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn default_rules_include_dmg_and_pkg() {
+        let rules = CleanRules::default();
+        let names: Vec<_> = rules.rules.iter().map(|r| r.name).collect();
+        assert!(names.contains(&"dmg_files"));
+        assert!(names.contains(&"pkg_files"));
+        assert!(names.contains(&"old_installers"));
+    }
+
+    #[test]
+    fn is_dmg_file_detects_dmg_extension() {
+        assert!(is_dmg_file(Path::new("/Users/x/Downloads/Setup.dmg")));
+        assert!(is_dmg_file(Path::new("/Users/x/Setup.DMG")));
+        assert!(!is_dmg_file(Path::new("/Users/x/Setup.pkg")));
+    }
+
+    #[test]
+    fn is_pkg_file_detects_pkg_and_mpkg() {
+        assert!(is_pkg_file(Path::new("/Users/x/Installer.pkg")));
+        assert!(is_pkg_file(Path::new("/Users/x/Installer.mpkg")));
+        assert!(!is_pkg_file(Path::new("/Users/x/Installer.dmg")));
+    }
+
+    #[test]
+    fn is_installer_file_covers_all_extensions() {
+        assert!(is_installer_file(Path::new("a.dmg")));
+        assert!(is_installer_file(Path::new("a.pkg")));
+        assert!(is_installer_file(Path::new("a.mpkg")));
+        assert!(!is_installer_file(Path::new("a.txt")));
+    }
+
+    #[test]
+    fn installer_scan_dirs_returns_non_empty() {
+        let rules = CleanRules::default();
+        let dirs = rules.installer_scan_dirs();
+        assert!(!dirs.is_empty());
     }
 }

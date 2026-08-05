@@ -19,6 +19,9 @@ impl NodejsScanner {
         }
     }
 
+    /// op 294: Manage npm caches — scan for Node.js projects, nvm
+    /// installations, and global Node.js installs, reporting package
+    /// managers and node_modules disk usage.
     pub async fn scan(&self, _ctx: &ScanContext) -> anyhow::Result<Vec<Finding>> {
         let mut findings = Vec::new();
         let search_paths = self.get_search_paths();

@@ -104,7 +104,7 @@ def train_mlp(features, targets, epochs, batch_size):
 def export_model(model):
     import coremltools as ct
     traced = torch.jit.trace(model, torch.zeros(1, NUM_FEATURES))
-    batch = ct.RangeDim(lower_bound=1, upper_bound=600, default=1)
+    batch = ct.RangeDim(lower_bound=1, upper_bound=2000, default=1)
     converted = ct.convert(
         traced,
         inputs=[ct.TensorType(name="node_features", shape=(batch, NUM_FEATURES))],

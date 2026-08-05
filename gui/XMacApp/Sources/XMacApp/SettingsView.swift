@@ -8,6 +8,7 @@ struct SettingsView: View {
     @State private var profileName: String = ""
     @State private var showingImportSheet = false
     @State private var importJSON = ""
+    @State private var showingDeleteConfirmation = false
 
     private var xmacPath: String {
         let candidates = [
@@ -82,11 +83,23 @@ struct SettingsView: View {
                         }
                         Button("Import") { showingImportSheet = true }
                         Button("Delete") {
-                            profiles.delete(profiles.selectedProfile)
+                            showingDeleteConfirmation = true
                         }
                         .disabled(profiles.selectedProfile.isBuiltIn)
                     }
                     .controlSize(.small)
+                    .confirmationDialog(
+                        "Delete profile \"\(profiles.selectedProfile.name)\"?",
+                        isPresented: $showingDeleteConfirmation,
+                        titleVisibility: .visible
+                    ) {
+                        Button("Delete Profile", role: .destructive) {
+                            profiles.delete(profiles.selectedProfile)
+                        }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text("This action cannot be undone. The profile and all its settings will be permanently removed.")
+                    }
                 }
 
                 SettingsSectionCard(title: "Per-category policy", icon: "checklist") {
@@ -100,6 +113,36 @@ struct SettingsView: View {
                     Stepper("Minimum size: \(settings.minimumSizeMB) MB", value: $settings.minimumSizeMB, in: 0...10000)
                     Toggle("Include hidden files", isOn: $settings.includeHidden)
                     Toggle("Follow symbolic links", isOn: $settings.followSymlinks)
+                }
+
+                SettingsSectionCard(title: "Resource Mode", icon: "gauge.with.dots.needle.67percent") {
+                    Text("Controls scan parallelism and CPU strain. Lower modes reduce CPU usage during scans.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(XTheme.textSecondary)
+
+                    Picker("Mode", selection: Binding(
+                        get: { settings.resourceModeEnum },
+                        set: { settings.resourceModeEnum = $0 }
+                    )) {
+                        ForEach(ResourceMode.allCases) { mode in
+                            Label(mode.label, systemImage: mode.icon).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(runner.isScanning)
+
+                    Text(settings.resourceModeEnum.description)
+                        .font(.system(size: 11))
+                        .foregroundStyle(XTheme.textTertiary)
+                }
+
+                SettingsSectionCard(title: "GNN Intelligence", icon: "brain") {
+                    Toggle("Auto-score findings with GNN after scan", isOn: $settings.gnnAutoScore)
+                        .help("Automatically run the on-device GNN model to augment safety ratings after each clean scan")
+
+                    Text("When enabled, the GNN model scores each finding's safety after a clean scan completes, providing neural network-augmented safety ratings in addition to rule-based scores.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(XTheme.textSecondary)
                 }
 
                 SettingsSectionCard(title: "Appearance", icon: "paintbrush") {

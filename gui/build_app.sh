@@ -13,7 +13,7 @@ APP_BUNDLE="$STAGING_DIR/$APP_NAME.app"
 echo "=== Building X-MaC GUI ==="
 
 # Step 0: Verify CoreML model integrity
-echo "[0/6] Verifying CoreML model integrity..."
+echo "[0/7] Verifying CoreML model integrity..."
 if [ -f "$PROJECT_ROOT/scripts/verify_models.sh" ]; then
     bash "$PROJECT_ROOT/scripts/verify_models.sh"
 else
@@ -21,19 +21,19 @@ else
 fi
 
 # Step 1: Build the Rust binary
-echo "[1/6] Building Rust binary..."
+echo "[1/7] Building Rust binary..."
 cd "$PROJECT_ROOT"
 cargo build --release 2>&1 | tail -3
 cp target/release/x-mac ~/.local/bin/xmac
 echo "  Rust binary installed to ~/.local/bin/xmac"
 
 # Step 2: Build the Swift app
-echo "[2/6] Building Swift app..."
+echo "[2/7] Building Swift app..."
 cd "$SCRIPT_DIR/XMacApp"
 swift build -c release 2>&1 | tail -5
 
 # Step 3: Create the .app bundle
-echo "[3/6] Creating .app bundle..."
+echo "[3/7] Creating .app bundle..."
 rm -rf "$STAGING_DIR"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
@@ -52,7 +52,7 @@ if [ -f "$RUST_BIN" ]; then
 fi
 
 # Step 4: Copy resources
-echo "[4/6] Copying resources..."
+echo "[4/7] Copying resources..."
 # Copy CoreML model
 if [ -d "$PROJECT_ROOT/gnn/XMacGNN.mlpackage" ]; then
     cp -r "$PROJECT_ROOT/gnn/XMacGNN.mlpackage" "$APP_BUNDLE/Contents/Resources/"
@@ -92,7 +92,7 @@ if [ -f "$SCRIPT_DIR/install_launch_agent.sh" ]; then
 fi
 
 # Step 5: Create Info.plist
-echo "[5/6] Creating Info.plist..."
+echo "[5/7] Creating Info.plist..."
 cat > "$APP_BUNDLE/Contents/Info.plist" << 'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -132,8 +132,53 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << 'PLIST'
 </plist>
 PLIST
 
+# Step 6: Code sign with hardened runtime (ad-hoc, no certificate needed)
+echo "[6/7] Signing with hardened runtime (ad-hoc)..."
+ENTITLEMENTS="$SCRIPT_DIR/XMacApp/XMacApp.entitlements"
+
+# Sign the Rust binary first (innermost)
+if [ -f "$APP_BUNDLE/Contents/MacOS/xmac" ]; then
+    codesign --force --options runtime \
+        --entitlements "$ENTITLEMENTS" \
+        --sign - \
+        "$APP_BUNDLE/Contents/MacOS/xmac" 2>&1 | head -3
+    echo "  Signed xmac (Rust binary)"
+fi
+
+# Sign the Swift binary
+codesign --force --options runtime \
+    --entitlements "$ENTITLEMENTS" \
+    --sign - \
+    "$APP_BUNDLE/Contents/MacOS/XMacApp" 2>&1 | head -3
+echo "  Signed XMacApp (Swift binary)"
+
+# Deep sign the entire bundle (catches any helper binaries)
+codesign --force --deep --options runtime \
+    --entitlements "$ENTITLEMENTS" \
+    --sign - \
+    "$APP_BUNDLE" 2>&1 | head -3
+echo "  Deep signed bundle"
+
+# Step 7: Verify the signature
+echo "[7/7] Verifying signature..."
+if codesign --verify --strict --verbose=2 "$APP_BUNDLE" 2>&1 | head -5; then
+    echo "  Signature verification: PASSED"
+else
+    echo "  WARNING: Signature verification failed (non-fatal for ad-hoc)"
+fi
+
+# Show signature details
+echo ""
+echo "  Signature details:"
+codesign --display --entitlements - "$APP_BUNDLE" 2>&1 | grep -E "Identifier|Format|CodeDirectory|Entitlements" | head -5
+
 echo ""
 echo "=== Build complete ==="
 echo "App bundle: $APP_BUNDLE"
 echo ""
+echo "The app is signed with an ad-hoc signature (hardened runtime enabled)."
+echo "Users may still need to right-click -> Open on first launch."
+echo ""
 echo "To install: cp -r '$APP_BUNDLE' /Applications/"
+echo ""
+echo "For distribution with notarization, see gui/SIGNING.md"

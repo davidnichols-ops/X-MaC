@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct AutomationView: View {
+    @EnvironmentObject var runner: XMacRunner
     @State private var isInstalled = false
     @State private var message: String?
     @AppStorage("autoScanEnabled") var autoScanEnabled: Bool = true
@@ -142,15 +143,12 @@ struct AutomationView: View {
     }
 
     private func checkStatus() {
-        let task = Process()
-        task.launchPath = "/bin/launchctl"
-        task.arguments = ["list"]
-        let pipe = Pipe()
-        task.standardOutput = pipe
-        try? task.run()
-        task.waitUntilExit()
-        let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        isInstalled = output.contains("com.xmac.agent")
+        Task {
+            let (_, output) = await runner.runShellCommand(["/bin/launchctl", "list"], timeoutSecs: 10)
+            await MainActor.run {
+                isInstalled = output.contains("com.xmac.agent")
+            }
+        }
     }
 
     private func runScript(_ action: String) {
@@ -158,20 +156,18 @@ struct AutomationView: View {
             message = "Failed: launch agent script not found in bundle."
             return
         }
-        let task = Process()
-        task.launchPath = "/bin/bash"
-        task.arguments = [script.path, action]
-        let pipe = Pipe()
-        task.standardOutput = pipe
-        task.standardError = pipe
-        do {
-            try task.run()
-            task.waitUntilExit()
-            let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            message = output.trimmingCharacters(in: .whitespacesAndNewlines)
-            checkStatus()
-        } catch {
-            message = "Failed: \(error.localizedDescription)"
+        Task {
+            let (status, output) = await runner.runShellCommand(["/bin/bash", script.path, action], timeoutSecs: 30)
+            await MainActor.run {
+                if status == 0 {
+                    message = output.trimmingCharacters(in: .whitespacesAndNewlines)
+                } else if output.hasPrefix("TIMEOUT") {
+                    message = "Failed: command timed out"
+                } else {
+                    message = output.isEmpty ? "Failed with exit code \(status)" : output.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                checkStatus()
+            }
         }
     }
 }

@@ -19,13 +19,16 @@ Pick an issue that interests you, comment on it (or just open a PR), and ask for
 - [x] Add tests for the `map` engine (18 tests added — Python/Node env detection)
 - [x] Add tests for the `conflict` engine (11 tests added — shell config parsing)
 - [x] Add daemon lifecycle integration tests (7 tests added)
-- [ ] Add integration test for `xmac zen --no-clean --no-maintain` (dry-run preview)
+- [x] Add integration test for `xmac zen --no-clean --no-maintain` (3 tests added)
+- [x] Add purge CLI tests for --preview, --yes, --dry-run flags (3 tests added)
 
 ### CLI
 - [x] Add `--version` flag output with build metadata (git hash, build date)
-- [ ] Add `xmac doctor` command that checks system health and prints recommendations
+- [x] Add `xmac doctor` command — alias for `scan` with health summary (capability #3)
 - [x] Add shell completion generation (`xmac completions --shell zsh`)
 - [x] Add CSV export (`--format csv`) for scan results
+- [x] Add `xmac purge --preview` — trusted preview showing every file grouped by category
+- [x] Add `xmac purge --yes` — skip confirmation for automation
 
 ### GUI
 - [ ] Add a "Largest files" view when clicking a disk donut segment
@@ -40,9 +43,11 @@ Pick an issue that interests you, comment on it (or just open a PR), and ask for
 
 ## Medium-Difficulty Tasks
 
-- [ ] Implement duplicate file finder with BLAKE3 hashing (CLI flag exists, logic not implemented)
+- [x] Implement duplicate file finder with BLAKE3 hashing (CLI flag exists, logic not implemented)
 - [x] Add Homebrew formula for `xmac` CLI (`packaging/homebrew/xmac.rb`)
 - [x] Add Docker image cache detection to the clean engine (`--docker` flag)
+- [x] Add benchmark suite for scan performance (criterion benchmarks: disk_walk, blake3_hash, file_snapshot)
+- [x] Add BLAKE3 hash-based FileSnapshot for cryptographic TOCTOU protection
 - [ ] Implement scheduled scan UI in the GUI (backend exists via daemon)
 - [ ] Add Notification Center integration for scan completion on macOS
 - [ ] Implement Space Lens (drill-down treemap) in the GUI
