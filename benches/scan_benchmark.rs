@@ -47,12 +47,16 @@ fn count_files(root: &PathBuf) -> usize {
 
 /// Benchmark the disk engine's directory walk + size computation.
 /// This is the core scan path — WalkDir + metadata.
+///
+/// Includes 500K+ file corpus as required by the v1 Definition of Done.
 fn bench_disk_walk(c: &mut Criterion) {
     let mut group = c.benchmark_group("disk_walk");
     group.measurement_time(std::time::Duration::from_secs(10));
 
-    for n_files in [1_000, 10_000, 100_000] {
-        let tmp = create_corpus(n_files, 100, 64);
+    // Scale directory count with file count to avoid single-dir performance
+    // degredation at 500K+ files. 500 files per dir is a realistic density.
+    for (n_files, n_dirs) in [(1_000, 10), (10_000, 50), (100_000, 500), (500_000, 1_000)] {
+        let tmp = create_corpus(n_files, n_dirs, 64);
         let root = tmp.path().to_path_buf();
         let actual = count_files(&root);
         assert_eq!(actual, n_files, "file count mismatch");
@@ -100,26 +104,41 @@ fn bench_blake3_hashing(c: &mut Criterion) {
 }
 
 /// Benchmark FileSnapshot capture + verify — the TOCTOU protection path.
+/// Tests at 1K (fast feedback) and 10K (scale validation).
 fn bench_file_snapshot(c: &mut Criterion) {
-    let tmp = create_corpus(1_000, 10, 256);
-    let root = tmp.path().to_path_buf();
+    let mut group = c.benchmark_group("file_snapshot");
+    group.measurement_time(std::time::Duration::from_secs(10));
 
-    let files: Vec<PathBuf> = WalkDir::new(&root)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
-        .map(|e| e.path().to_path_buf())
-        .collect();
+    for n_files in [1_000, 10_000] {
+        let tmp = create_corpus(n_files, 10, 256);
+        let root = tmp.path().to_path_buf();
 
-    c.bench_function("file_snapshot_capture_and_verify_1000", |b| {
-        b.iter(|| {
-            for path in &files {
-                if let Some(snap) = x_mac::cleanup::verification::FileSnapshot::capture(path) {
-                    let _ = snap.verify(path);
-                }
-            }
-        });
-    });
+        let files: Vec<PathBuf> = WalkDir::new(&root)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_file())
+            .map(|e| e.path().to_path_buf())
+            .collect();
+
+        group.throughput(Throughput::Elements(n_files as u64));
+        group.bench_with_input(
+            BenchmarkId::new("capture_verify", n_files),
+            &files,
+            |b, files| {
+                b.iter(|| {
+                    for path in files {
+                        if let Some(snap) =
+                            x_mac::cleanup::verification::FileSnapshot::capture(path)
+                        {
+                            let _ = snap.verify(path);
+                        }
+                    }
+                });
+            },
+        );
+    }
+
+    group.finish();
 }
 
 criterion_group!(

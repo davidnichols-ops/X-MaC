@@ -351,13 +351,19 @@ cargo bench --bench scan_benchmark  # performance benchmarks
 
 ### Benchmarks
 
-The benchmark suite measures scan throughput on synthetic directory trees:
+The benchmark suite measures scan throughput on synthetic directory trees,
+including a **500K+ file corpus** as required by the v1 Definition of Done.
 
 | Benchmark | Metric | Result (M4) |
 |-----------|--------|-------------|
-| `disk_walk/100000` | files/sec | ~434K files/sec |
-| `blake3_hash/1MB` | throughput | ~1.57 GiB/s |
-| `file_snapshot_1000` | latency | 3.4 ms |
+| `disk_walk/1000` | files/sec | 635K files/sec |
+| `disk_walk/10000` | files/sec | 491K files/sec |
+| `disk_walk/100000` | files/sec | 494K files/sec |
+| `disk_walk/500000` | total time | 9.3s (53.8K files/sec) |
+| `blake3_hash/1MB` | throughput | 1.71 GiB/s |
+| `file_snapshot/10000` | files/sec | 217K files/sec |
+
+Run with: `cargo bench --bench scan_benchmark`
 
 Test coverage:
 - **168 library tests** — engine logic, config, cleanup, intelligence, CLI

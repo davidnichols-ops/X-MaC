@@ -1,0 +1,14 @@
+{
+  "type": "command",
+  "command": "cd /Users/david/Projects/X-MaC-digital-twin && cargo clippy --all-targets -- -D warnings",
+  "exit_code": 0,
+  "success": true,
+  "stdout": "",
+  "stderr": "    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.46s\n",
+  "duration_seconds": 0.682,
+  "timestamp": "2026-08-05T03:32:34.729214+00:00",
+  "working_dir": "/Users/david/mac-ai-os",
+  "commit": "e11e1bf10ea545f0395df28d1a5f9c5f62f9a2a9",
+  "dirty": true,
+  "env_keys": []
+}
