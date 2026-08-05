@@ -1,0 +1,133 @@
+[
+  {
+    "id": 1,
+    "category": "bugfix",
+    "description": "Extend benchmark suite to 500K+ file corpus (v1 DoD blocker)",
+    "steps": [
+      "Step 1: Read benches/scan_benchmark.rs current state (maxes at 100K)",
+      "Step 2: Add 500K file benchmark to disk_walk group",
+      "Step 3: Add 500K file benchmark to file_snapshot benchmark",
+      "Step 4: Run cargo bench --bench scan_benchmark to verify it completes",
+      "Step 5: Record timing results in README benchmark table",
+      "Step 6: Update devin-progress.txt with results"
+    ],
+    "passes": false
+  },
+  {
+    "id": 2,
+    "category": "enhancement",
+    "description": "Add `xmac dedup --benchmark` self-benchmark subcommand",
+    "steps": [
+      "Step 1: Add --benchmark flag to DedupArgs in src/cli/args.rs",
+      "Step 2: Implement benchmark mode in run_dedup() — create temp corpus, scan, report timing",
+      "Step 3: Add test for --benchmark CLI flag parsing",
+      "Step 4: Run cargo test to verify",
+      "Step 5: Run clippy + fmt"
+    ],
+    "passes": false
+  },
+  {
+    "id": 3,
+    "category": "enhancement",
+    "description": "Publish Homebrew tap for `xmac` CLI (v1 DoD requirement)",
+    "steps": [
+      "Step 1: Verify packaging/homebrew/xmac.rb formula is correct",
+      "Step 2: Create homebrew-tap repo on GitHub (davidnichols-ops/homebrew-tap)",
+      "Step 3: Push formula to tap repo",
+      "Step 4: Test: brew tap davidnichols-ops/xmac && brew install xmac",
+      "Step 5: Document install instructions in README"
+    ],
+    "passes": false
+  },
+  {
+    "id": 4,
+    "category": "enhancement",
+    "description": "Add notarization CI workflow for macOS app (v1 DoD requirement)",
+    "steps": [
+      "Step 1: Read gui/SIGNING.md for current signing setup",
+      "Step 2: Add GitHub Actions workflow for notarization using Apple notarytool",
+      "Step 3: Configure secrets (APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID)",
+      "Step 4: Test workflow with a manual trigger",
+      "Step 5: Document notarization status in README"
+    ],
+    "passes": false
+  },
+  {
+    "id": 5,
+    "category": "docs",
+    "description": "Final v1 Definition of Done review + scope freeze lift",
+    "steps": [
+      "Step 1: Review docs/DOD.md against current state",
+      "Step 2: Review docs/PRODUCT_TRUTH_TABLE.md against current state",
+      "Step 3: Verify all 3 capabilities meet every DoD checkbox",
+      "Step 4: If all pass, update SCOPE_FREEZE.md status to LIFTED",
+      "Step 5: Commit review with evidence"
+    ],
+    "passes": false
+  },
+  {
+    "id": 6,
+    "category": "enhancement",
+    "description": "Add Space Lens drill-down treemap to GUI (ROADMAP v2.2)",
+    "steps": [
+      "Step 1: Research treemap rendering options for SwiftUI",
+      "Step 2: Design treemap data model from disk engine findings",
+      "Step 3: Implement TreemapView in gui/XMacApp/",
+      "Step 4: Wire to disk engine results",
+      "Step 5: Test on sample data"
+    ],
+    "passes": false
+  },
+  {
+    "id": 7,
+    "category": "enhancement",
+    "description": "Add `xmac report --format html` for exportable HTML reports (ROADMAP v2.2)",
+    "steps": [
+      "Step 1: Add html to OutputFormat enum in src/cli/args.rs",
+      "Step 2: Implement HTML report renderer in src/cli/output/",
+      "Step 3: Include CSS styling and responsive layout",
+      "Step 4: Add test for HTML output format",
+      "Step 5: Run clippy + fmt + test"
+    ],
+    "passes": false
+  },
+  {
+    "id": 8,
+    "category": "enhancement",
+    "description": "Add scheduled scan UI in GUI (ROADMAP v2.2, backend exists via daemon)",
+    "steps": [
+      "Step 1: Read daemon automation rules API in src/intelligence/daemon/",
+      "Step 2: Design scheduled scan settings view in SwiftUI",
+      "Step 3: Implement ScheduleView with frequency, time, scan type",
+      "Step 4: Wire to daemon automation rules",
+      "Step 5: Test scheduling lifecycle"
+    ],
+    "passes": false
+  },
+  {
+    "id": 9,
+    "category": "enhancement",
+    "description": "Add Notification Center integration for scan completion (ROADMAP v2.2)",
+    "steps": [
+      "Step 1: Research UserNotifications framework for macOS",
+      "Step 2: Implement notification helper in gui/XMacApp/",
+      "Step 3: Wire to scan completion events",
+      "Step 4: Add settings toggle for notifications",
+      "Step 5: Test notification delivery"
+    ],
+    "passes": false
+  },
+  {
+    "id": 10,
+    "category": "enhancement",
+    "description": "Add 'Largest files' view when clicking disk donut segment (GOOD_FIRST_ISSUES)",
+    "steps": [
+      "Step 1: Read current disk donut chart implementation in gui/",
+      "Step 2: Design drill-down view showing largest files in selected category",
+      "Step 3: Implement LargestFilesView",
+      "Step 4: Wire to donut segment tap events",
+      "Step 5: Test with sample data"
+    ],
+    "passes": false
+  }
+]
