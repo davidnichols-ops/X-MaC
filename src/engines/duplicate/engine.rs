@@ -137,6 +137,15 @@ impl DuplicateEngine {
             self.similar_images = true;
         }
 
+        // Apply scan_paths from config if set (MAOS task #12).
+        if !dc.scan_paths.is_empty() {
+            self.scan_paths = dc.scan_paths.clone();
+        }
+        // Apply whitelist from config (MAOS task #12).
+        for entry in &dc.whitelist {
+            self.whitelist.push(entry.clone());
+        }
+
         self
     }
 
@@ -768,10 +777,7 @@ impl DuplicateEngine {
 
         if !all_files.is_empty() {
             if let Some(ref pb) = bar {
-                pb.set_message(format!(
-                    "Fingerprinting {} image files…",
-                    all_files.len()
-                ));
+                pb.set_message(format!("Fingerprinting {} image files…", all_files.len()));
             }
             self.fingerprint_images(&mut all_files).await;
         }
@@ -806,11 +812,7 @@ impl DuplicateEngine {
         if let (Some(path), Some(cache)) = (&self.cache_path, &cache) {
             if let Ok(db) = cache.lock() {
                 if let Err(e) = db.save(path) {
-                    tracing::warn!(
-                        "Failed to save dedup cache to {}: {}",
-                        path.display(),
-                        e
-                    );
+                    tracing::warn!("Failed to save dedup cache to {}: {}", path.display(), e);
                 }
             }
         }
@@ -2119,5 +2121,19 @@ mod tests {
         let engine = DuplicateEngine::new().with_config(&config);
         assert_eq!(engine.min_size, 10 * 1024 * 1024);
         assert!(!engine.similar_images);
+    }
+
+    #[test]
+    fn test_with_config_applies_scan_paths_and_whitelist() {
+        use crate::config::Config;
+        use std::path::PathBuf;
+
+        let mut config = Config::default();
+        config.duplicate.scan_paths = vec![PathBuf::from("/tmp/scan1")];
+        config.duplicate.whitelist = vec!["/tmp/whitelist".to_string()];
+
+        let engine = DuplicateEngine::new().with_config(&config);
+        assert_eq!(engine.scan_paths, vec![PathBuf::from("/tmp/scan1")]);
+        assert!(engine.whitelist.contains(&"/tmp/whitelist".to_string()));
     }
 }

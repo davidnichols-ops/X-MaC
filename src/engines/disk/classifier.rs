@@ -96,62 +96,72 @@ pub fn classify(path: &Path) -> Bucket {
     }
 
     // Caches — OS / app caches (substrings inside known cache dirs)
-    if contains_any(&path_str, &[
-        "/Library/Caches/",
-        "/.cache/",
-        "/Library/Logs/",
-        "/.npm/",
-        "/.cargo/",
-        "/.rustup/",
-        "/.bundle/",
-        "/.gem/",
-        "/.pyenv/cache/",
-    ]) {
+    if contains_any(
+        &path_str,
+        &[
+            "/Library/Caches/",
+            "/.cache/",
+            "/Library/Logs/",
+            "/.npm/",
+            "/.cargo/",
+            "/.rustup/",
+            "/.bundle/",
+            "/.gem/",
+            "/.pyenv/cache/",
+        ],
+    ) {
         return Bucket::Caches;
     }
 
     // Dev artifacts — build outputs, dependency dirs
-    if contains_any(&path_str, &[
-        "/node_modules/",
-        "/target/",          // Rust
-        "/.gradle/",
-        "/build/",           // Gradle, CMake, Ant
-        "/dist/",            // JS bundlers
-        "/.next/",           // Next.js
-        "/.nuxt/",           // Nuxt
-        "/__pycache__/",
-        "/.pytest_cache/",
-        "/DerivedData/",     // Xcode
-        "/.xcuserstate/",
-        "/.git/objects/",
-        "/.venv/",
-        "/venv/",
-        "/.tox/",
-        "/.mypy_cache/",
-        "/.ruff_cache/",
-        "/.parcel-cache/",
-        "/.turbo/",
-        "/coverage/",
-        "/.cargo/registry/",
-        "/.cargo/git/",
-    ]) {
+    if contains_any(
+        &path_str,
+        &[
+            "/node_modules/",
+            "/target/", // Rust
+            "/.gradle/",
+            "/build/", // Gradle, CMake, Ant
+            "/dist/",  // JS bundlers
+            "/.next/", // Next.js
+            "/.nuxt/", // Nuxt
+            "/__pycache__/",
+            "/.pytest_cache/",
+            "/DerivedData/", // Xcode
+            "/.xcuserstate/",
+            "/.git/objects/",
+            "/.venv/",
+            "/venv/",
+            "/.tox/",
+            "/.mypy_cache/",
+            "/.ruff_cache/",
+            "/.parcel-cache/",
+            "/.turbo/",
+            "/coverage/",
+            "/.cargo/registry/",
+            "/.cargo/git/",
+        ],
+    ) {
         return Bucket::DevArtifacts;
     }
 
     // Applications — .app bundles, /Applications
-    if contains_any(&path_str, &[
-        "/Applications/",
-    ]) || path_str.ends_with(".app/") || path_str.contains(".app/Contents/") {
+    if contains_any(&path_str, &["/Applications/"])
+        || path_str.ends_with(".app/")
+        || path_str.contains(".app/Contents/")
+    {
         return Bucket::Applications;
     }
 
     // Backups — Trash, iOS backups, Time Machine
-    if contains_any(&path_str, &[
-        "/.Trash/",
-        "/MobileSync/",
-        "/Backups.backupdb/",
-        "/.MobileBackups/",
-    ]) || path_str.ends_with(".iosbackup")
+    if contains_any(
+        &path_str,
+        &[
+            "/.Trash/",
+            "/MobileSync/",
+            "/Backups.backupdb/",
+            "/.MobileBackups/",
+        ],
+    ) || path_str.ends_with(".iosbackup")
         || path_str.ends_with(".backup")
         || path_str.ends_with(".tmbackup")
     {
@@ -163,16 +173,7 @@ pub fn classify(path: &Path) -> Bucket {
         let ext_lower = ext.to_ascii_lowercase();
         if matches!(
             ext_lower.as_str(),
-            "zip" | "tar"
-            | "gz"
-            | "bz2"
-            | "xz"
-            | "7z"
-            | "rar"
-            | "dmg"
-            | "pkg"
-            | "iso"
-            | "zst"
+            "zip" | "tar" | "gz" | "bz2" | "xz" | "7z" | "rar" | "dmg" | "pkg" | "iso" | "zst"
         ) {
             return Bucket::Archives;
         }
@@ -194,7 +195,8 @@ fn contains_any(haystack: &str, needles: &[&str]) -> bool {
 
 /// Is this extension a media file (image, video, audio)?
 fn is_media_extension(ext: &str) -> bool {
-    matches!(ext,
+    matches!(
+        ext,
         // Images
         "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp" | "tiff" | "tif"
         | "heic" | "heif" | "raw" | "cr2" | "nef" | "arw" | "dng"
@@ -249,13 +251,16 @@ mod tests {
 
     #[test]
     fn test_classify_dev_artifacts_xcode_derived_data() {
-        let p = PathBuf::from("/Users/david/Library/Developer/Xcode/DerivedData/SomeApp/Build/Products/Release/App");
+        let p = PathBuf::from(
+            "/Users/david/Library/Developer/Xcode/DerivedData/SomeApp/Build/Products/Release/App",
+        );
         assert_eq!(classify(&p), Bucket::DevArtifacts);
     }
 
     #[test]
     fn test_classify_dev_artifacts_python_venv() {
-        let p = PathBuf::from("/Users/david/projects/app/.venv/lib/python3.13/site-packages/foo.py");
+        let p =
+            PathBuf::from("/Users/david/projects/app/.venv/lib/python3.13/site-packages/foo.py");
         assert_eq!(classify(&p), Bucket::DevArtifacts);
     }
 
@@ -315,13 +320,17 @@ mod tests {
 
     #[test]
     fn test_classify_backups_ios() {
-        let p = PathBuf::from("/Users/david/Library/Application Support/MobileSync/Backup/abcdef/Info.plist");
+        let p = PathBuf::from(
+            "/Users/david/Library/Application Support/MobileSync/Backup/abcdef/Info.plist",
+        );
         assert_eq!(classify(&p), Bucket::Backups);
     }
 
     #[test]
     fn test_classify_backups_time_machine() {
-        let p = PathBuf::from("/Volumes/Time Machine Backups/Backups.backupdb/Mac/Latest/Mac.sparsebundle");
+        let p = PathBuf::from(
+            "/Volumes/Time Machine Backups/Backups.backupdb/Mac/Latest/Mac.sparsebundle",
+        );
         assert_eq!(classify(&p), Bucket::Backups);
     }
 

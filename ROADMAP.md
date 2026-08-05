@@ -9,12 +9,22 @@ This document tracks planned work. Items are driven by community interest and co
 - [x] Docker cache detection (`--docker` flag)
 - [x] Homebrew formula (`packaging/homebrew/xmac.rb`)
 - [x] Daemon signal handling fix (SIGTERM/SIGINT now work across all cycles)
-- [x] 410 tests (disk, map, conflict, daemon lifecycle coverage)
+- [x] 870+ tests (disk, map, conflict, daemon lifecycle, purge, zen, privacy, verification)
 - [x] Linux cross-compile support
 - [x] Config profiles wired into engines
 - [x] Background daemon with auto-purge and automation rules
 - [x] AI Advisor with adaptive learning
 - [x] Zen Mode comprehensive optimization
+- [x] Duplicate file finder with BLAKE3 hashing (`xmac dedup`)
+- [x] `xmac doctor` command — system health scan with recommendations (capability #3)
+- [x] `xmac disk --explain` — categorize what's eating your disk (capability #2)
+- [x] Privacy & security engine (permissions, malware, browser data)
+- [x] Startup engine (login items, launch agents/daemons)
+- [x] Trusted preview — `xmac purge --preview` shows every file before action
+- [x] Interactive confirmation prompt for `xmac purge`
+- [x] BLAKE3 hash-based FileSnapshot for cryptographic TOCTOU protection
+- [x] Benchmark suite (criterion: disk_walk, blake3_hash, file_snapshot)
+- [x] Duplicate engine config (scan_paths, whitelist, profile thresholds)
 
 ## Current Focus (v2.1.x)
 
@@ -26,12 +36,10 @@ This document tracks planned work. Items are driven by community interest and co
 
 ## Near Term (v2.2)
 
-- [ ] Duplicate file finder with BLAKE3 hashing
 - [ ] Space Lens — drill-down treemap (like Disk Diag / DaisyDisk)
 - [ ] "Largest files" view inside disk donut segments
 - [ ] Scheduled scan UI in the GUI (backend exists via daemon)
 - [ ] Notification Center integration for scan completion
-- [ ] `xmac doctor` command (system health check with recommendations)
 - [ ] HTML report export (`xmac report --format html`)
 
 ## Medium Term (v2.3–v2.5)

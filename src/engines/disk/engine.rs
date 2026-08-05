@@ -306,10 +306,7 @@ struct BucketStats {
 /// Record a single path into the per-bucket aggregator. Keeps at most
 /// 100 paths per bucket, sorted descending by size.
 fn record_bucket(
-    buckets: &mut std::collections::BTreeMap<
-        crate::engines::disk::classifier::Bucket,
-        BucketStats,
-    >,
+    buckets: &mut std::collections::BTreeMap<crate::engines::disk::classifier::Bucket, BucketStats>,
     path: &std::path::Path,
     size: u64,
 ) {

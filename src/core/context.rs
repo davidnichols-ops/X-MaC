@@ -53,6 +53,7 @@ impl ScanContext {
 
     /// Request cancellation. Engines polling `is_cancelled()` will see it
     /// on their next check and unwind cleanly.
+    #[allow(dead_code)]
     pub fn cancel(&self) {
         self.cancelled.store(true, Ordering::Relaxed);
     }

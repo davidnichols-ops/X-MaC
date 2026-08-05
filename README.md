@@ -11,7 +11,7 @@
 [![Swift](https://img.shields.io/badge/Swift-5.9+-orange?style=flat-square&logo=swift)](https://swift.org)
 [![Platform](https://img.shields.io/badge/macOS-13%2B-blue?style=flat-square&logo=apple)](https://www.apple.com/macos)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-410+-brightgreen?style=flat-square)](#testing)
+[![Tests](https://img.shields.io/badge/tests-870+-brightgreen?style=flat-square)](#testing)
 
 [Install](#installation) · [Features](#features) · [Architecture](#architecture) · [Contributing](CONTRIBUTING.md) · [Roadmap](ROADMAP.md)
 
@@ -103,9 +103,13 @@ surface (most used internally by v1):
 xmac quick              # clean + maintain + disk overview in one shot
 xmac clean              # find reclaimable space (caches, build artifacts, browsers, Docker)
 xmac purge              # clean + delete with confirmation and undo
+xmac purge --preview    # show every file that will be moved, grouped by category
+xmac purge --yes        # skip confirmation (for automation / non-TTY)
 xmac disk               # disk usage breakdown with APFS-accurate stats
+xmac disk --explain     # categorize what's eating your disk (capability #2)
 xmac maintain           # flush DNS, reindex Spotlight, rebuild LaunchServices
-xmac scan               # full system scan (all engines)
+xmac scan               # full system scan (all engines including privacy)
+xmac doctor             # alias for scan — system health + recommendations (capability #3)
 xmac map                # map Python/Node/container environments
 xmac conflict           # detect PATH and environment conflicts
 xmac depth              # filesystem integrity (permissions, symlinks, dylibs)
@@ -148,7 +152,10 @@ xmac completions        # generate shell completions (zsh, bash, fish, elvish, p
 ### Safe Cleanup
 
 - **Trash-first** — files go to Trash, never `rm -rf`
-- **Dry-run by default** — `xmac clean` scans but doesn't delete; `xmac purge` requires confirmation
+- **Trusted preview** — `xmac purge --preview` shows every file that will be moved, grouped by category with sizes and safety ratings, before any action
+- **Interactive confirmation** — `xmac purge` prompts before executing unless `--yes` is passed
+- **Dry-run mode** — `xmac purge --dry-run` simulates without touching the filesystem
+- **BLAKE3 verification** — `FileSnapshot` captures size, mtime, and optional BLAKE3 hash for cryptographic TOCTOU protection
 - **Undo support** — every cleanup transaction records undo metadata
 - **Verification** — post-cleanup verification confirms files were moved
 - **Preflight checks** — every candidate is validated before deletion
@@ -334,12 +341,23 @@ X-MaC/
 ## Testing
 
 ```bash
-cargo test                  # run all 410 tests
-cargo test --lib            # library tests only (fast, 168 tests)
+cargo test                  # run all 870+ tests
+cargo test --lib            # library tests only (fast)
 cargo test -- --nocapture   # with output
 cargo clippy -- -D warnings # lint (zero warnings)
 cargo fmt --check           # format check
+cargo bench --bench scan_benchmark  # performance benchmarks
 ```
+
+### Benchmarks
+
+The benchmark suite measures scan throughput on synthetic directory trees:
+
+| Benchmark | Metric | Result (M4) |
+|-----------|--------|-------------|
+| `disk_walk/100000` | files/sec | ~434K files/sec |
+| `blake3_hash/1MB` | throughput | ~1.57 GiB/s |
+| `file_snapshot_1000` | latency | 3.4 ms |
 
 Test coverage:
 - **168 library tests** — engine logic, config, cleanup, intelligence, CLI

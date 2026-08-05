@@ -206,6 +206,15 @@ pub struct DuplicateConfig {
     /// Whether to detect similar images (perceptual hash).
     #[serde(default)]
     pub similar_images: bool,
+    /// Paths to scan for duplicates. If empty, defaults to the user's home
+    /// directory. MAOS task #12.
+    #[serde(default)]
+    pub scan_paths: Vec<std::path::PathBuf>,
+    /// Path substrings to exclude from duplicate detection (whitelist).
+    /// Any file whose path contains one of these strings is skipped.
+    /// MAOS task #12.
+    #[serde(default)]
+    pub whitelist: Vec<String>,
 }
 
 fn default_dedup_min_size() -> u64 {
@@ -218,6 +227,8 @@ impl Default for DuplicateConfig {
             min_size: default_dedup_min_size(),
             enabled: false,
             similar_images: false,
+            scan_paths: Vec::new(),
+            whitelist: Vec::new(),
         }
     }
 }
@@ -877,6 +888,21 @@ enabled = true
         assert_eq!(parsed.duplicate.min_size, 8192);
         assert!(parsed.duplicate.enabled);
         assert!(parsed.duplicate.similar_images);
+    }
+
+    #[test]
+    fn test_duplicate_config_scan_paths_and_whitelist() {
+        let toml_str = r#"
+[duplicate]
+min_size = 4096
+enabled = true
+scan_paths = ["/tmp/scan1", "/tmp/scan2"]
+whitelist = ["/tmp/keep"]
+"#;
+        let config = ConfigManager::parse(toml_str).expect("parse");
+        assert_eq!(config.duplicate.scan_paths.len(), 2);
+        assert_eq!(config.duplicate.whitelist.len(), 1);
+        assert_eq!(config.duplicate.whitelist[0], "/tmp/keep");
     }
 
     #[test]

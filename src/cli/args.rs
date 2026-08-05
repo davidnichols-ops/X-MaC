@@ -305,7 +305,7 @@ pub struct QuickArgs {
 /// Arguments for the `scan` command — the recommended default.
 #[derive(Args, Debug, Clone)]
 pub struct ScanArgs {
-    /// Skip specific engines. Available: clean, conflict, map, envmap, depth, diag.
+    /// Skip specific engines. Available: clean, conflict, map, envmap, depth, diag, privacy.
     #[arg(long, value_enum)]
     pub skip: Vec<ScanEngineIdArg>,
 
@@ -321,6 +321,16 @@ pub struct ScanArgs {
     /// Include package-manager diagnostics (brew doctor, etc.). On by default.
     #[arg(long, default_value = "true")]
     pub diagnostics: bool,
+
+    /// Include the privacy & security engine (permissions, malware, browser
+    /// data). On by default for `doctor` — this is capability #3.
+    #[arg(long, default_value = "true")]
+    pub privacy: bool,
+
+    /// Emit a health summary with recommendations at the end. On by default.
+    /// This is the "system health scan + recommendations" capability #3.
+    #[arg(long, default_value = "true")]
+    pub health_summary: bool,
 }
 
 /// Engine IDs selectable from the `scan` command's `--skip` flag.
@@ -332,6 +342,7 @@ pub enum ScanEngineIdArg {
     Envmap,
     Depth,
     Diag,
+    Privacy,
 }
 
 /// Arguments for the `install` command.
@@ -686,6 +697,18 @@ pub struct PurgeArgs {
     /// (TOCTOU protection). Recommended for safety.
     #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
     pub verify: bool,
+
+    /// Skip the interactive confirmation prompt. Use with caution —
+    /// the purge will execute without asking. Required for non-TTY use.
+    #[arg(long)]
+    pub yes: bool,
+
+    /// Show a detailed preview of every file that will be moved to Trash,
+    /// grouped by category, then exit without executing. This is the
+    /// "trusted preview" mode — shows exact paths, sizes, and trash
+    /// destinations before any action is taken.
+    #[arg(long)]
+    pub preview: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]

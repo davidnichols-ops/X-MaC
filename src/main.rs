@@ -246,6 +246,14 @@ async fn main() -> Result<()> {
             total_duration,
         );
         writer.write_report(&report)?;
+
+        // Capability #3: health summary with recommendations.
+        // Emitted after the report so the user sees actionable advice last.
+        if let cli::args::Commands::Scan(args) | cli::args::Commands::Doctor(args) = &cli.command {
+            if args.health_summary && !cli.global.quiet {
+                print_health_summary(&collected_findings, &report);
+            }
+        }
     } else {
         output_writer.lock().await.flush()?;
     }
@@ -278,6 +286,127 @@ async fn main() -> Result<()> {
 
     info!("X-MaC scan complete");
     Ok(())
+}
+
+/// Capability #3 — print a human-readable health summary with recommendations.
+///
+/// This is the "system health scan + recommendations" that `xmac doctor`
+/// produces. It aggregates findings from all engines (clean, conflict, map,
+/// envmap, privacy, diag) into a concise, actionable report.
+fn print_health_summary(findings: &[core::types::Finding], report: &core::types::ScanReport) {
+    use core::types::Severity;
+
+    eprintln!();
+    eprintln!("════════════════════════════════════════════════════════════════");
+    eprintln!("  System Health Summary — xmac doctor (capability #3)");
+    eprintln!("════════════════════════════════════════════════════════════════");
+    eprintln!();
+
+    // ── Severity breakdown ──
+    let sb = &report.findings_by_severity;
+    let total = report.total_findings;
+    eprintln!("  Findings: {} total", total);
+    if sb.critical > 0 {
+        eprintln!("    critical: {}", sb.critical);
+    }
+    if sb.high > 0 {
+        eprintln!("    high:     {}", sb.high);
+    }
+    if sb.medium > 0 {
+        eprintln!("    medium:   {}", sb.medium);
+    }
+    if sb.low > 0 {
+        eprintln!("    low:      {}", sb.low);
+    }
+    if sb.info > 0 {
+        eprintln!("    info:     {}", sb.info);
+    }
+    eprintln!();
+
+    // ── Reclaimable space ──
+    if report.total_reclaimable_bytes > 0 {
+        eprintln!(
+            "  Reclaimable space: {}",
+            util::disk::format_bytes(report.total_reclaimable_bytes)
+        );
+        eprintln!();
+    }
+
+    // ── Category breakdown ──
+    let mut cats: Vec<_> = report.findings_by_category.iter().collect();
+    cats.sort_by(|a, b| b.1.cmp(a.1));
+    if !cats.is_empty() {
+        eprintln!("  By category:");
+        for (cat, count) in cats.iter().take(10) {
+            eprintln!("    {:<20} {}", cat, count);
+        }
+        eprintln!();
+    }
+
+    // ── Top recommendations (critical + high severity, actionable) ──
+    let recommendations: Vec<&core::types::Finding> = findings
+        .iter()
+        .filter(|f| matches!(f.severity, Severity::Critical | Severity::High))
+        .collect();
+
+    if !recommendations.is_empty() {
+        eprintln!("  Top recommendations:");
+        for (i, f) in recommendations.iter().take(10).enumerate() {
+            let icon = match f.severity {
+                Severity::Critical => "[!]",
+                Severity::High => "[*]",
+                _ => "   ",
+            };
+            eprintln!("  {} {}. {}", icon, i + 1, f.title);
+            if !f.description.is_empty() {
+                let desc: String = f.description.chars().take(120).collect();
+                eprintln!("       {}", desc);
+            }
+        }
+        eprintln!();
+    }
+
+    // ── Privacy & security flags ──
+    let privacy_findings: Vec<&core::types::Finding> = findings
+        .iter()
+        .filter(|f| f.engine == core::types::EngineId::Privacy)
+        .collect();
+    if !privacy_findings.is_empty() {
+        eprintln!("  Privacy & Security:");
+        for f in privacy_findings.iter().take(5) {
+            eprintln!("    - {}", f.title);
+        }
+        eprintln!();
+    }
+
+    // ── Overall health grade ──
+    let grade = if sb.critical > 0 {
+        "FAIL"
+    } else if sb.high > 3 {
+        "POOR"
+    } else if sb.high > 0 || sb.medium > 5 {
+        "FAIR"
+    } else if sb.medium > 0 {
+        "GOOD"
+    } else {
+        "EXCELLENT"
+    };
+    eprintln!("  Overall health: {}", grade);
+    eprintln!();
+
+    // ── Next steps ──
+    if report.total_reclaimable_bytes > 0 {
+        eprintln!(
+            "  Next: run `xmac clean` to reclaim {}, or `xmac --fix-script cleanup.sh`",
+            util::disk::format_bytes(report.total_reclaimable_bytes)
+        );
+        eprintln!("        to generate a reviewable remediation script.");
+    }
+    if sb.critical > 0 || sb.high > 0 {
+        eprintln!("  Review the findings above before taking action.");
+    }
+    eprintln!();
+    eprintln!("════════════════════════════════════════════════════════════════");
 }
 
 fn init_tracing(verbosity: u8) {
@@ -427,6 +556,7 @@ async fn run_all_engines(
 /// The `scan` command — the recommended default. Runs the safe, reliable
 /// engines by default (clean, conflict, map) plus package-manager
 /// diagnostics. The depth engine is opt-in via `--include-depth`.
+/// The privacy engine is on by default (capability #3).
 async fn run_scan(
     ctx: Arc<ScanContext>,
     args: &cli::args::ScanArgs,
@@ -467,6 +597,11 @@ async fn run_scan(
     }
     if args.diagnostics && should_run(ScanEngineIdArg::Diag) {
         let engine = engines::diag::DiagEngine::default();
+        let ctx = ctx.clone();
+        tasks.push(Box::pin(async move { engine.run(ctx).await }));
+    }
+    if args.privacy && should_run(ScanEngineIdArg::Privacy) {
+        let engine = engines::privacy::PrivacyEngine::new();
         let ctx = ctx.clone();
         tasks.push(Box::pin(async move { engine.run(ctx).await }));
     }
@@ -618,7 +753,46 @@ async fn run_purge(cli: &Cli, args: &cli::args::PurgeArgs) -> Result<()> {
     let plan = executor.plan(&findings);
     let mut executor = executor;
 
-    // 3a. Snapshot verification — if enabled, verify each candidate file
+    // 3a. Trusted preview — show every file that will be moved to Trash,
+    // grouped by category, then exit without executing. This is the
+    // "here's exactly what we'll do" preview that users trust.
+    if args.preview {
+        print_purge_preview(&plan);
+        return Ok(());
+    }
+
+    // 3b. Interactive confirmation — if not --yes and not --dry-run, show
+    // a summary and ask the user to confirm before executing.
+    if !args.yes && !args.dry_run && !plan.executable().is_empty() {
+        let reclaimable = plan.total_reclaimable_bytes();
+        eprintln!();
+        eprintln!(
+            "X-MaC purge — {} files will be moved to Trash.",
+            plan.executable().len()
+        );
+        eprintln!(
+            "  Reclaimable: {}",
+            crate::util::disk::format_bytes(reclaimable)
+        );
+        eprintln!(
+            "  Blocked:     {} files (protected paths)",
+            plan.blocked().len()
+        );
+        eprintln!();
+        eprint!("Proceed? [y/N] ");
+        use std::io::{Read, Write};
+        let _ = std::io::stderr().flush();
+        let mut input = [0u8; 1];
+        match std::io::stdin().read(&mut input) {
+            Ok(1) if input[0] == b'y' || input[0] == b'Y' => {}
+            _ => {
+                eprintln!("Cancelled.");
+                return Ok(());
+            }
+        }
+    }
+
+    // 3c. Snapshot verification — if enabled, verify each candidate file
     // hasn't been modified since the scan. Files that changed between scan
     // and execution are skipped (TOCTOU protection).
     let mut skipped_modified = 0u64;
@@ -691,6 +865,76 @@ async fn run_purge(cli: &Cli, args: &cli::args::PurgeArgs) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Print a detailed, trusted preview of the purge plan — every file that
+/// will be moved to Trash, grouped by category, with sizes and safety
+/// ratings. This is the "here's exactly what we'll do" preview.
+fn print_purge_preview(plan: &cleanup::transaction::CleanupPlan) {
+    use cleanup::preflight::CleanupCandidate;
+    use std::collections::BTreeMap;
+
+    let executable = plan.executable();
+    let blocked = plan.blocked();
+    let total = plan.total_reclaimable_bytes();
+
+    eprintln!();
+    eprintln!("════════════════════════════════════════════════════════════════");
+    eprintln!("  X-MaC purge — PREVIEW (no files will be moved)");
+    eprintln!("════════════════════════════════════════════════════════════════");
+    eprintln!();
+    eprintln!("  {} files will be moved to Trash", executable.len());
+    eprintln!("  {} files blocked (protected paths)", blocked.len());
+    eprintln!(
+        "  Total reclaimable: {}",
+        crate::util::disk::format_bytes(total)
+    );
+    eprintln!();
+
+    // Group executable candidates by category.
+    let mut by_category: BTreeMap<String, Vec<&CleanupCandidate>> = BTreeMap::new();
+    for c in &executable {
+        let cat = format!("{:?}", c.category).to_lowercase();
+        by_category.entry(cat).or_default().push(c);
+    }
+
+    for (cat, items) in &by_category {
+        let cat_total: u64 = items.iter().map(|c| c.size_bytes).sum();
+        eprintln!(
+            "  ── {} ({} files, {}) ──",
+            cat,
+            items.len(),
+            crate::util::disk::format_bytes(cat_total)
+        );
+        for c in items.iter().take(20) {
+            let safety = c.safety_rating.as_deref().unwrap_or("unknown");
+            eprintln!(
+                "    [{}] {} ({})",
+                safety,
+                c.path.display(),
+                crate::util::disk::format_bytes(c.size_bytes)
+            );
+        }
+        if items.len() > 20 {
+            eprintln!("    ... and {} more", items.len() - 20);
+        }
+        eprintln!();
+    }
+
+    // Show blocked items.
+    if !blocked.is_empty() {
+        eprintln!("  ── blocked (protected) ──");
+        for c in blocked.iter().take(10) {
+            eprintln!("    [BLOCKED] {} — {}", c.path.display(), c.reason);
+        }
+        if blocked.len() > 10 {
+            eprintln!("    ... and {} more", blocked.len() - 10);
+        }
+        eprintln!();
+    }
+
+    eprintln!("  To execute: run `xmac purge --yes` (or without --preview)");
+    eprintln!("════════════════════════════════════════════════════════════════");
 }
 
 /// The `undo` command — restore trashed files from a previous cleanup
