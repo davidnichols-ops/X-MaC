@@ -1,5 +1,18 @@
 # X-MaC Digital Twin — Devin Progress Log
 
+## Session 3 — 2026-08-05 — Homebrew Tap (Feature #3)
+
+- Implemented: Published Homebrew tap for xmac CLI
+- Created davidnichols-ops/homebrew-xmac repo on GitHub
+- Added xmac-cli.rb formula (builds from source via cargo)
+- Tagged v2.1.1 with current HEAD (bc9542b)
+- Verified: brew tap davidnichols-ops/xmac && brew info xmac-cli works
+- Updated README with Homebrew install instructions
+- Tests passing: all tests pass, clippy clean, fmt clean
+- Next priority: Feature #4 — Notarization CI workflow for macOS app
+- Guards: clippy + fmt clean (no code changes, packaging only)
+- MAOS task 633 completed
+
 ## Session 2 — 2026-08-05 — Dedup --benchmark (Feature #2)
 
 - Implemented: `xmac dedup --benchmark` self-benchmark subcommand
