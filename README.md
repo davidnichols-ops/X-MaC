@@ -121,6 +121,7 @@ xmac config             # manage config, profiles, settings
 xmac daemon             # background daemon with auto-purge and automation rules
 xmac history            # scan history and analytics
 xmac completions        # generate shell completions (zsh, bash, fish, elvish, powershell)
+xmac dedup --benchmark  # self-benchmark: create synthetic corpus, scan, report timing
 ```
 
 **Output formats:** `--format report` (default, human-readable), `--format json` (NDJSON, one finding per line), `--format json-pretty` (indented array), `--format csv` (spreadsheet export).

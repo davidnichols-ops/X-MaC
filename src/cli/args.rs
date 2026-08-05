@@ -1102,6 +1102,12 @@ pub struct DedupArgs {
     /// Honors MAOS task #152 (resumable / incremental scans).
     #[arg(long, value_name = "PATH")]
     pub cache: Option<PathBuf>,
+
+    /// Run a self-benchmark: create a synthetic corpus, scan it, and
+    /// report timing. Useful for performance regression detection.
+    /// Does not scan user directories.
+    #[arg(long)]
+    pub benchmark: bool,
 }
 
 // ═══════════════════════════════════════════════════════════════════════

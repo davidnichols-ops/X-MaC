@@ -24,7 +24,7 @@
       "Step 4: Run cargo test to verify",
       "Step 5: Run clippy + fmt"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 3,

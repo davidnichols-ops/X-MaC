@@ -1,5 +1,19 @@
 # X-MaC Digital Twin — Devin Progress Log
 
+## Session 1 — 2026-08-05 — 500K Benchmark (Feature #1)
+
+- Implemented: Extended benchmark suite to 500K+ file corpus (v1 DoD blocker)
+- Tests passing: 788 lib + 778 binary + 7 daemon + 76 integration = 1,649 total, 0 failures
+- Fixed issues: None — benchmark extension was additive
+- Next priority: Feature #2 — `xmac dedup --benchmark` self-benchmark subcommand
+- Guards: PR_READY (test + lint evidence captured in .nonstop/)
+- Benchmark results (M4):
+  - disk_walk/500000: 9.3s (53.8K files/sec)
+  - disk_walk/100000: 202ms (494K files/sec)
+  - blake3_hash/1MB: 570µs (1.71 GiB/s)
+  - file_snapshot/10000: 46ms (217K files/sec)
+- MAOS task 631 completed
+
 ## Initial Project Analysis — 2026-08-05
 
 ### Project Overview

@@ -1173,4 +1173,28 @@ mod tests {
             _ => panic!("Expected Zen command"),
         }
     }
+
+    #[test]
+    fn test_cli_dedup_benchmark_flag() {
+        let args = vec!["x-mac", "dedup", "--benchmark"];
+        let cli = x_mac::cli::args::Cli::parse_from(args);
+        match cli.command {
+            x_mac::cli::args::Commands::Dedup(dedup_args) => {
+                assert!(dedup_args.benchmark);
+            }
+            _ => panic!("Expected Dedup command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_dedup_default_no_benchmark() {
+        let args = vec!["x-mac", "dedup"];
+        let cli = x_mac::cli::args::Cli::parse_from(args);
+        match cli.command {
+            x_mac::cli::args::Commands::Dedup(dedup_args) => {
+                assert!(!dedup_args.benchmark);
+            }
+            _ => panic!("Expected Dedup command"),
+        }
+    }
 }
