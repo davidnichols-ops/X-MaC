@@ -216,13 +216,15 @@ cargo build --release
 xmac quick
 ```
 
-### Homebrew (formula exists, tap not yet published)
+### Homebrew (CLI)
 
 ```bash
-# Once the tap is published:
 brew tap davidnichols-ops/xmac
-brew install xmac
+brew install xmac-cli
+xmac quick
 ```
+
+The tap is live at [github.com/davidnichols-ops/homebrew-xmac](https://github.com/davidnichols-ops/homebrew-xmac).
 
 ### Linux
 

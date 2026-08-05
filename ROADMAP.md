@@ -28,7 +28,7 @@ This document tracks planned work. Items are driven by community interest and co
 
 ## Current Focus (v2.1.x)
 
-- [ ] Publish Homebrew tap (`brew tap davidnichols-ops/xmac`)
+- [x] Publish Homebrew tap (`brew tap davidnichols-ops/xmac && brew install xmac-cli`)
 - [ ] Notarize the macOS app for distribution
 - [ ] GNN model improvement — file scorer is at 99.76% val accuracy, memory model needs final accuracy verification
 - [ ] Localization — the UI is English-only right now
