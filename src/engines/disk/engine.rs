@@ -184,7 +184,7 @@ impl DiskEngine {
 #[async_trait]
 impl Engine for DiskEngine {
     fn id(&self) -> EngineId {
-        EngineId::All
+        EngineId::Disk
     }
 
     fn name(&self) -> &'static str {
@@ -225,7 +225,7 @@ impl Engine for DiskEngine {
                 "Root filesystem (/)"
             };
             let vol_finding = Finding::new(
-                EngineId::All,
+                EngineId::Disk,
                 Severity::Info,
                 Category::SystemInfo,
                 Target::Path(std::path::PathBuf::from("/")),
@@ -323,7 +323,7 @@ impl Engine for DiskEngine {
 
                 // SystemInfo category → not counted in reclaimable totals.
                 let finding = Finding::new(
-                    EngineId::All,
+                    EngineId::Disk,
                     Severity::Info,
                     Category::SystemInfo,
                     Target::Path(path.clone()),
@@ -376,7 +376,7 @@ impl Engine for DiskEngine {
                     .unwrap_or_else(|| path.to_string_lossy().to_string());
 
                 let finding = Finding::new(
-                    EngineId::All,
+                    EngineId::Disk,
                     Severity::Info,
                     Category::LargeFile,
                     Target::Path(path.clone()),
@@ -436,7 +436,7 @@ mod tests {
             paths: vec![PathBuf::from("/tmp")],
         };
         let engine = DiskEngine::new(args);
-        assert_eq!(engine.id(), EngineId::All);
+        assert_eq!(engine.id(), EngineId::Disk);
         assert_eq!(engine.name(), "Disk Engine");
         assert!(!engine.description().is_empty());
     }
@@ -444,7 +444,7 @@ mod tests {
     #[test]
     fn test_disk_engine_default_values() {
         let engine = DiskEngine::default();
-        assert_eq!(engine.id(), EngineId::All);
+        assert_eq!(engine.id(), EngineId::Disk);
         assert_eq!(engine.name(), "Disk Engine");
         assert!(engine.description().contains("disk usage"));
     }

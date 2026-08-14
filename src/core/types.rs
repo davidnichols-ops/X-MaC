@@ -34,6 +34,9 @@ pub enum EngineId {
     Map,
     Depth,
     Envmap,
+    Disk,
+    Maintain,
+    Graph,
     All,
 }
 
@@ -179,6 +182,9 @@ pub struct EngineBreakdown {
     pub map: u64,
     pub depth: u64,
     pub envmap: u64,
+    pub disk: u64,
+    pub maintain: u64,
+    pub graph: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -218,6 +224,9 @@ impl ScanReport {
             map: 0,
             depth: 0,
             envmap: 0,
+            disk: 0,
+            maintain: 0,
+            graph: 0,
         };
         let mut category_map: HashMap<String, u64> = HashMap::new();
         let mut reclaimable: u64 = 0;
@@ -236,6 +245,9 @@ impl ScanReport {
                 EngineId::Map => engine_bd.map += 1,
                 EngineId::Depth => engine_bd.depth += 1,
                 EngineId::Envmap => engine_bd.envmap += 1,
+                EngineId::Disk => engine_bd.disk += 1,
+                EngineId::Maintain => engine_bd.maintain += 1,
+                EngineId::Graph => engine_bd.graph += 1,
                 EngineId::All => {}
             }
             let cat = serde_json::to_string(&f.category)

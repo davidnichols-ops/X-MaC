@@ -92,7 +92,7 @@ impl MaintainEngine {
             let _ = Self::run_command("killall", &["-HUP", "mDNSResponder"]);
             findings.push(
                 Finding::new(
-                    EngineId::All,
+                    EngineId::Maintain,
                     if ok { Severity::Info } else { Severity::Medium },
                     Category::SystemMaintenance,
                     Target::Path(std::path::PathBuf::from("/")),
@@ -111,7 +111,7 @@ impl MaintainEngine {
                 let (ok, msg) = Self::run_command("resolvectl", &["flush-caches"]);
                 findings.push(
                     Finding::new(
-                        EngineId::All,
+                        EngineId::Maintain,
                         if ok { Severity::Info } else { Severity::Medium },
                         Category::SystemMaintenance,
                         Target::Path(std::path::PathBuf::from("/")),
@@ -128,7 +128,7 @@ impl MaintainEngine {
                 let (ok, msg) = Self::run_command("nscd", &["-i", "hosts"]);
                 findings.push(
                     Finding::new(
-                        EngineId::All,
+                        EngineId::Maintain,
                         if ok { Severity::Info } else { Severity::Medium },
                         Category::SystemMaintenance,
                         Target::Path(std::path::PathBuf::from("/")),
@@ -144,7 +144,7 @@ impl MaintainEngine {
             } else {
                 findings.push(
                     Finding::new(
-                        EngineId::All,
+                        EngineId::Maintain,
                         Severity::Low,
                         Category::SystemMaintenance,
                         Target::Path(std::path::PathBuf::from("/")),
@@ -173,7 +173,7 @@ impl MaintainEngine {
             !ok && (msg.contains("Try as root") || msg.contains("Operation not permitted"));
 
         let findings = vec![Finding::new(
-            EngineId::All,
+            EngineId::Maintain,
             if ok {
                 Severity::Info
             } else if needs_sudo {
@@ -217,7 +217,7 @@ impl MaintainEngine {
         };
 
         let findings = vec![Finding::new(
-            EngineId::All,
+            EngineId::Maintain,
             if ok { Severity::Info } else { Severity::Medium },
             Category::SystemMaintenance,
             Target::Path(std::path::PathBuf::from("/")),
@@ -241,7 +241,7 @@ impl MaintainEngine {
             items = 1;
             findings.push(
                 Finding::new(
-                    EngineId::All,
+                    EngineId::Maintain,
                     Severity::Low,
                     Category::SystemMaintenance,
                     Target::Path(std::path::PathBuf::from("/etc/periodic")),
@@ -259,7 +259,7 @@ impl MaintainEngine {
             let (ok, msg) = Self::run_command("periodic", &[script]);
             findings.push(
                 Finding::new(
-                    EngineId::All,
+                    EngineId::Maintain,
                     if ok { Severity::Info } else { Severity::Medium },
                     Category::SystemMaintenance,
                     Target::Path(std::path::PathBuf::from(format!(
@@ -284,7 +284,7 @@ impl MaintainEngine {
     async fn task_repair_permissions(&self, ctx: &ScanContext) -> (Vec<Finding>, u64) {
         let findings = vec![
             Finding::new(
-                EngineId::All,
+                EngineId::Maintain,
                 Severity::Medium,
                 Category::SystemMaintenance,
                 Target::Path(std::path::PathBuf::from("/")),
@@ -301,7 +301,7 @@ impl MaintainEngine {
         let (ok, msg) = Self::run_command("purge", &[]);
 
         let findings = vec![Finding::new(
-            EngineId::All,
+            EngineId::Maintain,
             if ok { Severity::Info } else { Severity::Medium },
             Category::SystemMaintenance,
             Target::Path(std::path::PathBuf::from("/")),
@@ -320,7 +320,7 @@ impl MaintainEngine {
     async fn task_rebuild_dyld(&self, ctx: &ScanContext) -> (Vec<Finding>, u64) {
         let findings = vec![
             Finding::new(
-                EngineId::All,
+                EngineId::Maintain,
                 Severity::High,
                 Category::SystemMaintenance,
                 Target::Path(std::path::PathBuf::from("/var/db/dyld")),
@@ -337,7 +337,7 @@ impl MaintainEngine {
         let (ok, msg) = Self::run_command("qlmanage", &["-r", "cache"]);
 
         let findings = vec![Finding::new(
-            EngineId::All,
+            EngineId::Maintain,
             if ok { Severity::Info } else { Severity::Medium },
             Category::SystemMaintenance,
             Target::Path(std::path::PathBuf::from("/")),
@@ -364,7 +364,7 @@ impl MaintainEngine {
         if !Self::command_exists("journalctl") {
             findings.push(
                 Finding::new(
-                    EngineId::All,
+                    EngineId::Maintain,
                     Severity::Low,
                     Category::SystemMaintenance,
                     Target::Path(std::path::PathBuf::from("/var/log/journal")),
@@ -383,7 +383,7 @@ impl MaintainEngine {
 
         findings.push(
             Finding::new(
-                EngineId::All,
+                EngineId::Maintain,
                 if ok { Severity::Info } else { Severity::Low },
                 Category::SystemMaintenance,
                 Target::Path(std::path::PathBuf::from("/var/log/journal")),
@@ -418,7 +418,7 @@ impl MaintainEngine {
             let (ok, msg) = Self::run_command("apt-get", &["clean"]);
             findings.push(
                 Finding::new(
-                    EngineId::All,
+                    EngineId::Maintain,
                     if ok { Severity::Info } else { Severity::Low },
                     Category::SystemMaintenance,
                     Target::Path(std::path::PathBuf::from("/var/cache/apt")),
@@ -440,7 +440,7 @@ impl MaintainEngine {
             let (ok, msg) = Self::run_command("dnf", &["clean", "all"]);
             findings.push(
                 Finding::new(
-                    EngineId::All,
+                    EngineId::Maintain,
                     if ok { Severity::Info } else { Severity::Low },
                     Category::SystemMaintenance,
                     Target::Path(std::path::PathBuf::from("/var/cache/dnf")),
@@ -462,7 +462,7 @@ impl MaintainEngine {
             let (ok, msg) = Self::run_command("pacman", &["-Sc", "--noconfirm"]);
             findings.push(
                 Finding::new(
-                    EngineId::All,
+                    EngineId::Maintain,
                     if ok { Severity::Info } else { Severity::Low },
                     Category::SystemMaintenance,
                     Target::Path(std::path::PathBuf::from("/var/cache/pacman/pkg")),
@@ -486,7 +486,7 @@ impl MaintainEngine {
             let (ok, msg) = Self::run_command("zypper", &["clean", "-a"]);
             findings.push(
                 Finding::new(
-                    EngineId::All,
+                    EngineId::Maintain,
                     if ok { Severity::Info } else { Severity::Low },
                     Category::SystemMaintenance,
                     Target::Path(std::path::PathBuf::from("/var/cache/zypp")),
@@ -506,7 +506,7 @@ impl MaintainEngine {
             items = 1;
             findings.push(
                 Finding::new(
-                    EngineId::All,
+                    EngineId::Maintain,
                     Severity::Low,
                     Category::SystemMaintenance,
                     Target::Path(std::path::PathBuf::from("/var/cache")),
@@ -536,7 +536,7 @@ impl MaintainEngine {
             let cache_size = crate::util::disk::dir_size(&thumb_cache);
             findings.push(
                 Finding::new(
-                    EngineId::All,
+                    EngineId::Maintain,
                     Severity::Info,
                     Category::SystemMaintenance,
                     Target::Path(thumb_cache.clone()),
@@ -560,7 +560,7 @@ impl MaintainEngine {
             let (ok, msg) = Self::run_command("fc-cache", &["-f"]);
             findings.push(
                 Finding::new(
-                    EngineId::All,
+                    EngineId::Maintain,
                     if ok { Severity::Info } else { Severity::Low },
                     Category::SystemMaintenance,
                     Target::Path(font_cache.clone()),
@@ -580,7 +580,7 @@ impl MaintainEngine {
             items = 1;
             findings.push(
                 Finding::new(
-                    EngineId::All,
+                    EngineId::Maintain,
                     Severity::Low,
                     Category::SystemMaintenance,
                     Target::Path(home.join(".cache")),
@@ -599,7 +599,7 @@ impl MaintainEngine {
     async fn task_drop_caches(&self, ctx: &ScanContext) -> (Vec<Finding>, u64) {
         let findings = vec![
             Finding::new(
-                EngineId::All,
+                EngineId::Maintain,
                 Severity::Medium,
                 Category::SystemMaintenance,
                 Target::Path(std::path::PathBuf::from("/proc/sys/vm/drop_caches")),
@@ -616,7 +616,7 @@ impl MaintainEngine {
     async fn task_tmpfiles_clean(&self, ctx: &ScanContext) -> (Vec<Finding>, u64) {
         if !Self::command_exists("systemd-tmpfiles") {
             let findings = vec![Finding::new(
-                EngineId::All,
+                EngineId::Maintain,
                 Severity::Low,
                 Category::SystemMaintenance,
                 Target::Path(std::path::PathBuf::from("/tmp")),
@@ -631,7 +631,7 @@ impl MaintainEngine {
 
         let (ok, msg) = Self::run_command("systemd-tmpfiles", &["--clean"]);
         let findings = vec![Finding::new(
-            EngineId::All,
+            EngineId::Maintain,
             if ok { Severity::Info } else { Severity::Low },
             Category::SystemMaintenance,
             Target::Path(std::path::PathBuf::from("/tmp")),
@@ -654,7 +654,7 @@ impl MaintainEngine {
     async fn task_updatedb(&self, ctx: &ScanContext) -> (Vec<Finding>, u64) {
         if !Self::command_exists("updatedb") {
             let findings = vec![Finding::new(
-                EngineId::All,
+                EngineId::Maintain,
                 Severity::Low,
                 Category::SystemMaintenance,
                 Target::Path(std::path::PathBuf::from("/var/lib/mlocate")),
@@ -669,7 +669,7 @@ impl MaintainEngine {
 
         let findings = vec![
             Finding::new(
-                EngineId::All,
+                EngineId::Maintain,
                 Severity::Low,
                 Category::SystemMaintenance,
                 Target::Path(std::path::PathBuf::from("/var/lib/mlocate")),
@@ -700,7 +700,7 @@ impl MaintainEngine {
         items_scanned += 1;
 
         let before_finding = Finding::new(
-            EngineId::All,
+            EngineId::Maintain,
             Severity::Info,
             Category::RamOptimization,
             Target::Path(std::path::PathBuf::from("/")),
@@ -735,7 +735,7 @@ impl MaintainEngine {
 
         if args.report_only {
             return Ok(EngineStats {
-                engine: EngineId::All,
+                engine: EngineId::Maintain,
                 duration: start.elapsed(),
                 items_scanned,
                 findings_count,
@@ -809,7 +809,7 @@ impl MaintainEngine {
             };
 
             let purge_finding = Finding::new(
-                EngineId::All,
+                EngineId::Maintain,
                 if ok { Severity::Info } else { Severity::Medium },
                 Category::RamOptimization,
                 Target::Path(std::path::PathBuf::from("/")),
@@ -837,7 +837,7 @@ impl MaintainEngine {
                 killed += if success { 1 } else { 0 };
 
                 let kill_finding = Finding::new(
-                    EngineId::All,
+                    EngineId::Maintain,
                     if success {
                         Severity::Info
                     } else {
@@ -886,7 +886,7 @@ impl MaintainEngine {
                     killed += if success { 1 } else { 0 };
 
                     let kill_finding = Finding::new(
-                        EngineId::All,
+                        EngineId::Maintain,
                         if success {
                             Severity::Info
                         } else {
@@ -926,7 +926,7 @@ impl MaintainEngine {
         );
 
         let after_finding = Finding::new(
-            EngineId::All,
+            EngineId::Maintain,
             if freed > 0 {
                 Severity::Info
             } else {
@@ -969,7 +969,7 @@ impl MaintainEngine {
         findings_count += 1;
 
         Ok(EngineStats {
-            engine: EngineId::All,
+            engine: EngineId::Maintain,
             duration: start.elapsed(),
             items_scanned,
             findings_count,
@@ -1046,7 +1046,7 @@ impl MaintainEngine {
 #[async_trait]
 impl Engine for MaintainEngine {
     fn id(&self) -> EngineId {
-        EngineId::All
+        EngineId::Maintain
     }
 
     fn name(&self) -> &'static str {

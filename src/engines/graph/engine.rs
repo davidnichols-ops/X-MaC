@@ -27,7 +27,7 @@ impl GraphEngine {
 #[async_trait]
 impl Engine for GraphEngine {
     fn id(&self) -> EngineId {
-        EngineId::All
+        EngineId::Graph
     }
 
     fn name(&self) -> &'static str {
@@ -74,7 +74,7 @@ impl Engine for GraphEngine {
             if let Some(output_dir) = &self.args.output_graph {
                 if let Err(e) = std::fs::create_dir_all(output_dir) {
                     let finding = Finding::new(
-                        EngineId::All,
+                        EngineId::Graph,
                         Severity::Medium,
                         Category::SystemInfo,
                         Target::Path(output_dir.clone()),
@@ -98,7 +98,7 @@ impl Engine for GraphEngine {
                 let output_file = output_dir.join(format!("graph_{}.json", safe_name));
                 if let Err(e) = std::fs::write(&output_file, graph_json) {
                     let finding = Finding::new(
-                        EngineId::All,
+                        EngineId::Graph,
                         Severity::Medium,
                         Category::SystemInfo,
                         Target::Path(output_file.clone()),
@@ -108,7 +108,7 @@ impl Engine for GraphEngine {
                     ctx.emit(finding).await;
                 } else {
                     let finding = Finding::new(
-                        EngineId::All,
+                        EngineId::Graph,
                         Severity::Info,
                         Category::SystemInfo,
                         Target::Path(output_file.clone()),
@@ -131,7 +131,7 @@ impl Engine for GraphEngine {
                     .map_err(|e| EngineError::ScanFailed(e.to_string()))?;
 
                 let finding = Finding::new(
-                    EngineId::All,
+                    EngineId::Graph,
                     Severity::Info,
                     Category::SystemInfo,
                     Target::Path(root.clone()),
