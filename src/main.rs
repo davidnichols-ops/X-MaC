@@ -18,6 +18,7 @@ mod util;
 use cli::{
     args::{Cli, OutputFormat},
     output::OutputWriter,
+    FixScriptGenerator,
 };
 use core::context::ScanContext;
 use core::engine::Engine;
@@ -457,6 +458,22 @@ async fn run_doctor(cli: &Cli, args: &cli::args::ScanArgs) -> Result<()> {
         std::fs::write(path, output)?;
     } else {
         println!("{}", output);
+    }
+
+    if let Some(fix_script_path) = &cli.global.fix_script {
+        let generator = FixScriptGenerator::new(fix_script_path.clone());
+        match generator.write(&findings) {
+            Ok(path) => {
+                if !cli.global.quiet {
+                    eprintln!("Wrote remediation script to {}", path.display());
+                }
+            }
+            Err(e) => {
+                if !cli.global.quiet {
+                    eprintln!("Failed to write remediation script: {}", e);
+                }
+            }
+        }
     }
 
     if !report.engine_errors.is_empty() && !cli.global.quiet {
