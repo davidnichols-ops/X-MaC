@@ -57,7 +57,7 @@ EXAMPLES:
 #[derive(Args, Debug, Clone)]
 pub struct GlobalArgs {
     /// Output format: report (human-readable summary), json (one finding per
-    /// line), or json-pretty (indented array).
+    /// line), json-pretty (indented array), csv, or html.
     #[arg(short, long, value_enum, default_value = "report", global = true)]
     pub format: OutputFormat,
 
@@ -494,6 +494,7 @@ pub enum OutputFormat {
     JsonPretty,
     Report,
     Csv,
+    Html,
 }
 
 /// Arguments for the `maintain` command — system maintenance tasks.
