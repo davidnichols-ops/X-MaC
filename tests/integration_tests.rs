@@ -79,7 +79,7 @@ mod tests {
 
     #[test]
     fn test_cli_clean_args_parsing() {
-        let args = vec!["x-mac", "clean", "--min-age", "7d", "--min-size", "100k"];
+        let args = vec!["xmac", "clean", "--min-age", "7d", "--min-size", "100k"];
         let cli = x_mac::cli::args::Cli::parse_from(args);
 
         match cli.command {
@@ -93,7 +93,7 @@ mod tests {
 
     #[test]
     fn test_cli_conflict_args_parsing() {
-        let args = vec!["x-mac", "conflict", "--path", "--ports"];
+        let args = vec!["xmac", "conflict", "--path", "--ports"];
         let cli = x_mac::cli::args::Cli::parse_from(args);
 
         match cli.command {
@@ -107,7 +107,7 @@ mod tests {
 
     #[test]
     fn test_cli_map_args_parsing() {
-        let args = vec!["x-mac", "map", "--python", "--nodejs"];
+        let args = vec!["xmac", "map", "--python", "--nodejs"];
         let cli = x_mac::cli::args::Cli::parse_from(args);
 
         match cli.command {
@@ -121,7 +121,7 @@ mod tests {
 
     #[test]
     fn test_cli_depth_args_parsing() {
-        let args = vec!["x-mac", "depth", "--permissions", "--symlinks"];
+        let args = vec!["xmac", "depth", "--permissions", "--symlinks"];
         let cli = x_mac::cli::args::Cli::parse_from(args);
 
         match cli.command {
@@ -192,7 +192,7 @@ mod tests {
     #[tokio::test]
     async fn test_clean_engine_validate() {
         let engine = x_mac::engines::CleanEngine::default();
-        let cli = x_mac::cli::args::Cli::parse_from(vec!["x-mac", "clean"]);
+        let cli = x_mac::cli::args::Cli::parse_from(vec!["xmac", "clean"]);
 
         let (tx, _rx) = tokio::sync::mpsc::channel::<x_mac::core::types::Finding>(1000);
         let ctx = x_mac::core::ScanContext::new(&cli, tx).await.unwrap();
@@ -203,7 +203,7 @@ mod tests {
     #[tokio::test]
     async fn test_conflict_engine_validate() {
         let engine = x_mac::engines::ConflictEngine::default();
-        let cli = x_mac::cli::args::Cli::parse_from(vec!["x-mac", "conflict"]);
+        let cli = x_mac::cli::args::Cli::parse_from(vec!["xmac", "conflict"]);
 
         let (tx, _rx) = tokio::sync::mpsc::channel::<x_mac::core::types::Finding>(1000);
         let ctx = x_mac::core::ScanContext::new(&cli, tx).await.unwrap();
@@ -214,7 +214,7 @@ mod tests {
     #[tokio::test]
     async fn test_map_engine_validate() {
         let engine = x_mac::engines::MapEngine::default();
-        let cli = x_mac::cli::args::Cli::parse_from(vec!["x-mac", "map"]);
+        let cli = x_mac::cli::args::Cli::parse_from(vec!["xmac", "map"]);
 
         let (tx, _rx) = tokio::sync::mpsc::channel::<x_mac::core::types::Finding>(1000);
         let ctx = x_mac::core::ScanContext::new(&cli, tx).await.unwrap();
@@ -225,7 +225,7 @@ mod tests {
     #[tokio::test]
     async fn test_depth_engine_validate() {
         let engine = x_mac::engines::DepthEngine::default();
-        let cli = x_mac::cli::args::Cli::parse_from(vec!["x-mac", "depth"]);
+        let cli = x_mac::cli::args::Cli::parse_from(vec!["xmac", "depth"]);
 
         let (tx, _rx) = tokio::sync::mpsc::channel::<x_mac::core::types::Finding>(1000);
         let ctx = x_mac::core::ScanContext::new(&cli, tx).await.unwrap();
@@ -321,14 +321,14 @@ mod tests {
 
     #[test]
     fn test_report_output_format() {
-        let args = vec!["x-mac", "--format", "report", "clean"];
+        let args = vec!["xmac", "--format", "report", "clean"];
         let cli = x_mac::cli::args::Cli::parse_from(args);
         assert_eq!(cli.global.format, x_mac::cli::args::OutputFormat::Report);
     }
 
     #[test]
     fn test_all_args_skip_parsing() {
-        let args = vec!["x-mac", "all", "--skip", "clean", "--skip", "depth"];
+        let args = vec!["xmac", "all", "--skip", "clean", "--skip", "depth"];
         let cli = x_mac::cli::args::Cli::parse_from(args);
 
         match cli.command {
@@ -347,7 +347,7 @@ mod tests {
 
     #[test]
     fn test_engine_id_all_variant() {
-        let args = vec!["x-mac", "all"];
+        let args = vec!["xmac", "all"];
         let cli = x_mac::cli::args::Cli::parse_from(args);
         assert_eq!(cli.command.engine_id(), x_mac::core::types::EngineId::All);
     }
@@ -356,7 +356,7 @@ mod tests {
 
     #[test]
     fn test_cli_envmap_args_parsing() {
-        let args = vec!["x-mac", "envmap"];
+        let args = vec!["xmac", "envmap"];
         let cli = x_mac::cli::args::Cli::parse_from(args);
 
         match cli.command {
@@ -375,7 +375,7 @@ mod tests {
 
     #[test]
     fn test_cli_envmap_redact_flag_off() {
-        let args = vec!["x-mac", "envmap", "--redact", "false"];
+        let args = vec!["xmac", "envmap", "--redact", "false"];
         let cli = x_mac::cli::args::Cli::parse_from(args);
 
         match cli.command {
@@ -388,7 +388,7 @@ mod tests {
 
     #[test]
     fn test_cli_envmap_redact_hostnames_flag() {
-        let args = vec!["x-mac", "envmap", "--redact-hostnames", "true"];
+        let args = vec!["xmac", "envmap", "--redact-hostnames", "true"];
         let cli = x_mac::cli::args::Cli::parse_from(args);
 
         match cli.command {
@@ -401,7 +401,7 @@ mod tests {
 
     #[test]
     fn test_envmap_engine_id_is_envmap() {
-        let args = vec!["x-mac", "envmap"];
+        let args = vec!["xmac", "envmap"];
         let cli = x_mac::cli::args::Cli::parse_from(args);
         assert_eq!(
             cli.command.engine_id(),
@@ -412,7 +412,7 @@ mod tests {
     #[tokio::test]
     async fn test_envmap_engine_validate() {
         let engine = x_mac::engines::EnvmapEngine::default();
-        let cli = x_mac::cli::args::Cli::parse_from(vec!["x-mac", "envmap"]);
+        let cli = x_mac::cli::args::Cli::parse_from(vec!["xmac", "envmap"]);
 
         let (tx, _rx) = tokio::sync::mpsc::channel::<x_mac::core::types::Finding>(1000);
         let ctx = x_mac::core::ScanContext::new(&cli, tx).await.unwrap();
@@ -448,7 +448,7 @@ mod tests {
             redact_hostnames: false,
         });
 
-        let cli = x_mac::cli::args::Cli::parse_from(vec!["x-mac", "envmap"]);
+        let cli = x_mac::cli::args::Cli::parse_from(vec!["xmac", "envmap"]);
         let (tx, mut rx) = tokio::sync::mpsc::channel::<x_mac::core::types::Finding>(1000);
         let ctx = std::sync::Arc::new(x_mac::core::ScanContext::new(&cli, tx).await.unwrap());
 
@@ -526,7 +526,7 @@ mod tests {
 
     #[test]
     fn test_scan_skip_supports_envmap() {
-        let args = vec!["x-mac", "scan", "--skip", "envmap"];
+        let args = vec!["xmac", "scan", "--skip", "envmap"];
         let cli = x_mac::cli::args::Cli::parse_from(args);
         match cli.command {
             x_mac::cli::args::Commands::Scan(scan_args) => {
@@ -540,7 +540,7 @@ mod tests {
 
     #[test]
     fn test_all_skip_supports_envmap() {
-        let args = vec!["x-mac", "all", "--skip", "envmap"];
+        let args = vec!["xmac", "all", "--skip", "envmap"];
         let cli = x_mac::cli::args::Cli::parse_from(args);
         match cli.command {
             x_mac::cli::args::Commands::All(all_args) => {
@@ -556,7 +556,7 @@ mod tests {
 
     #[test]
     fn test_cli_clean_new_flags_default_true() {
-        let args = vec!["x-mac", "clean"];
+        let args = vec!["xmac", "clean"];
         let cli = x_mac::cli::args::Cli::parse_from(args);
 
         match cli.command {
@@ -571,7 +571,7 @@ mod tests {
 
     #[test]
     fn test_cli_clean_disable_build_artifacts() {
-        let args = vec!["x-mac", "clean", "--build-artifacts", "false"];
+        let args = vec!["xmac", "clean", "--build-artifacts", "false"];
         let cli = x_mac::cli::args::Cli::parse_from(args);
 
         match cli.command {
@@ -584,7 +584,7 @@ mod tests {
 
     #[test]
     fn test_cli_clean_disable_temp() {
-        let args = vec!["x-mac", "clean", "--temp", "false"];
+        let args = vec!["xmac", "clean", "--temp", "false"];
         let cli = x_mac::cli::args::Cli::parse_from(args);
 
         match cli.command {
@@ -597,7 +597,7 @@ mod tests {
 
     #[test]
     fn test_cli_clean_disable_pkg_caches() {
-        let args = vec!["x-mac", "clean", "--pkg-caches", "false"];
+        let args = vec!["xmac", "clean", "--pkg-caches", "false"];
         let cli = x_mac::cli::args::Cli::parse_from(args);
 
         match cli.command {
@@ -710,7 +710,7 @@ mod tests {
 
     #[test]
     fn test_cli_clean_browser_flag() {
-        let args = vec!["x-mac", "clean", "--browser", "false"];
+        let args = vec!["xmac", "clean", "--browser", "false"];
         let cli = x_mac::cli::args::Cli::parse_from(args);
         match cli.command {
             x_mac::cli::args::Commands::Clean(c) => assert!(!c.browser),
@@ -720,7 +720,7 @@ mod tests {
 
     #[test]
     fn test_cli_clean_mail_flag() {
-        let args = vec!["x-mac", "clean", "--mail", "false"];
+        let args = vec!["xmac", "clean", "--mail", "false"];
         let cli = x_mac::cli::args::Cli::parse_from(args);
         match cli.command {
             x_mac::cli::args::Commands::Clean(c) => assert!(!c.mail),
@@ -730,7 +730,7 @@ mod tests {
 
     #[test]
     fn test_cli_clean_ios_backups_flag() {
-        let args = vec!["x-mac", "clean", "--ios-backups", "false"];
+        let args = vec!["xmac", "clean", "--ios-backups", "false"];
         let cli = x_mac::cli::args::Cli::parse_from(args);
         match cli.command {
             x_mac::cli::args::Commands::Clean(c) => assert!(!c.ios_backups),
@@ -740,7 +740,7 @@ mod tests {
 
     #[test]
     fn test_cli_clean_languages_flag() {
-        let args = vec!["x-mac", "clean", "--languages", "false"];
+        let args = vec!["xmac", "clean", "--languages", "false"];
         let cli = x_mac::cli::args::Cli::parse_from(args);
         match cli.command {
             x_mac::cli::args::Commands::Clean(c) => assert!(!c.languages),
@@ -750,7 +750,7 @@ mod tests {
 
     #[test]
     fn test_cli_clean_trash_flag() {
-        let args = vec!["x-mac", "clean", "--trash", "false"];
+        let args = vec!["xmac", "clean", "--trash", "false"];
         let cli = x_mac::cli::args::Cli::parse_from(args);
         match cli.command {
             x_mac::cli::args::Commands::Clean(c) => assert!(!c.trash),
@@ -760,7 +760,7 @@ mod tests {
 
     #[test]
     fn test_cli_clean_large_files_flag() {
-        let args = vec!["x-mac", "clean", "--large-files", "false"];
+        let args = vec!["xmac", "clean", "--large-files", "false"];
         let cli = x_mac::cli::args::Cli::parse_from(args);
         match cli.command {
             x_mac::cli::args::Commands::Clean(c) => assert!(!c.large_files),
@@ -770,7 +770,7 @@ mod tests {
 
     #[test]
     fn test_cli_clean_min_large_size() {
-        let args = vec!["x-mac", "clean", "--min-large-size", "500M"];
+        let args = vec!["xmac", "clean", "--min-large-size", "500M"];
         let cli = x_mac::cli::args::Cli::parse_from(args);
         match cli.command {
             x_mac::cli::args::Commands::Clean(c) => assert_eq!(c.min_large_size, "500M"),
@@ -809,7 +809,7 @@ mod tests {
 
     #[test]
     fn test_cli_quick_args_parsing() {
-        let args = vec!["x-mac", "quick"];
+        let args = vec!["xmac", "quick"];
         let cli = x_mac::cli::args::Cli::parse_from(args);
         match cli.command {
             x_mac::cli::args::Commands::Quick(q) => {
@@ -823,7 +823,7 @@ mod tests {
 
     #[test]
     fn test_cli_quick_with_options() {
-        let args = vec!["x-mac", "quick", "--dedup", "--no-maintain"];
+        let args = vec!["xmac", "quick", "--dedup", "--no-maintain"];
         let cli = x_mac::cli::args::Cli::parse_from(args);
         match cli.command {
             x_mac::cli::args::Commands::Quick(q) => {
@@ -837,7 +837,7 @@ mod tests {
 
     #[test]
     fn test_cli_doctor_alias() {
-        let args = vec!["x-mac", "doctor"];
+        let args = vec!["xmac", "doctor"];
         let cli = x_mac::cli::args::Cli::parse_from(args);
         match cli.command {
             x_mac::cli::args::Commands::Doctor(_) => {}
@@ -847,14 +847,14 @@ mod tests {
 
     #[test]
     fn test_default_format_is_report() {
-        let args = vec!["x-mac", "quick"];
+        let args = vec!["xmac", "quick"];
         let cli = x_mac::cli::args::Cli::parse_from(args);
         assert_eq!(cli.global.format, x_mac::cli::args::OutputFormat::Report);
     }
 
     #[test]
     fn test_cli_maintain_args_parsing() {
-        let args = vec!["x-mac", "maintain"];
+        let args = vec!["xmac", "maintain"];
         let cli = x_mac::cli::args::Cli::parse_from(args);
         match cli.command {
             x_mac::cli::args::Commands::Maintain(m) => {
@@ -874,7 +874,7 @@ mod tests {
     #[test]
     fn test_cli_maintain_selective() {
         let args = vec![
-            "x-mac",
+            "xmac",
             "maintain",
             "--spotlight",
             "false",
@@ -895,7 +895,7 @@ mod tests {
     #[tokio::test]
     async fn test_maintain_engine_validate() {
         let engine = x_mac::engines::MaintainEngine::default();
-        let cli = x_mac::cli::args::Cli::parse_from(vec!["x-mac", "maintain"]);
+        let cli = x_mac::cli::args::Cli::parse_from(vec!["xmac", "maintain"]);
         let (tx, _rx) = tokio::sync::mpsc::channel::<x_mac::core::types::Finding>(1000);
         let ctx = x_mac::core::ScanContext::new(&cli, tx).await.unwrap();
         let result = engine.validate(&ctx).await;
@@ -906,7 +906,7 @@ mod tests {
 
     #[test]
     fn test_cli_disk_args_parsing() {
-        let args = vec!["x-mac", "disk", "--top", "10", "--min-size", "50M"];
+        let args = vec!["xmac", "disk", "--top", "10", "--min-size", "50M"];
         let cli = x_mac::cli::args::Cli::parse_from(args);
         match cli.command {
             x_mac::cli::args::Commands::Disk(d) => {
@@ -920,7 +920,7 @@ mod tests {
     #[tokio::test]
     async fn test_disk_engine_validate() {
         let engine = x_mac::engines::DiskEngine::default();
-        let cli = x_mac::cli::args::Cli::parse_from(vec!["x-mac", "disk"]);
+        let cli = x_mac::cli::args::Cli::parse_from(vec!["xmac", "disk"]);
         let (tx, _rx) = tokio::sync::mpsc::channel::<x_mac::core::types::Finding>(1000);
         let ctx = x_mac::core::ScanContext::new(&cli, tx).await.unwrap();
         let result = engine.validate(&ctx).await;
@@ -942,7 +942,7 @@ mod tests {
             paths: vec![tmp.path().to_path_buf()],
         });
 
-        let cli = x_mac::cli::args::Cli::parse_from(vec!["x-mac", "disk"]);
+        let cli = x_mac::cli::args::Cli::parse_from(vec!["xmac", "disk"]);
         let (tx, mut rx) = tokio::sync::mpsc::channel::<x_mac::core::types::Finding>(1000);
         let ctx = std::sync::Arc::new(x_mac::core::ScanContext::new(&cli, tx).await.unwrap());
 

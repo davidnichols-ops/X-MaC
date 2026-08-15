@@ -138,7 +138,7 @@ open /Applications/X-MaC.app
 
 The build script compiles the Rust binary, bundles it inside the `.app` along with the CoreML model — no external dependencies at runtime.
 
-> **Note:** The app is not yet notarized. On first launch, macOS Gatekeeper will block it. The safest approach is to verify the download's integrity and then right-click → Open to allow it. Do not use `xattr -cr` as it removes all security attributes from the bundle.
+> **Note:** Pre-built releases are signed and notarized. Local builds are unsigned, so macOS Gatekeeper will block them on first launch. Right-click → Open to allow a local build. Do not use `xattr -cr` as it removes all security attributes from the bundle.
 
 ### CLI only
 
@@ -146,7 +146,7 @@ The build script compiles the Rust binary, bundles it inside the `.app` along wi
 git clone https://github.com/davidnichols-ops/X-MaC.git
 cd X-MaC
 cargo build --release
-./target/release/x-mac install   # installs xmac to ~/.local/bin
+./target/release/xmac install   # installs xmac to ~/.local/bin
 xmac quick
 ```
 
@@ -164,7 +164,7 @@ brew install xmac
 git clone https://github.com/davidnichols-ops/X-MaC.git
 cd X-MaC
 cargo build --release
-./target/release/x-mac quick --no-disk
+./target/release/xmac quick --no-disk
 ```
 
 macOS-specific features (Spotlight, LaunchServices, purge) gracefully degrade on Linux. The GUI is macOS-only (SwiftUI).

@@ -24,9 +24,9 @@ cargo build
 cargo test
 
 # Try the CLI
-./target/debug/x-mac quick --no-disk
-./target/debug/x-mac advisor
-./target/debug/x-mac zen --no-clean --no-maintain
+./target/debug/xmac quick --no-disk
+./target/debug/xmac advisor
+./target/debug/xmac zen --no-clean --no-maintain
 
 # Build the GUI app (macOS only)
 cd gui && ./build_app.sh

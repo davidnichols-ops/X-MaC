@@ -18,7 +18,7 @@ usage() {
 
 install_agent() {
     if [ ! -x "$XMAC_BIN" ]; then
-        echo "xmac binary not found at $XMAC_BIN. Install it first: cargo build --release && cp target/release/x-mac ~/.local/bin/xmac"
+        echo "xmac binary not found at $XMAC_BIN. Install it first: cargo build --release && cp target/release/xmac ~/.local/bin/xmac"
         exit 1
     fi
 

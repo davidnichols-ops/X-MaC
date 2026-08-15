@@ -1,0 +1,107 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g. 2.2.0). Overrides the tag name when set.'
+        required: false
+      draft:
+        description: 'Create a draft release'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-macos:
+    name: Build and release macOS DMG
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+
+      - name: Add macOS Rust targets
+        run: rustup target add x86_64-apple-darwin aarch64-apple-darwin
+
+      - name: Build universal Rust binary
+        run: |
+          cargo build --release --target x86_64-apple-darwin
+          cargo build --release --target aarch64-apple-darwin
+          mkdir -p target/release
+          lipo -create -output target/release/xmac \
+            target/x86_64-apple-darwin/release/xmac \
+            target/aarch64-apple-darwin/release/xmac
+          file target/release/xmac
+
+      - name: Verify CoreML model integrity
+        run: bash scripts/verify_models.sh
+
+      - name: Build universal Swift app
+        id: swift
+        working-directory: gui/XMacApp
+        run: |
+          swift build -c release --arch arm64 --arch x86_64
+          BIN_DIR=$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)
+          echo "swift_bin=$BIN_DIR/XMacApp" >> "$GITHUB_OUTPUT"
+
+      - name: Import code-signing certificate
+        if: env.MACOS_CERTIFICATE_P12 != ''
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          CERT_PATH="$RUNNER_TEMP/certificate.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+          echo -n "$MACOS_CERTIFICATE_P12" | base64 --decode -o "$CERT_PATH"
+          security create-keychain -p "$MACOS_CERTIFICATE_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$MACOS_CERTIFICATE_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$MACOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          echo "CODESIGN_IDENTITY=${{ secrets.MACOS_CERTIFICATE_NAME }}" >> "$GITHUB_ENV"
+
+      - name: Build .app and DMG
+        env:
+          XMAC_RUST_BIN: ${{ github.workspace }}/target/release/xmac
+          XMAC_SWIFT_BIN: ${{ steps.swift.outputs.swift_bin }}
+          XMAC_SKIP_RUST_BUILD: 1
+          XMAC_SKIP_SWIFT_BUILD: 1
+          XMAC_UNIVERSAL: 1
+          CODESIGN_IDENTITY: ${{ env.CODESIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: bash gui/build_dmg.sh
+
+      - name: Compute release version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@0150e08e7fc6e5cb4c1f349e4b55f8c3ac84ac6a # v2
+        with:
+          name: X-MaC ${{ steps.version.outputs.version }}
+          draft: ${{ github.event.inputs.draft || false }}
+          generate_release_notes: true
+          files: |
+            target/release/X-MaC-${{ steps.version.outputs.version }}-macOS.dmg
+            target/release/xmac

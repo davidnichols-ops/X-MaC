@@ -10,12 +10,10 @@ class Xmac < Formula
   depends_on macos: :monterey
 
   def install
-    # Build and install using cargo install, which handles the binary
-    # naming. The crate's binary is "x-mac" but we install it as "xmac"
-    # using --root and a post-install rename.
+    # Build and install the CLI. The binary target is now named "xmac";
+    # keep the legacy rename for older source tarballs that still produce "x-mac".
     system "cargo", "install", *std_cargo_args
-    # cargo install names the binary after the crate (x-mac); rename to xmac
-    mv(bin/"x-mac", bin/"xmac")
+    mv(bin/"x-mac", bin/"xmac") if (bin/"x-mac").exist?
 
     generate_completions_from_executable(bin/"xmac", "completions", "--shell", :bash)
     generate_completions_from_executable(bin/"xmac", "completions", "--shell", :zsh)

@@ -10,7 +10,7 @@ cargo build --release
 
 echo "Installing to $INSTALL_DIR..."
 mkdir -p "$INSTALL_DIR"
-cp target/release/x-mac "$INSTALL_DIR/xmac"
+cp target/release/xmac "$INSTALL_DIR/xmac"
 chmod +x "$INSTALL_DIR/xmac"
 
 echo ""
