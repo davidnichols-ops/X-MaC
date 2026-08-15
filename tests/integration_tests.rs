@@ -958,6 +958,55 @@ mod tests {
         assert!(found, "expected to find big.bin in disk scan results");
     }
 
+    #[tokio::test]
+    async fn test_clean_dedup_finds_duplicate_files() {
+        let tmp = TempDir::new().unwrap();
+        let dup_a = tmp.path().join("dir_a/file.txt");
+        let dup_b = tmp.path().join("dir_b/file.txt");
+        let unique = tmp.path().join("dir_a/unique.txt");
+        std::fs::create_dir_all(dup_a.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(dup_b.parent().unwrap()).unwrap();
+        std::fs::write(&dup_a, "duplicate content").unwrap();
+        std::fs::write(&dup_b, "duplicate content").unwrap();
+        std::fs::write(&unique, "unique content").unwrap();
+
+        let mut args = x_mac::engines::CleanEngine::default_args();
+        args.dedup = true;
+        args.paths = vec![tmp.path().to_path_buf()];
+        let engine =
+            x_mac::engines::CleanEngine::new(args).with_config(&x_mac::config::Config::default());
+
+        let cli = x_mac::cli::args::Cli::parse_from(vec![
+            "xmac",
+            "clean",
+            "--dedup",
+            tmp.path().to_str().unwrap(),
+        ]);
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<x_mac::core::types::Finding>(1000);
+        let ctx = std::sync::Arc::new(x_mac::core::ScanContext::new(&cli, tx).await.unwrap());
+
+        let stats = engine.scan(ctx).await.expect("scan should succeed");
+        assert!(
+            stats.findings_count >= 1,
+            "expected at least one duplicate finding"
+        );
+
+        let mut found = false;
+        while let Ok(f) = rx.try_recv() {
+            if matches!(f.category, x_mac::core::types::Category::DuplicateFile) {
+                let paths = f
+                    .metadata
+                    .get("duplicate_paths")
+                    .cloned()
+                    .unwrap_or_default();
+                let paths: Vec<String> = serde_json::from_value(paths).unwrap_or_default();
+                assert_eq!(paths.len(), 2);
+                found = true;
+            }
+        }
+        assert!(found, "expected to find a duplicate_file finding");
+    }
+
     // -- fix script with new categories -------------------------------------
 
     #[test]

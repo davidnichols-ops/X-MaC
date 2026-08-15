@@ -91,11 +91,8 @@ impl CleanEngine {
         if self.args.large_files && !cc.large_files {
             self.args.large_files = false;
         }
-        if !cc.dedup {
-            self.args.dedup = false;
-        } else {
-            self.args.dedup = self.args.dedup || cc.dedup;
-        }
+        // CLI --dedup takes precedence; config can only enable it when not set.
+        self.args.dedup = self.args.dedup || cc.dedup;
 
         // Conservative profile: disable aggressive categories
         if matches!(
@@ -218,44 +215,174 @@ impl CleanEngine {
     async fn scan_orphans(&self, _ctx: &ScanContext) -> (Vec<Finding>, u64) {
         let mut findings = Vec::new();
         let mut items = 0u64;
-        let app_support = crate::util::macos::MacosUtils::get_application_support_dir();
-
-        if !app_support.exists() {
-            return (findings, items);
-        }
+        let home = crate::util::macos::MacosUtils::home_dir();
 
         // Build a cache of installed app bundle IDs + names once.
         let installed_apps = Self::collect_installed_apps();
 
-        if let Ok(entries) = std::fs::read_dir(&app_support) {
-            for entry in entries.flatten() {
-                let dir_path = entry.path();
-                if !dir_path.is_dir() {
-                    continue;
-                }
-                items += 1;
+        // Directories that typically contain per-application leftovers.
+        let dir_locations: [(&str, &str); 8] = [
+            (
+                "Library/Application Support",
+                "application support directory",
+            ),
+            ("Library/Caches", "cache directory"),
+            ("Library/Logs", "log directory"),
+            ("Library/Containers", "sandbox container"),
+            ("Library/Group Containers", "group container"),
+            (
+                "Library/Application Scripts",
+                "application script container",
+            ),
+            ("Library/HTTPStorages", "HTTP storage directory"),
+            ("Library/WebKit", "WebKit data directory"),
+        ];
 
-                let dir_name = dir_path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_default();
+        for (rel, desc) in dir_locations {
+            let base = home.join(rel);
+            if !base.exists() {
+                continue;
+            }
+            if let Ok(entries) = std::fs::read_dir(&base) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if !path.is_dir() {
+                        continue;
+                    }
+                    items += 1;
 
-                let is_orphan = !Self::is_app_installed(&dir_name, &installed_apps);
+                    let name = path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    if name.is_empty() || Self::is_app_installed(&name, &installed_apps) {
+                        continue;
+                    }
 
-                if is_orphan {
-                    let size = CleanScanner::dir_size(&dir_path);
+                    let size = CleanScanner::dir_size(&path);
                     if size > 0 {
                         findings.push(
                             Finding::new(
                                 EngineId::Clean,
                                 Severity::Low,
                                 Category::OrphanFile,
-                                Target::Path(dir_path.clone()),
-                                "Orphan application support directory",
-                                format!("Found orphaned app support directory: {}", dir_name),
+                                Target::Path(path.clone()),
+                                "Orphan application leftover",
+                                format!("Found orphaned {}: {}", desc, name),
                             )
                             .with_size(size)
-                            .with_hint("This application may have been uninstalled. Verify before deleting.".to_string()),
+                            .with_hint(format!(
+                                "This {} may belong to an uninstalled app. Verify before deleting.",
+                                desc
+                            )),
+                        );
+                    }
+                }
+            }
+        }
+
+        // Preference plists are named by bundle identifier or app name.
+        let prefs_dir = home.join("Library/Preferences");
+        if prefs_dir.exists() {
+            if let Ok(entries) = std::fs::read_dir(&prefs_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if !path.is_file() {
+                        continue;
+                    }
+                    let ext_match = path
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .map(|e| e.eq_ignore_ascii_case("plist"))
+                        .unwrap_or(false);
+                    if !ext_match {
+                        continue;
+                    }
+                    items += 1;
+
+                    let candidate = path
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    if candidate.is_empty() || Self::is_app_installed(&candidate, &installed_apps) {
+                        continue;
+                    }
+
+                    let size = std::fs::metadata(&path).map(physical_size).unwrap_or(0);
+                    if size > 0 {
+                        findings.push(
+                            Finding::new(
+                                EngineId::Clean,
+                                Severity::Low,
+                                Category::OrphanFile,
+                                Target::Path(path.clone()),
+                                "Orphan preference plist",
+                                format!(
+                                    "Found orphaned preference plist: {}",
+                                    path.file_name()
+                                        .map(|n| n.to_string_lossy())
+                                        .unwrap_or_default()
+                                ),
+                            )
+                            .with_size(size)
+                            .with_hint(
+                                "This plist may belong to an uninstalled app. Verify before deleting."
+                                    .to_string(),
+                            ),
+                        );
+                    }
+                }
+            }
+        }
+
+        // Saved application state directories are named <bundle-id>.savedState.
+        let saved_state_dir = home.join("Library/Saved Application State");
+        if saved_state_dir.exists() {
+            if let Ok(entries) = std::fs::read_dir(&saved_state_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if !path.is_dir() {
+                        continue;
+                    }
+                    let ext_match = path
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .map(|e| e.eq_ignore_ascii_case("savedState"))
+                        .unwrap_or(false);
+                    if !ext_match {
+                        continue;
+                    }
+                    items += 1;
+
+                    let candidate = path
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    if candidate.is_empty() || Self::is_app_installed(&candidate, &installed_apps) {
+                        continue;
+                    }
+
+                    let size = CleanScanner::dir_size(&path);
+                    if size > 0 {
+                        findings.push(
+                            Finding::new(
+                                EngineId::Clean,
+                                Severity::Low,
+                                Category::OrphanFile,
+                                Target::Path(path.clone()),
+                                "Orphan saved application state",
+                                format!(
+                                    "Found orphaned saved application state: {}",
+                                    path.file_name()
+                                        .map(|n| n.to_string_lossy())
+                                        .unwrap_or_default()
+                                ),
+                            )
+                            .with_size(size)
+                            .with_hint(
+                                "This saved state may belong to an uninstalled app. Verify before deleting."
+                                    .to_string(),
+                            ),
                         );
                     }
                 }
@@ -267,7 +394,7 @@ impl CleanEngine {
 
     /// Collect installed app bundle identifiers and names from the standard
     /// Applications directories. Returns a set of lowercase strings that can
-    /// be matched against Application Support directory names.
+    /// be matched against leftover directory/file names in ~/Library.
     fn collect_installed_apps() -> std::collections::HashSet<String> {
         use std::process::Command;
         let mut set = std::collections::HashSet::new();
@@ -288,23 +415,26 @@ impl CleanEngine {
                     if !path.is_dir() || !path.to_string_lossy().ends_with(".app") {
                         continue;
                     }
-                    // Add the bundle name (without .app).
+                    // Add the bundle display name (without .app).
                     if let Some(name) = path.file_stem() {
                         set.insert(name.to_string_lossy().to_lowercase());
                     }
-                    // Add the bundle identifier via defaults read.
+
+                    // Add bundle identifier, display name and executable name.
                     let info_plist = path.join("Contents/Info.plist");
                     if info_plist.exists() {
-                        if let Ok(output) = Command::new("defaults")
-                            .args(["read", &info_plist.to_string_lossy(), "CFBundleIdentifier"])
-                            .output()
-                        {
-                            if output.status.success() {
-                                let bundle_id = String::from_utf8_lossy(&output.stdout)
-                                    .trim()
-                                    .to_lowercase();
-                                if !bundle_id.is_empty() {
-                                    set.insert(bundle_id);
+                        for key in ["CFBundleIdentifier", "CFBundleName", "CFBundleExecutable"] {
+                            if let Ok(output) = Command::new("defaults")
+                                .args(["read", &info_plist.to_string_lossy(), key])
+                                .output()
+                            {
+                                if output.status.success() {
+                                    let value = String::from_utf8_lossy(&output.stdout)
+                                        .trim()
+                                        .to_lowercase();
+                                    if !value.is_empty() {
+                                        set.insert(value);
+                                    }
                                 }
                             }
                         }
@@ -317,7 +447,7 @@ impl CleanEngine {
 
     fn is_app_installed(app_name: &str, installed: &std::collections::HashSet<String>) -> bool {
         let name_lower = app_name.to_lowercase();
-        // Direct match against bundle name or bundle ID.
+        // Direct match against bundle name, bundle ID, or executable name.
         if installed.contains(&name_lower) {
             return true;
         }
@@ -332,23 +462,32 @@ impl CleanEngine {
     async fn scan_duplicates(&self, _ctx: &ScanContext) -> (Vec<Finding>, u64) {
         let mut findings = Vec::new();
         let mut items = 0u64;
-        let mut hash_map: HashMap<String, Vec<PathBuf>> = HashMap::new();
+        const SAMPLE_SIZE: usize = 4096;
 
-        let search_paths = vec![
-            crate::util::macos::MacosUtils::home_dir().join("Downloads"),
-            crate::util::macos::MacosUtils::home_dir().join("Documents"),
-        ];
+        let home = crate::util::macos::MacosUtils::home_dir();
+        let search_paths = if self.args.paths.is_empty() {
+            vec![
+                home.join("Downloads"),
+                home.join("Documents"),
+                home.join("Desktop"),
+                home.join("Pictures"),
+            ]
+        } else {
+            self.args.paths.clone()
+        };
 
-        for search_path in search_paths {
+        // Phase 1: group files by logical size.
+        let mut by_size: HashMap<u64, Vec<PathBuf>> = HashMap::new();
+        for search_path in &search_paths {
             if !search_path.exists() {
                 continue;
             }
             // Never scan inside Time Machine / backup volumes.
-            if crate::util::backup::is_backup_path(&search_path) {
+            if crate::util::backup::is_backup_path(search_path) {
                 continue;
             }
 
-            let entries = WalkDir::new(&search_path)
+            let entries = WalkDir::new(search_path)
                 .follow_links(false)
                 .into_iter()
                 .filter_map(|e| e.ok())
@@ -356,57 +495,105 @@ impl CleanEngine {
 
             for entry in entries {
                 items += 1;
-                let path = entry.path();
-                if let Ok(hash) = Self::compute_file_hash(path).await {
-                    hash_map.entry(hash).or_default().push(path.to_path_buf());
+                let path = entry.path().to_path_buf();
+                if let Ok(meta) = std::fs::metadata(&path) {
+                    let size = meta.len();
+                    if size > 0 {
+                        by_size.entry(size).or_default().push(path);
+                    }
                 }
             }
         }
 
-        for (hash, paths) in hash_map {
-            if paths.len() > 1 {
-                let total_size: u64 = paths
-                    .iter()
-                    .filter_map(|p| std::fs::metadata(p).ok())
-                    .map(physical_size)
-                    .sum();
+        // Phase 2: for files of the same size, hash the first SAMPLE_SIZE bytes.
+        // Phase 3: when sample hashes collide, do a full hash to confirm.
+        for (_size, size_group) in by_size {
+            if size_group.len() < 2 {
+                continue;
+            }
 
-                findings.push(
-                    Finding::new(
-                        EngineId::Clean,
-                        Severity::Medium,
-                        Category::DuplicateFile,
-                        Target::Path(paths[0].clone()),
-                        "Duplicate files detected",
-                        format!(
-                            "Found {} duplicate files with hash {}. Total size: {}",
-                            paths.len(),
-                            hash.chars().take(8).collect::<String>(),
-                            crate::util::disk::format_bytes(total_size)
-                        ),
-                    )
-                    .with_size(total_size)
-                    .with_metadata(
-                        "duplicate_paths".to_string(),
-                        serde_json::json!(paths
-                            .iter()
-                            .map(|p| p.to_string_lossy().to_string())
-                            .collect::<Vec<_>>()),
-                    )
-                    .with_hint("Review and remove duplicate files to save space".to_string()),
-                );
+            let mut by_sample: HashMap<String, Vec<PathBuf>> = HashMap::new();
+            for path in &size_group {
+                match Self::hash_sample(path, SAMPLE_SIZE).await {
+                    Ok(hash) => {
+                        by_sample.entry(hash).or_default().push(path.clone());
+                    }
+                    Err(_) => continue,
+                }
+            }
+
+            let mut by_full: HashMap<String, Vec<PathBuf>> = HashMap::new();
+            for (_sample_hash, sample_group) in by_sample {
+                if sample_group.len() < 2 {
+                    // A unique sample hash rules out duplicates for this size group.
+                    continue;
+                }
+                for path in sample_group {
+                    match Self::hash_full(&path).await {
+                        Ok(hash) => {
+                            by_full.entry(hash).or_default().push(path);
+                        }
+                        Err(_) => continue,
+                    }
+                }
+            }
+
+            for (hash, dup_paths) in by_full {
+                if dup_paths.len() > 1 {
+                    let total_size: u64 = dup_paths
+                        .iter()
+                        .filter_map(|p| std::fs::metadata(p).ok())
+                        .map(physical_size)
+                        .sum();
+
+                    findings.push(
+                        Finding::new(
+                            EngineId::Clean,
+                            Severity::Medium,
+                            Category::DuplicateFile,
+                            Target::Path(dup_paths[0].clone()),
+                            "Duplicate files detected",
+                            format!(
+                                "Found {} duplicate files with hash {}. Total size: {}",
+                                dup_paths.len(),
+                                hash.chars().take(8).collect::<String>(),
+                                crate::util::disk::format_bytes(total_size)
+                            ),
+                        )
+                        .with_size(total_size)
+                        .with_metadata(
+                            "duplicate_paths".to_string(),
+                            serde_json::json!(dup_paths
+                                .iter()
+                                .map(|p| p.to_string_lossy().to_string())
+                                .collect::<Vec<_>>()),
+                        )
+                        .with_hint("Review and remove duplicate files to save space".to_string()),
+                    );
+                }
             }
         }
 
         (findings, items)
     }
 
-    async fn compute_file_hash(path: &std::path::Path) -> Result<String, std::io::Error> {
+    async fn hash_sample(path: &std::path::Path, limit: usize) -> Result<String, std::io::Error> {
         use tokio::io::AsyncReadExt;
 
         let mut file = tokio::fs::File::open(path).await?;
         let mut hasher = blake3::Hasher::new();
-        let mut buffer = vec![0u8; 8192];
+        let mut buffer = vec![0u8; limit];
+        let bytes_read = file.read(&mut buffer).await?;
+        hasher.update(&buffer[..bytes_read]);
+        Ok(hasher.finalize().to_hex().to_string())
+    }
+
+    async fn hash_full(path: &std::path::Path) -> Result<String, std::io::Error> {
+        use tokio::io::AsyncReadExt;
+
+        let mut file = tokio::fs::File::open(path).await?;
+        let mut hasher = blake3::Hasher::new();
+        let mut buffer = [0u8; 8192];
 
         loop {
             let bytes_read = file.read(&mut buffer).await?;
