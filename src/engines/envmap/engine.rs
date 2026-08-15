@@ -362,7 +362,7 @@ mod tests {
     async fn validate_always_ok() {
         use clap::Parser;
         let e = EnvmapEngine::default();
-        let cli = crate::cli::args::Cli::parse_from(vec!["x-mac", "envmap"]);
+        let cli = crate::cli::args::Cli::parse_from(vec!["xmac", "envmap"]);
         let (tx, _rx) = tokio::sync::mpsc::channel::<crate::core::types::Finding>(1000);
         let ctx = crate::core::ScanContext::new(&cli, tx).await.unwrap();
         assert!(e.validate(&ctx).await.is_ok());

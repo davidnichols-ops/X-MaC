@@ -101,7 +101,7 @@ jobs:
       - name: Install binary
         run: |
           mkdir -p ~/.local/bin
-          cp target/release/x-mac ~/.local/bin/xmac
+          cp target/release/xmac ~/.local/bin/xmac
 
       - name: Build Swift app
         run: |

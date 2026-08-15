@@ -98,7 +98,7 @@ impl Daemon {
     fn xmac_binary(&self) -> &str {
         XMAC_BINARY.get_or_init(|| {
             // Try current_exe directory first — this handles the .app bundle case
-            // and the case where the user ran ./target/release/x-mac daemon.
+            // and the case where the user ran ./target/release/xmac daemon.
             if let Ok(exe) = std::env::current_exe() {
                 if let Some(dir) = exe.parent() {
                     let candidate = dir.join("xmac");

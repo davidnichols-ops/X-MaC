@@ -1,6 +1,6 @@
 [package]
 name = "x-mac"
-version = "2.1.1"
+version = "2.2.0"
 edition = "2021"
 authors = ["X-MaC Contributors"]
 description = "Open-source macOS cleaner, optimizer, and system monitor with on-device GNN intelligence"
@@ -65,6 +65,10 @@ tokio-test = "0.4"
 
 [build-dependencies]
 chrono = "0.4"
+
+[[bin]]
+name = "xmac"
+path = "src/main.rs"
 
 [profile.release]
 opt-level = 3

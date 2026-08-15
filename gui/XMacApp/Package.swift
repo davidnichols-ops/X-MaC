@@ -9,10 +9,7 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "XMacApp",
-            path: "Sources/XMacApp",
-            resources: [
-                .copy("Resources/XMacMemoryGNN.mlpackage"),
-            ]
+            path: "Sources/XMacApp"
         )
     ]
 )
