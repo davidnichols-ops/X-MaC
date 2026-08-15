@@ -106,6 +106,19 @@ mod tests {
     }
 
     #[test]
+    fn test_cli_doctor_args_parsing() {
+        let args = vec!["xmac", "doctor", "--skip", "diag", "--skip", "clean"];
+        let cli = x_mac::cli::args::Cli::parse_from(args);
+
+        match cli.command {
+            x_mac::cli::args::Commands::Doctor(scan_args) => {
+                assert_eq!(scan_args.skip.len(), 2);
+            }
+            _ => panic!("Expected Doctor command"),
+        }
+    }
+
+    #[test]
     fn test_cli_map_args_parsing() {
         let args = vec!["xmac", "map", "--python", "--nodejs"];
         let cli = x_mac::cli::args::Cli::parse_from(args);

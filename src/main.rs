@@ -1,5 +1,7 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
 use clap::Parser;
+use serde::Serialize;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc;
@@ -20,6 +22,14 @@ use cli::{
 use core::context::ScanContext;
 use core::engine::Engine;
 use core::types::Finding;
+
+/// Returns the serialized (snake_case/lowercase) variant name of an enum.
+fn variant_name<T: Serialize>(v: &T) -> String {
+    serde_json::to_string(v)
+        .unwrap_or_default()
+        .trim_matches('"')
+        .to_string()
+}
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() -> Result<()> {
@@ -54,9 +64,8 @@ async fn main() -> Result<()> {
 
     let engine_results = match &cli.command {
         cli::args::Commands::Quick(args) => run_quick(ctx.clone(), args).await,
-        cli::args::Commands::Scan(args) | cli::args::Commands::Doctor(args) => {
-            run_scan(ctx.clone(), args).await
-        }
+        cli::args::Commands::Scan(args) => run_scan(ctx.clone(), args).await,
+        cli::args::Commands::Doctor(args) => return run_doctor(&cli, args).await,
         cli::args::Commands::Clean(args) => {
             let engine = engines::clean::CleanEngine::new(args.clone()).with_config(&xmac_config);
             vec![engine.run(ctx.clone()).await]
@@ -287,6 +296,321 @@ async fn run_scan(
     }
 
     results
+}
+
+/// Report produced by the `doctor` command.
+#[derive(Debug, Serialize)]
+struct DoctorReport {
+    health_score: i64,
+    status: String,
+    total_findings: usize,
+    total_reclaimable_bytes: u64,
+    findings_by_severity: HashMap<String, u64>,
+    findings_by_category: HashMap<String, u64>,
+    engines: Vec<String>,
+    top_issues: Vec<DoctorIssue>,
+    suggestions: Vec<String>,
+    duration_secs: f64,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    engine_errors: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct DoctorIssue {
+    title: String,
+    severity: String,
+    category: String,
+    size_bytes: Option<u64>,
+    description: String,
+    remediation_hint: Option<String>,
+}
+
+/// The `doctor` command — runs the standard scan engines and prints a concise
+/// health summary with a score, top issues, and actionable next steps.
+async fn run_doctor(cli: &Cli, args: &cli::args::ScanArgs) -> Result<()> {
+    use core::types::Category;
+
+    let scan_start = Instant::now();
+    let (tx, mut rx) = mpsc::channel::<Finding>(1000);
+
+    // Collect findings concurrently so the bounded channel doesn't block
+    // engines that emit many findings before the scan finishes.
+    let findings = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let collector_handle = {
+        let findings = Arc::clone(&findings);
+        tokio::spawn(async move {
+            while let Some(f) = rx.recv().await {
+                findings.lock().unwrap().push(f);
+            }
+        })
+    };
+
+    let ctx = Arc::new(ScanContext::new(cli, tx).await?);
+    let results = run_scan(ctx.clone(), args).await;
+    drop(ctx);
+
+    collector_handle.await?;
+    let findings = Arc::try_unwrap(findings)
+        .map_err(|_| anyhow::anyhow!("findings collector still referenced"))?
+        .into_inner()
+        .unwrap();
+
+    let total_duration = scan_start.elapsed();
+
+    let mut severity_counts: HashMap<String, u64> = HashMap::new();
+    let mut category_counts: HashMap<String, u64> = HashMap::new();
+    let mut reclaimable: u64 = 0;
+
+    for f in &findings {
+        *severity_counts
+            .entry(variant_name(&f.severity))
+            .or_insert(0) += 1;
+        *category_counts
+            .entry(variant_name(&f.category))
+            .or_insert(0) += 1;
+
+        if let Some(sz) = f.size_bytes {
+            match f.category {
+                Category::SystemInfo | Category::LargeFile => {}
+                _ => reclaimable += sz,
+            }
+        }
+    }
+
+    let snapshot = intelligence::SystemSnapshot::collect();
+    let base_score = snapshot.health_score.round() as i64;
+    let deduction: i64 = (*severity_counts.get("critical").unwrap_or(&0) as i64) * 25
+        + (*severity_counts.get("high").unwrap_or(&0) as i64) * 15
+        + (*severity_counts.get("medium").unwrap_or(&0) as i64) * 8
+        + (*severity_counts.get("low").unwrap_or(&0) as i64) * 3
+        + (*severity_counts.get("info").unwrap_or(&0) as i64);
+    // Cap the deduction so a large number of low/medium findings doesn't
+    // always drive the score to zero.
+    let deduction = deduction.min(100);
+    let health_score = (base_score - deduction).clamp(0, 100);
+    let status = if health_score >= 90 {
+        "excellent"
+    } else if health_score >= 75 {
+        "good"
+    } else if health_score >= 50 {
+        "fair"
+    } else if health_score >= 25 {
+        "poor"
+    } else {
+        "critical"
+    }
+    .to_string();
+
+    let mut sorted = findings.clone();
+    sorted.sort_by(|a, b| {
+        b.severity
+            .cmp(&a.severity)
+            .then_with(|| b.size_bytes.unwrap_or(0).cmp(&a.size_bytes.unwrap_or(0)))
+    });
+
+    let top_issues: Vec<DoctorIssue> = sorted
+        .iter()
+        .take(10)
+        .map(|f| DoctorIssue {
+            title: f.title.clone(),
+            severity: variant_name(&f.severity),
+            category: variant_name(&f.category),
+            size_bytes: f.size_bytes,
+            description: f.description.clone(),
+            remediation_hint: f.remediation_hint.clone(),
+        })
+        .collect();
+
+    let engines: Vec<String> = results
+        .iter()
+        .filter_map(|r| r.as_ref().ok())
+        .map(|s| variant_name(&s.engine))
+        .collect();
+
+    let engine_errors: Vec<String> = results
+        .iter()
+        .filter_map(|r| r.as_ref().err().map(|e| e.to_string()))
+        .collect();
+
+    let suggestions = build_doctor_suggestions(&category_counts, reclaimable);
+
+    let report = DoctorReport {
+        health_score,
+        status,
+        total_findings: findings.len(),
+        total_reclaimable_bytes: reclaimable,
+        findings_by_severity: severity_counts,
+        findings_by_category: category_counts,
+        engines,
+        top_issues,
+        suggestions,
+        duration_secs: total_duration.as_secs_f64(),
+        engine_errors,
+    };
+
+    let output = match cli.global.format {
+        OutputFormat::Report | OutputFormat::Csv => format_doctor_report(&report),
+        OutputFormat::Json | OutputFormat::JsonPretty => serde_json::to_string_pretty(&report)?,
+    };
+
+    if let Some(path) = &cli.global.output {
+        std::fs::write(path, output)?;
+    } else {
+        println!("{}", output);
+    }
+
+    if !report.engine_errors.is_empty() && !cli.global.quiet {
+        eprintln!("Engine errors: {}", report.engine_errors.join("; "));
+    }
+
+    if report.findings_by_severity.get("critical").unwrap_or(&0) > &0 {
+        bail!(
+            "System health is {} ({}/100). Review the doctor report and run `xmac purge` or `xmac --fix-script ...` to address critical findings.",
+            report.status,
+            report.health_score
+        );
+    }
+
+    Ok(())
+}
+
+fn format_doctor_report(report: &DoctorReport) -> String {
+    let mut lines = Vec::new();
+    lines.push("X-MaC Doctor Report".to_string());
+    lines.push(
+        "═══════════════════════════════════════════════════════════════════════".to_string(),
+    );
+    lines.push(format!(
+        "Health score: {}/100 ({})  |  Total findings: {}  |  Reclaimable: {}",
+        report.health_score,
+        report.status,
+        report.total_findings,
+        crate::util::disk::format_bytes(report.total_reclaimable_bytes)
+    ));
+    lines.push(String::new());
+
+    if !report.findings_by_severity.is_empty() {
+        lines.push("Findings by severity:".to_string());
+        for sev in ["critical", "high", "medium", "low", "info"] {
+            if let Some(&count) = report.findings_by_severity.get(sev) {
+                lines.push(format!("  {}: {}", sev, count));
+            }
+        }
+        lines.push(String::new());
+    }
+
+    if !report.top_issues.is_empty() {
+        lines.push("Top issues:".to_string());
+        for (i, issue) in report.top_issues.iter().enumerate() {
+            let size = issue
+                .size_bytes
+                .map(|b| format!(" ({})", crate::util::disk::format_bytes(b)))
+                .unwrap_or_default();
+            lines.push(format!(
+                "{}. [{}] {}{}",
+                i + 1,
+                issue.severity,
+                issue.title,
+                size
+            ));
+            lines.push(format!("   {}", issue.description));
+            if let Some(hint) = &issue.remediation_hint {
+                lines.push(format!("   Hint: {}", hint));
+            }
+        }
+        lines.push(String::new());
+    }
+
+    if !report.suggestions.is_empty() {
+        lines.push("Suggestions:".to_string());
+        for s in &report.suggestions {
+            lines.push(format!("  - {}", s));
+        }
+        lines.push(String::new());
+    }
+
+    lines.push(format!(
+        "Completed in {:.2}s using engines: {}",
+        report.duration_secs,
+        report.engines.join(", ")
+    ));
+
+    lines.join("\n")
+}
+
+fn build_doctor_suggestions(categories: &HashMap<String, u64>, reclaimable: u64) -> Vec<String> {
+    let mut suggestions = Vec::new();
+
+    let has_cleanup = categories.contains_key("cache")
+        || categories.contains_key("build_artifact")
+        || categories.contains_key("temp_file")
+        || categories.contains_key("trash_bin")
+        || categories.contains_key("browser_cache")
+        || categories.contains_key("mail_attachment")
+        || categories.contains_key("ios_backup")
+        || categories.contains_key("language_file")
+        || categories.contains_key("package_manager_cache")
+        || categories.contains_key("orphan_file")
+        || categories.contains_key("duplicate_file")
+        || categories.contains_key("document_version");
+
+    let has_conflicts = categories.contains_key("path_conflict")
+        || categories.contains_key("env_var_conflict")
+        || categories.contains_key("port_conflict")
+        || categories.contains_key("shell_conflict");
+
+    let has_integrity = categories.contains_key("broken_symlink")
+        || categories.contains_key("missing_dylib")
+        || categories.contains_key("invalid_signature")
+        || categories.contains_key("permission_issue");
+
+    if has_cleanup {
+        if reclaimable > 0 {
+            suggestions.push(format!(
+                "Run `xmac clean` to review and reclaim {} of recoverable space.",
+                crate::util::disk::format_bytes(reclaimable)
+            ));
+        } else {
+            suggestions.push("Run `xmac clean` to review reclaimable files.".to_string());
+        }
+    }
+
+    if has_conflicts {
+        suggestions.push(
+            "Run `xmac conflict` to inspect PATH, port, and environment conflicts.".to_string(),
+        );
+    }
+
+    if has_integrity {
+        suggestions.push(
+            "Run `xmac depth --permissions --symlinks` to inspect filesystem integrity."
+                .to_string(),
+        );
+    }
+
+    if categories.contains_key("xcode_artifact") {
+        suggestions.push("Xcode artifacts found — review `xmac clean` output or delete DerivedData/Archives manually.".to_string());
+    }
+
+    if categories.contains_key("large_file") {
+        suggestions.push(
+            "Large files found — run `xmac disk` to identify the biggest space users.".to_string(),
+        );
+    }
+
+    if categories.contains_key("system_maintenance") || categories.contains_key("ram_optimization")
+    {
+        suggestions.push(
+            "Run `xmac maintain` to flush caches, rebuild indexes, and run safe maintenance tasks."
+                .to_string(),
+        );
+    }
+
+    if suggestions.is_empty() && categories.values().sum::<u64>() > 0 {
+        suggestions.push("Review the findings above and use `xmac --fix-script fixes.sh <command>` to generate a remediation script.".to_string());
+    }
+
+    suggestions
 }
 
 /// The `install` command — symlinks the built binary into a directory on

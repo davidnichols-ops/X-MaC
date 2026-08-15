@@ -31,7 +31,7 @@ reviewable remediation scripts. All scan operations are read-only.
   xmac maintain      # flush DNS, reindex Spotlight, purge RAM, run periodic…
   xmac disk          # what's taking up space? (top dirs & files by size)
   xmac scan          # full system scan (clean + conflict + map + envmap)
-  xmac doctor        # alias for `scan` (like `brew doctor`)
+  xmac doctor        # diagnostic health check with score and fixes
 
 All operations are read-only. Use --fix-script to generate a remediation
 shell script you can review and run.";
@@ -46,6 +46,8 @@ EXAMPLES:
   xmac disk ~/Projects --top 30       # top 30 entries in a specific dir
   xmac --fix-script ./fixes.sh clean  # generate a remediation script
   xmac scan --include-depth           # full scan + filesystem integrity
+  xmac doctor                         # quick health check with score
+  xmac doctor --format json           # machine-readable diagnosis
 
   # JSON output for scripting:
   xmac --format json clean | jq .
@@ -107,10 +109,12 @@ pub enum Commands {
 
     /// Full system scan: caches, conflicts, environment mapping, and
     /// package-manager diagnostics. The recommended command for thorough
-    /// system checks. (Alias: `doctor`)
+    /// system checks.
     Scan(ScanArgs),
 
-    /// Alias for `scan` — familiar to Homebrew users.
+    /// Diagnostic health check: runs the standard scan engines, scores
+    /// system health, and prints a concise actionable summary. Familiar to
+    /// Homebrew users as `brew doctor`.
     Doctor(ScanArgs),
 
     /// Run all engines including depth (filesystem integrity). Use `--skip`

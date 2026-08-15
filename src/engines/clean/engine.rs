@@ -221,12 +221,13 @@ impl CleanEngine {
         let installed_apps = Self::collect_installed_apps();
 
         // Directories that typically contain per-application leftovers.
-        let dir_locations: [(&str, &str); 8] = [
+        // Library/Caches is intentionally omitted: scan_caches already reports
+        // cache directories, so including them here would double-count space.
+        let dir_locations: [(&str, &str); 7] = [
             (
                 "Library/Application Support",
                 "application support directory",
             ),
-            ("Library/Caches", "cache directory"),
             ("Library/Logs", "log directory"),
             ("Library/Containers", "sandbox container"),
             ("Library/Group Containers", "group container"),
@@ -451,9 +452,14 @@ impl CleanEngine {
         if installed.contains(&name_lower) {
             return true;
         }
-        // Apple system services (com.apple.*) are always considered installed
-        // — they're part of the OS and the .app may not be in /Applications.
-        if name_lower.starts_with("com.apple.") {
+        // Apple system services are always considered installed — they're part
+        // of the OS and the .app may not be in /Applications. The whitelist
+        // covers bundle IDs (com.apple.*), shared group containers
+        // (group.com.apple.*), and global preferences (.GlobalPreferences.plist).
+        if name_lower.starts_with("com.apple.")
+            || name_lower.starts_with("group.com.apple.")
+            || name_lower.starts_with(".globalpreferences")
+        {
             return true;
         }
         false
