@@ -1,6 +1,7 @@
 pub mod args;
 pub mod fix_script;
 pub mod output;
+pub mod uninstall;
 
 #[allow(unused_imports)]
 pub use args::Cli;

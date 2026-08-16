@@ -124,6 +124,7 @@ impl FixScriptGenerator {
                 Category::BrokenSymlink
                 | Category::MissingDylib
                 | Category::OrphanFile
+                | Category::InstalledApp
                 | Category::DuplicateFile
                 | Category::Cache
                 | Category::Log
@@ -151,7 +152,6 @@ impl FixScriptGenerator {
                 | Category::NodeEnv
                 | Category::ContainerRuntime
                 | Category::PackageManager
-                | Category::InstalledApp
                 | Category::SystemInfo
                 | Category::LargeFile => {}
             }
@@ -274,6 +274,7 @@ impl FixScriptGenerator {
             | Category::Log
             | Category::XcodeArtifact
             | Category::OrphanFile
+            | Category::InstalledApp
             | Category::TempFile
             | Category::BuildArtifact
             | Category::PackageManagerCache
@@ -355,7 +356,6 @@ impl FixScriptGenerator {
             | Category::NodeEnv
             | Category::ContainerRuntime
             | Category::PackageManager
-            | Category::InstalledApp
             | Category::SystemInfo
             | Category::LargeFile => {
                 s.push_str("# (informational)\n");

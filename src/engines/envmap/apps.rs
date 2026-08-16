@@ -62,12 +62,18 @@ pub fn default_app_dirs() -> Vec<PathBuf> {
 }
 
 /// Enumerate applications under `dir`. On macOS, looks for `.app` bundles;
-/// on Linux, looks for `.desktop` files. `max_depth` bounds the walk.
+/// on Linux, looks for `.desktop` files and any `.app` bundles (useful for
+/// testing and for users with macOS app bundles on other systems).
+/// `max_depth` bounds the walk.
 pub fn enumerate_apps_in(dir: &Path, max_depth: usize) -> Vec<InstalledApp> {
     if cfg!(target_os = "macos") {
         enumerate_macos_apps(dir, max_depth)
     } else {
-        enumerate_linux_apps(dir, max_depth)
+        let mut apps = enumerate_linux_apps(dir, max_depth);
+        // Also discover `.app` bundles (e.g. cross-platform tests or synced
+        // macOS app directories) so the uninstall engine can target them.
+        apps.extend(enumerate_macos_apps(dir, max_depth));
+        apps
     }
 }
 

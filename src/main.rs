@@ -18,6 +18,7 @@ mod util;
 use cli::{
     args::{Cli, OutputFormat},
     output::OutputWriter,
+    uninstall::run_uninstall,
     FixScriptGenerator,
 };
 use core::context::ScanContext;
@@ -70,6 +71,9 @@ async fn main() -> Result<()> {
         cli::args::Commands::Clean(args) => {
             let engine = engines::clean::CleanEngine::new(args.clone()).with_config(&xmac_config);
             vec![engine.run(ctx.clone()).await]
+        }
+        cli::args::Commands::Uninstall(args) => {
+            return run_uninstall(&cli, args).await;
         }
         cli::args::Commands::Conflict(args) => {
             let engine = engines::conflict::ConflictEngine::new(args.clone());
