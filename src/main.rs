@@ -380,14 +380,16 @@ async fn run_doctor(cli: &Cli, args: &cli::args::ScanArgs) -> Result<()> {
 
     let snapshot = intelligence::SystemSnapshot::collect();
     let base_score = snapshot.health_score.round() as i64;
-    let deduction: i64 = (*severity_counts.get("critical").unwrap_or(&0) as i64) * 25
-        + (*severity_counts.get("high").unwrap_or(&0) as i64) * 15
-        + (*severity_counts.get("medium").unwrap_or(&0) as i64) * 8
-        + (*severity_counts.get("low").unwrap_or(&0) as i64) * 3
-        + (*severity_counts.get("info").unwrap_or(&0) as i64);
-    // Cap the deduction so a large number of low/medium findings doesn't
+    // Severity weights tuned so a handful of medium findings (e.g. PATH
+    // duplicates) don't always drive a healthy system to 0. Info-only
+    // findings are not counted against the score.
+    let deduction: i64 = (*severity_counts.get("critical").unwrap_or(&0) as i64) * 30
+        + (*severity_counts.get("high").unwrap_or(&0) as i64) * 18
+        + (*severity_counts.get("medium").unwrap_or(&0) as i64) * 3
+        + (*severity_counts.get("low").unwrap_or(&0) as i64);
+    // Cap the deduction so a large number of lower-severity findings doesn't
     // always drive the score to zero.
-    let deduction = deduction.min(100);
+    let deduction = deduction.min(80);
     let health_score = (base_score - deduction).clamp(0, 100);
     let status = if health_score >= 90 {
         "excellent"

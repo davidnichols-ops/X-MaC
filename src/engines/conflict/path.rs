@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 
 use crate::core::context::ScanContext;
@@ -13,7 +13,7 @@ impl PathConflictScanner {
 
     pub async fn scan(&self, _ctx: &ScanContext) -> anyhow::Result<Vec<Finding>> {
         let mut findings = Vec::new();
-        let mut binary_map: HashMap<String, Vec<PathBuf>> = HashMap::new();
+        let mut binary_map: HashMap<String, BTreeSet<PathBuf>> = HashMap::new();
 
         let path_dirs = Self::parse_path();
 
@@ -35,7 +35,10 @@ impl PathConflictScanner {
                             .map(|n| n.to_string_lossy().to_string())
                             .unwrap_or_default();
 
-                        binary_map.entry(binary_name).or_default().push(path);
+                        // Canonicalize so symlinks (e.g. /bin -> /usr/bin)
+                        // don't register as duplicates of the same real file.
+                        let canon = std::fs::canonicalize(&path).unwrap_or(path);
+                        binary_map.entry(binary_name).or_default().insert(canon);
                     }
                 }
             }
@@ -53,7 +56,7 @@ impl PathConflictScanner {
                         EngineId::Conflict,
                         Severity::Medium,
                         Category::PathConflict,
-                        Target::Path(paths[0].clone()),
+                        Target::Path(paths.iter().next().unwrap().clone()),
                         format!("Duplicate binary: {}", binary_name),
                         format!("Found {} at: {}", binary_name, path_strings.join(", ")),
                     )
