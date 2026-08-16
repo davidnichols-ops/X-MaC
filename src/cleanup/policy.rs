@@ -114,6 +114,29 @@ impl CleanupPolicy {
         }
     }
 
+    /// Uninstall policy: allows the .app bundle and associated user-data
+    /// leftovers to be moved to Trash, while keeping core system paths
+    /// protected.
+    pub fn uninstall() -> Self {
+        let mut policy = Self::safe();
+        policy
+            .category_actions
+            .insert("installed_app".to_string(), CleanupAction::Trash);
+        policy
+            .category_actions
+            .insert("orphan_file".to_string(), CleanupAction::Trash);
+
+        // The .app bundle lives in /Applications or ~/Applications; remove
+        // it from the protected list so uninstall can move it to Trash.
+        let app_path = Path::new("/Applications");
+        policy.protected_paths.retain(|p| p.as_path() != app_path);
+        policy
+            .protected_path_prefixes
+            .retain(|p| p.as_path() != app_path);
+
+        policy
+    }
+
     /// Returns the action for a given category, falling back to the default.
     pub fn action_for(&self, category: &Category) -> CleanupAction {
         let key = serde_json::to_string(category)

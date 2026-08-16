@@ -28,6 +28,7 @@ reviewable remediation scripts. All scan operations are read-only.
 
   xmac quick         # one-shot: clean scan + maintenance + disk breakdown
   xmac clean         # find reclaimable space (caches, builds, browser, trash…)
+  xmac uninstall     # find an app bundle and its leftover user data
   xmac maintain      # flush DNS, reindex Spotlight, purge RAM, run periodic…
   xmac disk          # what's taking up space? (top dirs & files by size)
   xmac scan          # full system scan (clean + conflict + map + envmap)
@@ -41,6 +42,9 @@ EXAMPLES:
   xmac quick                          # quick health check + cleanup scan
   xmac clean                          # find all reclaimable disk space
   xmac clean --dedup ~/Downloads      # also find duplicate files
+  xmac uninstall MyApp                # preview MyApp and its leftovers
+  xmac uninstall MyApp --yes          # move MyApp and leftovers to Trash
+  xmac uninstall MyApp --fix-script rm.sh # generate a reviewable removal script
   xmac maintain                       # run safe maintenance tasks
   xmac disk                           # show what's using your disk space
   xmac disk ~/Projects --top 30       # top 30 entries in a specific dir
@@ -126,6 +130,12 @@ pub enum Commands {
     /// All read-only — use --fix-script to generate cleanup commands.
     Clean(CleanArgs),
 
+    /// Find an application and its leftover user data (caches, preferences,
+    /// saved state, containers). Lists targets by default; pass --yes to
+    /// move them to Trash, or use --fix-script to generate a reviewable
+    /// removal script.
+    Uninstall(UninstallArgs),
+
     /// Detect PATH conflicts, environment variable conflicts, and port usage.
     Conflict(ConflictArgs),
 
@@ -207,6 +217,7 @@ impl Commands {
             Commands::Scan(_) => crate::core::types::EngineId::All,
             Commands::Doctor(_) => crate::core::types::EngineId::All,
             Commands::Clean(_) => crate::core::types::EngineId::Clean,
+            Commands::Uninstall(_) => crate::core::types::EngineId::Clean,
             Commands::Conflict(_) => crate::core::types::EngineId::Conflict,
             Commands::Map(_) => crate::core::types::EngineId::Map,
             Commands::Envmap(_) => crate::core::types::EngineId::Envmap,
@@ -360,6 +371,23 @@ pub struct CleanArgs {
     /// Directory to scan (defaults to home directory).
     #[arg(value_name = "PATH")]
     pub paths: Vec<PathBuf>,
+}
+
+/// Arguments for the `uninstall` command — locate an app and its leftovers.
+#[derive(Args, Debug, Clone)]
+pub struct UninstallArgs {
+    /// Application name, bundle ID, or .app name to uninstall.
+    #[arg(value_name = "APP")]
+    pub app: String,
+
+    /// Additional directory to search for the .app bundle.
+    #[arg(long, value_name = "DIR")]
+    pub app_dir: Vec<PathBuf>,
+
+    /// Actually move the application and leftovers to Trash. Without this
+    /// flag the command lists targets and is read-only.
+    #[arg(long)]
+    pub yes: bool,
 }
 
 #[derive(Args, Debug, Clone)]

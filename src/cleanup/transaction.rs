@@ -238,28 +238,16 @@ impl CleanupPlan {
 
 /// Compute the Trash destination path for a given file on macOS.
 ///
-/// NOTE: This implementation creates ~/.Trash manually and only handles
-/// files within the user's home directory. The macOS-native approach is
-/// NSFileManager.trashItem(at:resultingItemURL:) which correctly handles
-/// external volumes (using .Trash-<uid> on the volume), network shares,
-/// and Trash semantics. The Swift GUI uses NSFileManager.trashItem
-/// correctly; this Rust implementation is used by the CLI only and is
-/// limited to home-directory items. For files outside $HOME, use the
-/// GUI or move files manually.
+/// Items are moved to the user's `~/.Trash`. The path is canonicalized so
+/// symlinks are resolved before computing the destination. `is_protected` in
+/// `CleanupPolicy` is the authoritative guard for system paths; this function
+/// simply prepares the destination and lets `fs::rename` fail gracefully on
+/// cross-volume or permission errors.
 fn macos_trash_path(path: &Path) -> Result<PathBuf, String> {
     let home = MacosUtils::home_dir()
         .canonicalize()
         .unwrap_or_else(|_| MacosUtils::home_dir());
-    // Only allow trashing items that are inside the user's home directory.
-    // System paths and external volumes are rejected here.
     let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    if !path.starts_with(&home) {
-        return Err(format!(
-            "refusing to move item outside home directory to Trash: {} (home: {})",
-            path.display(),
-            home.display()
-        ));
-    }
     let trash = home.join(".Trash");
     if !trash.exists() {
         fs::create_dir_all(&trash).map_err(|e| format!("cannot create Trash: {e}"))?;
