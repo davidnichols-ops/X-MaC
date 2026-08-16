@@ -140,9 +140,13 @@ async fn main() -> Result<()> {
 
     let total_duration = scan_start.elapsed();
 
-    // Collect findings for the report and/or the fix-script generator.
-    // `take_findings` drains the buffer, so we capture once and reuse.
-    let collected_findings: Vec<Finding> = {
+    // Buffer-backed formats must be flushed before `take_findings` drains the
+    // buffer, while the aggregated `Report` format needs the findings first.
+    let collected_findings: Vec<Finding> = if cli.global.format == OutputFormat::Report {
+        let mut writer = output_writer.lock().await;
+        writer.take_findings()
+    } else {
+        output_writer.lock().await.flush()?;
         let mut writer = output_writer.lock().await;
         writer.take_findings()
     };
@@ -162,8 +166,6 @@ async fn main() -> Result<()> {
             total_duration,
         );
         writer.write_report(&report)?;
-    } else {
-        output_writer.lock().await.flush()?;
     }
 
     // Generate the remediation script if requested. This runs after the scan
@@ -452,7 +454,9 @@ async fn run_doctor(cli: &Cli, args: &cli::args::ScanArgs) -> Result<()> {
     };
 
     let output = match cli.global.format {
-        OutputFormat::Report | OutputFormat::Csv => format_doctor_report(&report),
+        OutputFormat::Report | OutputFormat::Csv | OutputFormat::Html => {
+            format_doctor_report(&report)
+        }
         OutputFormat::Json | OutputFormat::JsonPretty => serde_json::to_string_pretty(&report)?,
     };
 
